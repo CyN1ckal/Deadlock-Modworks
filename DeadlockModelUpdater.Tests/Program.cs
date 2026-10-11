@@ -368,6 +368,14 @@ try
         var report = HeroModelUpdater.Analyze(casingGame, oldRender);
         Assert(report.HasBlockers && report.Results.Single(r => r.Model == skeletonPath).Detail.Contains("Render-resource references"));
     });
+    Test("A third render spelling also needs consistent reference repair", () =>
+    {
+        var variantRender = Path.Combine(fixtureDirectory, "variant-render-spelling.vpk");
+        Fixtures.Archive(variantRender, new()
+            { [Fixtures.ModelPath] = Fixtures.Model(["root", "WEAPON_HAND_l", "magazine_L"], [-1, 0, 1], [0, 1, 2], animationSkeleton: skeletonName),
+              [skeletonPath] = Fixtures.AnimationSkeleton(["root", "weapon_hand_l", "magazine_l"], [-1, 0, 1], 3) });
+        Assert(HeroModelUpdater.Analyze(casingGame, variantRender).HasBlockers);
+    });
 }
 finally { Directory.Delete(fixtureDirectory, recursive: true); }
 

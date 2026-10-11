@@ -32,6 +32,10 @@ The tool supports VPK version 2, hero `.vmdl_c` resources and AG2 `.vnmskel_c` a
 
 A bundled stock-named `.vnmskel_c` can override the installed game and break animation when its binding order or low-LOD sampling layout is outdated. The updater checks that layout separately and migrates compatible overrides onto the current game binding order. It preserves existing parent-space reference poses and authored masks, adds new stock bones, recomputes world-space poses, and updates the low-LOD sampling count. A changed parent hierarchy, custom/removed animation bone, or unsupported secondary skeleton blocks that migration rather than silently replacing custom content. Model geometry and other archive resources remain unchanged.
 
+Unique case-only bone renames are supported when they are one-to-one and their mapped parent relationships agree. The updater canonicalizes bone IDs and same-skeleton mask bone references while preserving reference poses, mask weights, mask labels and references to other skeletons. It reports the mappings as `BoneRenames` in JSON. Ambiguous casing, collapsed names, semantic renames and a render model still using incompatible spelling remain review cases; the rule does not remove underscores or infer fuzzy matches.
+
+Haze exposed this case: its render model already uses `weapon_hand_L`, `magazine_L`, `weapon_hand_R` and `magazine_R`, but its animation override used lowercase side suffixes. Its override also had 97 bones and sampled all 97 at low LOD; the installed skeleton has 98 bones and samples 32. The generic repair updates the four names, 22 mask references, binding order and sampling layout. It leaves Haze's render model and other assets byte-identical. This fixes the identified data mismatch; in-game verification is still needed to confirm the visible distortion is resolved.
+
 For embedded/legacy rigs without external AG2 bindings, the existing supported skeleton normalization can reorder compatible bones and add unambiguous missing bones. It updates the mesh remapping table while preserving authored transforms and flags.
 
 It checks archive bounds and per-file CRCs, skeleton array sizes, duplicate names, parent cycles, transform validity, mesh remapping indices, and declared rig dependencies in the current game and selected VPK. Rest-pose and LOD-usage differences alone are not blockers. Missing legacy AG1 graphs are notes for models declaring AG2 bindings; missing declared animation includes or active AG2 dependencies remain review alerts. Models with embedded physics or animation blocks, unknown skeleton metadata, or missing remap tables are blocked if a render-skeleton rewrite would be required.
@@ -77,6 +81,14 @@ dotnet run --project DeadlockModelUpdater.Tests -c Release --no-build -- --verif
 ```
 
 This check verifies that the three known-working mods are not rewritten, only Unicorn's animation skeleton changes, its authored poses/masks and every other asset are preserved, and the original inputs remain untouched. It saves `input/deadlock-mod-report-fixed.json`.
+
+Optional Haze verification with a fresh output directory:
+
+```powershell
+dotnet run --project DeadlockModelUpdater.Tests -c Release --no-build -- --verify-haze "C:\Games\Deadlock\game\citadel" "input" "input/repaired-haze-check"
+```
+
+This creates a separate repaired `pak02_dir.vpk`, checks all other assets by SHA-256, checks all original reference poses, verifies that masks differ only by the four aliases, validates the result with ValvePak, and writes `haze-repair-report.json` beside the output. The original VPK is unchanged.
 
 Optional local sample checks (the game and samples are not committed):
 

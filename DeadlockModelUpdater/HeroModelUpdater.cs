@@ -186,7 +186,8 @@ public static class HeroModelUpdater
                     VpkArchive.Normalize(value.ToString().EndsWith("_c", StringComparison.Ordinal) ? value.ToString() : value + "_c")
                         .Equals(plans[i].Entry.FullPath, StringComparison.OrdinalIgnoreCase))) continue;
                 var renderNames = render.Model.Skeleton.Bones.Select(bone => bone.Name).ToHashSet(StringComparer.Ordinal);
-                var unresolved = edit.BoneAliases.Where(pair => renderNames.Contains(pair.Key) && !renderNames.Contains(pair.Value)).ToArray();
+                var unresolved = edit.BoneAliases.Where(pair => !renderNames.Contains(pair.Value)
+                    && renderNames.Any(name => name.Equals(pair.Value, StringComparison.OrdinalIgnoreCase))).ToArray();
                 if (unresolved.Length == 0) continue;
                 edits[i] = new MigrationEdit(null, ModelOutcome.NeedsReview,
                     $"Animation casing changes also require renaming bones in {modelEntry.FullPath}: {string.Join(", ", unresolved.Select(pair => pair.Key))}. Render-resource references need review.");
