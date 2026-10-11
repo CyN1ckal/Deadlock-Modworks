@@ -8,6 +8,8 @@ namespace DeadlockModelUpdater;
 
 public enum ModelOutcome
 {
+    Repairable,
+    NeedsReview,
     Updated,
     Current,
     Skipped,
@@ -21,6 +23,8 @@ public sealed record UpdateProgress(int Completed, int Total, string Message);
 public sealed record UpdateReport(IReadOnlyList<ModelResult> Results, bool WroteFile, string? OutputPath, string? BackupPath)
 {
     public bool HasFailures => Results.Any(result => result.Outcome == ModelOutcome.Failed);
+    public bool HasBlockers => Results.Any(result => result.Outcome is ModelOutcome.Failed or ModelOutcome.NeedsReview or ModelOutcome.Skipped);
+    public bool CanRepair => !HasBlockers && Results.Any(result => result.Outcome == ModelOutcome.Repairable);
 }
 
 /// <summary>
@@ -29,6 +33,10 @@ public sealed record UpdateReport(IReadOnlyList<ModelResult> Results, bool Wrote
 /// </summary>
 public static class HeroModelUpdater
 {
+    public static UpdateReport Analyze(string gameDirectory, string modVpkPath,
+        IProgress<UpdateProgress>? progress = null, CancellationToken cancellationToken = default) =>
+        Update(gameDirectory, modVpkPath, null, false, false, progress, cancellationToken, analyzeOnly: true);
+
     public static UpdateReport Update(
         string gameDirectory,
         string modVpkPath,
@@ -36,13 +44,14 @@ public static class HeroModelUpdater
         bool replaceSource,
         bool makeBackup,
         IProgress<UpdateProgress>? progress,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool analyzeOnly = false)
     {
         if (string.IsNullOrWhiteSpace(gameDirectory))
             throw new ArgumentException("Game folder is required.", nameof(gameDirectory));
         if (string.IsNullOrWhiteSpace(modVpkPath))
             throw new ArgumentException("Mod VPK is required.", nameof(modVpkPath));
-        if (!replaceSource && string.IsNullOrWhiteSpace(outputPath))
+        if (!analyzeOnly && !replaceSource && string.IsNullOrWhiteSpace(outputPath))
             throw new ArgumentException("Output VPK is required.", nameof(outputPath));
 
         var gamePak = Path.GetFullPath(Path.Combine(gameDirectory, "pak01_dir.vpk"));
@@ -55,7 +64,7 @@ public static class HeroModelUpdater
             throw new InvalidOperationException("That file is the game archive. Choose a mod VPK from the addons folder.");
 
         string? destination = null;
-        if (!replaceSource)
+        if (!analyzeOnly && !replaceSource)
         {
             destination = Path.GetFullPath(outputPath!);
             if (string.Equals(destination, gamePak, StringComparison.OrdinalIgnoreCase))
@@ -107,7 +116,14 @@ public static class HeroModelUpdater
 
             progress?.Report(new UpdateProgress(i, plans.Count, $"Updating {plan.Entry.FullPath}..."));
             var gameEntry = FindEntry(game, plan.Resolved);
-            edits[i] = ModelMigration.Migrate(mod.Read(plan.Entry), plan.Entry.FullPath, game.Read(gameEntry), plan.Resolved);
+            try
+            {
+                edits[i] = ModelMigration.Migrate(mod.Read(plan.Entry), plan.Entry.FullPath, game.Read(gameEntry), plan.Resolved);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException)
+            {
+                edits[i] = new MigrationEdit(null, ModelOutcome.Failed, ex.Message);
+            }
         }
 
         AcceptEdits(plans, edits, mod.Entries);
@@ -142,7 +158,8 @@ public static class HeroModelUpdater
             }
             else
             {
-                result = new ModelResult(plan.Entry.FullPath, edit.Outcome, edit.Detail);
+                result = new ModelResult(plan.Entry.FullPath,
+                    edit.Outcome == ModelOutcome.Updated ? ModelOutcome.Repairable : edit.Outcome, edit.Detail);
                 if (edit.Bytes != null)
                 {
                     var pathMoved = !plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase);
@@ -155,6 +172,18 @@ public static class HeroModelUpdater
 
             results.Add(result);
             progress?.Report(new UpdateProgress(i + 1, plans.Count, $"{result.Model}: {OutcomeText(result.Outcome)}. {result.Detail}"));
+        }
+
+        if (modHeroes.Count == 0)
+            results.Add(new ModelResult(Path.GetFileName(modFull), ModelOutcome.Skipped,
+                "No supported hero models. This MVP cannot assess this mod."));
+
+        var analysis = new UpdateReport(results, false, null, null);
+        if (analyzeOnly || analysis.HasBlockers)
+        {
+            progress?.Report(new UpdateProgress(plans.Count, plans.Count,
+                analysis.HasBlockers ? "Repair blocked. Resolve the reported issues first; no files were written." : "Analysis complete. No files were written."));
+            return analysis;
         }
 
         if (changes.Count == 0)
@@ -402,6 +431,13 @@ static class ModelMigration
         }
 
         var pathMoved = !modPath.Equals(gamePath, StringComparison.OrdinalIgnoreCase);
+        if (pathMoved)
+            return new MigrationEdit(null, ModelOutcome.NeedsReview,
+                $"Possible model move to {gamePath}. Path migration requires checking dependent resources; this MVP will not guess.");
+
+        var assessment = SkeletonCompatibility.Assess(ReadShapes(mod), ReadShapes(game));
+        if (assessment.NeedsReview)
+            return new MigrationEdit(null, ModelOutcome.NeedsReview, assessment.Detail);
         var aligned = modBones.Length >= gameBones.Length;
         if (aligned)
         {
@@ -416,12 +452,36 @@ static class ModelMigration
         }
 
         if (aligned && !pathMoved)
-            return new MigrationEdit(null, ModelOutcome.Current, "Already matches the current game skeleton.");
+            return new MigrationEdit(null, ModelOutcome.Current,
+                "No supported skeleton differences found. In-game animation is not verified. " + assessment.Detail);
 
         if (aligned)
             return MoveWithoutSkeletonChange(mod, game, modBytes, modNames, modParents, gamePath);
 
-        return RewriteSkeleton(mod, game, modBytes, modNames, modParents, modIndex, gameNames, gameParents, gameIndex, gamePath, pathMoved);
+        KVObject modRoot = ReadData(mod).Data;
+        if (!modRoot.ContainsKey("m_remappingTable") || modRoot["m_remappingTable"].Count == 0)
+            return new MigrationEdit(null, ModelOutcome.NeedsReview,
+                "Skeleton differs, but no mesh bone remap table is available. Direct mesh indices require author review.");
+
+        // These blocks may contain additional bone indices. Preserve them, but do not
+        // change the skeleton underneath them until their remapping is supported.
+        var unsupported = new[] { BlockType.PHYS, BlockType.ANIM, BlockType.ASEQ, BlockType.AGRP }
+            .Where(type => mod.Resource.GetBlockByType(type) is { Size: > 0 }).ToArray();
+        if (unsupported.Length > 0)
+            return new MigrationEdit(null, ModelOutcome.NeedsReview,
+                $"Skeleton differs and the model has embedded {string.Join(", ", unsupported)} data. Its bone references need author review.");
+
+        var edit = RewriteSkeleton(mod, game, modBytes, modNames, modParents, modIndex, gameNames, gameParents, gameIndex, gamePath, pathMoved);
+        return edit with { Detail = edit.Detail + " " + assessment.Detail + " Test animations and attachments in-game before keeping the repair." };
+    }
+
+    static BoneShape[] ReadShapes(ModelFile file)
+    {
+        var root = ReadData(file).Data;
+        var bones = file.Model.Skeleton.Bones;
+        var scales = RequireArray(root["m_modelSkeleton"], "m_boneScaleParent", bones.Length, "Model");
+        return bones.Select((b, i) => new BoneShape(b.Name, b.Parent?.Name, b.Position, b.Angle,
+            (float)scales[i].ToDouble())).ToArray();
     }
 
     static MigrationEdit MoveWithoutSkeletonChange(

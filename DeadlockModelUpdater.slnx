@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="DeadlockModelUpdater/DeadlockModelUpdater.csproj" />
+  <Project Path="DeadlockModelUpdater.Tests/DeadlockModelUpdater.Tests.csproj" />
 </Solution>
