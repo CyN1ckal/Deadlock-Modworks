@@ -63,7 +63,8 @@ static class Fixtures
         return file;
     }
 
-    public static byte[] AnimationSkeleton(string[] names, int[] parents, int lowLod, float customPose = 0)
+    public static byte[] AnimationSkeleton(string[] names, int[] parents, int lowLod, float customPose = 0,
+        string? maskLabel = null, string? otherMaskSkeleton = null)
     {
         KVObject Pose() => KVObject.Array(new[] { customPose, 0f, 0f, 1f, 0f, 0f, 0f, 1f }.Select(value => new KVObject(value)));
         var root = new KVObject();
@@ -74,8 +75,21 @@ static class Fixtures
         root.Add("m_modelSpaceReferencePose", KVObject.Array(names.Select(_ => Pose())));
         root.Add("m_numBonesToSampleAtLowLOD", new KVObject(lowLod));
         var mask = new KVObject();
-        mask.Add("m_ID", new KVObject("custom-mask"));
+        mask.Add("m_ID", new KVObject(maskLabel ?? "custom-mask"));
         mask.Add("m_authoredValue", new KVObject(0.75f));
+        var weights = new KVObject();
+        weights.Add("m_skeletonName", new KVObject("models/heroes/test/test.vnmskel"));
+        weights.Add("m_boneIDs", KVObject.Array(names.Select(name => new KVObject(name))));
+        weights.Add("m_weights", KVObject.Array(names.Select(_ => new KVObject(0.5f))));
+        mask.Add("m_primaryWeightList", weights);
+        if (otherMaskSkeleton != null)
+        {
+            var other = new KVObject();
+            other.Add("m_skeletonName", new KVObject(otherMaskSkeleton));
+            other.Add("m_boneIDs", KVObject.Array(names.Select(name => new KVObject(name))));
+            other.Add("m_weights", KVObject.Array(names.Select(_ => new KVObject(0.25f))));
+            mask.Add("m_secondaryWeightList", other);
+        }
         root.Add("m_maskDefinitions", KVObject.Array([mask]));
         root.Add("m_secondarySkeletons", KVObject.Array());
         root.Add("m_bIsPropSkeleton", new KVObject(false));

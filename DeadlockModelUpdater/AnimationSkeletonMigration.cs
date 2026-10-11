@@ -28,15 +28,19 @@ static class AnimationSkeletonMigration
             var current = Validate(gameRoot);
             if (modRoot["m_ID"].ToString() != gameRoot["m_ID"].ToString())
                 return new(null, ModelOutcome.NeedsReview, "Animation skeleton identities differ; this may be a custom skeleton.");
-            var oldIndex = old.Names.Select((name, index) => (name, index)).ToDictionary(x => x.name, x => x.index, StringComparer.Ordinal);
-            var currentNames = current.Names.ToHashSet(StringComparer.Ordinal);
-            var removed = old.Names.Where(name => !currentNames.Contains(name)).ToArray();
-            if (removed.Length > 0)
+            var mapping = BoneNameMapping.Resolve(old.Names, current.Names);
+            string Canonical(string name) => mapping.Aliases.TryGetValue(name, out var target) ? target : name;
+            var oldIndex = old.Names.Select((name, index) => (name: Canonical(name), index))
+                .ToDictionary(x => x.name, x => x.index, StringComparer.Ordinal);
+            var removed = mapping.Unmatched;
+            if (removed.Count > 0)
                 return new(null, ModelOutcome.NeedsReview,
-                    $"Animation override has custom or removed bones: {string.Join(", ", removed.Take(6))}. An explicit mapping is needed.");
+                    $"Animation override has custom or removed bones: {string.Join(", ", removed.Take(6))}. An explicit mapping is needed."
+                    + (mapping.Ambiguous.Count > 0 ? " Case matching is ambiguous; multiple names would collide." : ""));
             string? Parent(SkeletonData skeleton, int index) => skeleton.Parents[index] < 0 ? null : skeleton.Names[skeleton.Parents[index]];
             var changedParents = current.Names.Select((name, index) => (name, index))
-                .Where(x => oldIndex.TryGetValue(x.name, out var oldBone) && Parent(old, oldBone) != Parent(current, x.index))
+                .Where(x => oldIndex.TryGetValue(x.name, out var oldBone) &&
+                    (Parent(old, oldBone) is { } parent ? Canonical(parent) : null) != Parent(current, x.index))
                 .Select(x => x.name).ToArray();
             if (changedParents.Length > 0)
                 return new(null, ModelOutcome.NeedsReview,
@@ -60,6 +64,8 @@ static class AnimationSkeletonMigration
             modRoot["m_parentSpaceReferencePose"] = KVObject.Array(localPoses);
             modRoot["m_modelSpaceReferencePose"] = KVObject.Array(WorldPoses(current.Parents, localPoses));
             modRoot["m_numBonesToSampleAtLowLOD"] = gameRoot["m_numBonesToSampleAtLowLOD"];
+            var renamedMaskReferences = modRoot.ContainsKey("m_maskDefinitions")
+                ? RenameMaskBoneIds(modRoot["m_maskDefinitions"], mapping.Aliases, modRoot["m_ID"].ToString()) : 0;
             using var serialized = new MemoryStream();
             modKv.Serialize(serialized);
             var patched = ResourceData.ReplaceDataBlock(modBytes, serialized.ToArray());
@@ -73,9 +79,16 @@ static class AnimationSkeletonMigration
             for (var i = 0; i < localPoses.Length; i++)
                 if (!Numbers(localPoses[i]).SequenceEqual(Numbers(checkedRoot["m_parentSpaceReferencePose"][i])))
                     throw new InvalidDataException("An authored animation reference pose changed during serialization.");
+            var remainingMaskAliases = checkedRoot.ContainsKey("m_maskDefinitions")
+                ? CountMaskBoneIds(checkedRoot["m_maskDefinitions"], mapping.Aliases.Keys.ToHashSet(StringComparer.Ordinal), modRoot["m_ID"].ToString()) : 0;
+            if (remainingMaskAliases > 0)
+                throw new InvalidDataException("An outdated bone name remains in the animation masks.");
+            var renameNote = mapping.Aliases.Count == 0 ? "" : $" Case-only bone renames ({mapping.Aliases.Count}): "
+                + string.Join(", ", mapping.Aliases.Select(pair => $"{pair.Key} -> {pair.Value}"))
+                + $"; updated {renamedMaskReferences} mask references.";
             return new(patched, ModelOutcome.Updated,
-                $"Animation override binding layout updated: {old.Names.Length} to {current.Names.Length} bones; low-LOD sampling {oldLod} to {newLod}. Authored parent-space reference poses and masks are preserved, world poses are rebuilt, and model geometry is untouched.",
-                ["Test this animation-skeleton repair in-game; structural verification cannot confirm animation playback."]);
+                $"Animation override binding layout updated: {old.Names.Length} to {current.Names.Length} bones; low-LOD sampling {oldLod} to {newLod}. Authored parent-space poses and mask weights are preserved, world poses are rebuilt, and model geometry is untouched." + renameNote,
+                ["Test this animation-skeleton repair in-game; structural verification cannot confirm animation playback."], mapping.Aliases);
         }
         catch (Exception ex)
         {
@@ -84,6 +97,36 @@ static class AnimationSkeletonMigration
     }
 
     sealed record SkeletonData(string[] Names, int[] Parents);
+
+    static int RenameMaskBoneIds(KVObject node, IReadOnlyDictionary<string, string> aliases, string skeletonId)
+    {
+        if (node.ContainsKey("m_skeletonName") && !string.IsNullOrEmpty(node["m_skeletonName"].ToString())
+            && node["m_skeletonName"].ToString() != skeletonId) return 0;
+        var count = 0;
+        foreach (var child in node.Children.ToArray())
+        {
+            if (child.Key == "m_boneIDs" && child.Value.IsArray)
+            {
+                node[child.Key] = KVObject.Array(child.Value.Values.Select(value =>
+                {
+                    if (!aliases.TryGetValue(value.ToString(), out var target)) return value;
+                    count++;
+                    return new KVObject(target);
+                }).ToArray());
+            }
+            else count += RenameMaskBoneIds(child.Value, aliases, skeletonId);
+        }
+        return count;
+    }
+
+    static int CountMaskBoneIds(KVObject node, HashSet<string> names, string skeletonId)
+    {
+        if (node.ContainsKey("m_skeletonName") && !string.IsNullOrEmpty(node["m_skeletonName"].ToString())
+            && node["m_skeletonName"].ToString() != skeletonId) return 0;
+        return node.Children.Sum(child => child.Key == "m_boneIDs" && child.Value.IsArray
+            ? child.Value.Values.Count(value => names.Contains(value.ToString()))
+            : CountMaskBoneIds(child.Value, names, skeletonId));
+    }
 
     static SkeletonData Validate(KVObject root)
     {

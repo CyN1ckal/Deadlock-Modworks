@@ -16,7 +16,8 @@ public enum ModelOutcome
     Failed,
 }
 
-public sealed record ModelResult(string Model, ModelOutcome Outcome, string Detail, IReadOnlyList<string>? Warnings = null);
+public sealed record ModelResult(string Model, ModelOutcome Outcome, string Detail, IReadOnlyList<string>? Warnings = null,
+    IReadOnlyDictionary<string, string>? BoneRenames = null);
 
 public sealed record UpdateProgress(int Completed, int Total, string Message);
 
@@ -172,6 +173,27 @@ public static class HeroModelUpdater
             }
         }
 
+        // A casing fix in the animation override must not introduce a name
+        // mismatch with an authored render rig that still uses the old spelling.
+        for (var i = 0; i < plans.Count; i++)
+        {
+            if (edits[i] is not { Bytes: not null, BoneAliases.Count: > 0 } edit) continue;
+            foreach (var modelEntry in modHeroes.Where(entry => HeroPaths.IsHeroModel(entry.FullPath)))
+            {
+                using var render = ModelFile.Load(mod.Read(modelEntry), modelEntry.FullPath);
+                KVObject data = render.Model.Data;
+                if (!data.ContainsKey("m_vecNmSkeletonRefs") || !data["m_vecNmSkeletonRefs"].Values.Any(value =>
+                    VpkArchive.Normalize(value.ToString().EndsWith("_c", StringComparison.Ordinal) ? value.ToString() : value + "_c")
+                        .Equals(plans[i].Entry.FullPath, StringComparison.OrdinalIgnoreCase))) continue;
+                var renderNames = render.Model.Skeleton.Bones.Select(bone => bone.Name).ToHashSet(StringComparer.Ordinal);
+                var unresolved = edit.BoneAliases.Where(pair => renderNames.Contains(pair.Key) && !renderNames.Contains(pair.Value)).ToArray();
+                if (unresolved.Length == 0) continue;
+                edits[i] = new MigrationEdit(null, ModelOutcome.NeedsReview,
+                    $"Animation casing changes also require renaming bones in {modelEntry.FullPath}: {string.Join(", ", unresolved.Select(pair => pair.Key))}. Render-resource references need review.");
+                break;
+            }
+        }
+
         AcceptEdits(plans, edits, mod.Entries);
 
         var results = new List<ModelResult>(plans.Count);
@@ -205,7 +227,7 @@ public static class HeroModelUpdater
             else
             {
                 result = new ModelResult(plan.Entry.FullPath,
-                    edit.Outcome == ModelOutcome.Updated ? ModelOutcome.Repairable : edit.Outcome, edit.Detail, edit.Warnings);
+                    edit.Outcome == ModelOutcome.Updated ? ModelOutcome.Repairable : edit.Outcome, edit.Detail, edit.Warnings, edit.BoneAliases);
                 if (edit.Bytes != null)
                 {
                     var pathMoved = !plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase);
@@ -867,7 +889,8 @@ static class ModelMigration
     static int IntOf(KVObject value) => checked((int)value.ToInt64());
 }
 
-sealed record MigrationEdit(byte[]? Bytes, ModelOutcome Outcome, string Detail, IReadOnlyList<string>? Warnings = null);
+sealed record MigrationEdit(byte[]? Bytes, ModelOutcome Outcome, string Detail, IReadOnlyList<string>? Warnings = null,
+    IReadOnlyDictionary<string, string>? BoneAliases = null);
 
 sealed class ModelFile : IDisposable
 {

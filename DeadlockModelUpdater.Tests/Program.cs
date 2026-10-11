@@ -6,6 +6,11 @@ if (args.Length == 4 && args[0] == "--verify-samples")
     SampleRegression.Run(args[1], args[2], args[3]);
     return;
 }
+if (args.Length == 4 && args[0] == "--verify-haze")
+{
+    SampleRegression.VerifyHaze(args[1], args[2], args[3]);
+    return;
+}
 
 if (args.Length == 4 && args[0] == "--ui-smoke")
 {
@@ -72,6 +77,15 @@ Test("Review blocks an otherwise repairable package", () => Assert(!new UpdateRe
     new("a", ModelOutcome.Repairable, ""), new("b", ModelOutcome.NeedsReview, "")], false, null, null).CanRepair));
 Test("Unsupported mods are not called compatible", () => Assert(new UpdateReport([
     new("a", ModelOutcome.Skipped, "")], false, null, null).HasBlockers));
+Test("Case-only bone mapping is unique and keeps left/right roles", () =>
+{
+    var mapping = BoneNameMapping.Resolve(["root", "weapon_hand_l", "weapon_hand_r"], ["root", "weaponHand_L", "weapon_hand_L", "weapon_hand_R"]);
+    Assert(mapping.Unmatched.Count == 0 && mapping.Aliases["weapon_hand_l"] == "weapon_hand_L" && mapping.Aliases["weapon_hand_r"] == "weapon_hand_R");
+});
+Test("Semantic or separator changes are not guessed", () => Assert(BoneNameMapping.Resolve(["weapon_hand_l"], ["weaponHand_L"]).Unmatched.Count == 1));
+Test("Multiple current casing candidates require review", () => Assert(BoneNameMapping.Resolve(["HAND_l"], ["hand_L", "Hand_l"]).Ambiguous.Count == 1));
+Test("Two old names cannot collapse into one current bone", () => Assert(BoneNameMapping.Resolve(["hand_l", "hand_L"], ["hand_L"]).Ambiguous.Count == 1));
+Test("No first-match choice among old casing collisions", () => Assert(BoneNameMapping.Resolve(["HAND_l", "hand_l"], ["hand_L"]).Aliases.Count == 0));
 
 var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "fixtures-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(fixtureDirectory);
@@ -311,6 +325,48 @@ try
             [skeletonPath] = Fixtures.AnimationSkeleton(["root", "custom_helper"], [-1, 0], 2) });
         var report = HeroModelUpdater.Analyze(ag2GameDirectory, customAnimation);
         Assert(report.HasBlockers && report.Results.Single(r => r.Model == skeletonPath).Outcome == ModelOutcome.NeedsReview);
+    });
+    var casingGame = Path.Combine(fixtureDirectory, "casing-game");
+    var casingMod = Path.Combine(fixtureDirectory, "casing-mod.vpk");
+    var casingModel = Fixtures.Model(["root", "weapon_hand_L", "magazine_L"], [-1, 0, 1], [0, 1, 2], animationSkeleton: skeletonName, customPose: 3);
+    Fixtures.Archive(Path.Combine(casingGame, "pak01_dir.vpk"), new()
+        { [Fixtures.ModelPath] = casingModel, [skeletonPath] = Fixtures.AnimationSkeleton(["root", "weapon_hand_L", "magazine_L", "attachWorld"], [-1, 0, 1, 0], 2) });
+    Fixtures.Archive(casingMod, new() { [Fixtures.ModelPath] = casingModel,
+        [skeletonPath] = Fixtures.AnimationSkeleton(["root", "weapon_hand_l", "magazine_l"], [-1, 0, 1], 3,
+            customPose: 7, maskLabel: "weapon_hand_l", otherMaskSkeleton: "models/other.vnmskel") });
+    Test("Case-only animation names and scoped mask IDs are repaired", () =>
+    {
+        var report = HeroModelUpdater.Update(casingGame, casingMod, null, true, true, null);
+        Assert(report.WroteFile);
+        var archive = VpkArchive.Open(casingMod);
+        Assert(archive.Read(archive.Entries.Single(e => e.FullPath == Fixtures.ModelPath)).SequenceEqual(casingModel));
+        using var skeleton = new ValveResourceFormat.Resource { FileName = skeletonPath };
+        skeleton.Read(new MemoryStream(archive.Read(archive.Entries.Single(e => e.FullPath == skeletonPath))));
+        ValveKeyValue.KVObject data = ((ValveResourceFormat.ResourceTypes.BinaryKV3)skeleton.DataBlock!).Data;
+        Assert(data["m_boneIDs"][1].ToString() == "weapon_hand_L" && data["m_boneIDs"][2].ToString() == "magazine_L");
+        Assert(data["m_parentSpaceReferencePose"][1][0].ToDouble() == 7);
+        var mask = data["m_maskDefinitions"][0];
+        Assert(mask["m_primaryWeightList"]["m_boneIDs"][1].ToString() == "weapon_hand_L");
+        Assert(mask["m_primaryWeightList"]["m_weights"][1].ToDouble() == 0.5);
+        Assert(mask["m_ID"].ToString() == "weapon_hand_l");
+        Assert(mask["m_secondaryWeightList"]["m_boneIDs"][1].ToString() == "weapon_hand_l");
+        Assert(!HeroModelUpdater.Analyze(casingGame, casingMod).CanRepair);
+    });
+    Test("Casing matches with incompatible parents still need review", () =>
+    {
+        var changedParent = Path.Combine(fixtureDirectory, "changed-case-parent.vpk");
+        Fixtures.Archive(changedParent, new() { [Fixtures.ModelPath] = casingModel,
+            [skeletonPath] = Fixtures.AnimationSkeleton(["root", "weapon_hand_l", "magazine_l"], [-1, 0, 0], 3) });
+        Assert(HeroModelUpdater.Analyze(casingGame, changedParent).HasBlockers);
+    });
+    Test("A render model using obsolete spelling blocks a skeleton-only rename", () =>
+    {
+        var oldRender = Path.Combine(fixtureDirectory, "old-render-spelling.vpk");
+        Fixtures.Archive(oldRender, new()
+            { [Fixtures.ModelPath] = Fixtures.Model(["root", "weapon_hand_l", "magazine_l"], [-1, 0, 1], [0, 1, 2], animationSkeleton: skeletonName),
+              [skeletonPath] = Fixtures.AnimationSkeleton(["root", "weapon_hand_l", "magazine_l"], [-1, 0, 1], 3) });
+        var report = HeroModelUpdater.Analyze(casingGame, oldRender);
+        Assert(report.HasBlockers && report.Results.Single(r => r.Model == skeletonPath).Detail.Contains("Render-resource references"));
     });
 }
 finally { Directory.Delete(fixtureDirectory, recursive: true); }
