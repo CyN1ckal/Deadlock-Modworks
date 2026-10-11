@@ -1,6 +1,28 @@
 using System.Numerics;
 using DeadlockModelUpdater;
 
+if (args.Length == 4 && args[0] == "--ui-smoke")
+{
+    UiSmoke.Run(args[1], args[2], args[3]);
+    return;
+}
+if (args.Length == 2 && args[0] == "--ui-repair-smoke")
+{
+    var smokeDirectory = Path.Combine(AppContext.BaseDirectory, "ui-fixtures-" + Guid.NewGuid().ToString("N"));
+    var gameDirectory = Path.Combine(smokeDirectory, "game");
+    var modPath = Path.Combine(smokeDirectory, "mod.vpk");
+    try
+    {
+        Fixtures.Archive(Path.Combine(gameDirectory, "pak01_dir.vpk"), new()
+            { [Fixtures.ModelPath] = Fixtures.Model(["root", "arm"], [-1, 0], [0, 1]) });
+        Fixtures.Archive(modPath, new()
+            { [Fixtures.ModelPath] = Fixtures.Model(["arm", "root"], [1, -1], [0, 1]) });
+        UiSmoke.Run(gameDirectory, modPath, args[1], expectRepair: true);
+    }
+    finally { Directory.Delete(smokeDirectory, recursive: true); }
+    return;
+}
+
 var passed = 0;
 void Test(string name, Action check)
 {
@@ -74,6 +96,17 @@ try
         ValveKeyValue.KVObject data = ((ValveResourceFormat.ResourceTypes.Model)resource.DataBlock!).Data;
         Assert(data["m_remappingTable"][0].ToInt64() == 1 && data["m_remappingTable"][1].ToInt64() == 0);
     });
+    Test("Independent ValvePak reader verifies the repaired archive", () =>
+    {
+        using var package = new SteamDatabase.ValvePak.Package();
+        package.Read(outputPath);
+        package.VerifyHashes();
+        package.VerifyFileChecksums();
+        var material = package.FindEntry("materials/custom.txt");
+        Assert(material != null);
+        package.ReadEntry(material!, out byte[] contents);
+        Assert(contents.SequenceEqual(new byte[] { 9, 8, 7 }));
+    });
     Test("Replacement creates an exact original backup", () =>
     {
         var report = HeroModelUpdater.Update(gameDirectory, modPath, null, true, true, null);
@@ -81,11 +114,13 @@ try
     });
     Test("One invalid model blocks the whole package", () =>
     {
+        Fixtures.Archive(gamePath, new() { [Fixtures.ModelPath] = gameModel,
+            ["models/heroes/test/broken.vmdl_c"] = gameModel });
         var mixedPath = Path.Combine(fixtureDirectory, "mixed.vpk");
         Fixtures.Archive(mixedPath, new() { [Fixtures.ModelPath] = oldModel, ["models/heroes/test/broken.vmdl_c"] = [1, 2, 3] });
         var before = File.ReadAllBytes(mixedPath);
         var report = HeroModelUpdater.Update(gameDirectory, mixedPath, null, true, true, null);
-        Assert(report.HasBlockers && !report.WroteFile && File.ReadAllBytes(mixedPath).SequenceEqual(before));
+        Assert(report.HasFailures && !report.WroteFile && File.ReadAllBytes(mixedPath).SequenceEqual(before));
     });
     Test("An existing output is never overwritten", () =>
     {

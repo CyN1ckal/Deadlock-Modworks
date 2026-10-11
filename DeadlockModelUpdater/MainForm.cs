@@ -23,6 +23,7 @@ sealed class MainForm : Form
     Control _picker = null!;
     CancellationTokenSource? _cancellation;
     string? _analyzedGame;
+    int _progressGeneration;
 
     public MainForm()
     {
@@ -35,16 +36,20 @@ sealed class MainForm : Form
         _results.Columns.Add("Model", 310);
         _results.Columns.Add("Result", 110);
         _results.Columns.Add("Detail", 460);
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(12) };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12) };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 62));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _picker = BuildPicker();
         root.Controls.Add(_picker, 0, 0);
         root.Controls.Add(BuildActions(), 0, 1);
         root.Controls.Add(_results, 0, 2);
         root.Controls.Add(_log, 0, 3);
+        var credit = new LinkLabel { Text = "Powered by Source 2 Viewer / ValveResourceFormat", AutoSize = true, Padding = new Padding(0, 6, 0, 0) };
+        credit.LinkClicked += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://s2v.app") { UseShellExecute = true });
+        root.Controls.Add(credit, 0, 4);
         Controls.Add(root);
         _analyze.Click += async (_, _) => await RunAsync(repair: false);
         _repair.Click += async (_, _) => await RunAsync(repair: true);
@@ -71,7 +76,11 @@ sealed class MainForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        _game.Text = GameFolder.Find() ?? "";
+        try { _game.Text = GameFolder.Find() ?? ""; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            _status.Text = "Automatic game detection was unavailable. Choose the citadel folder manually.";
+        }
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -175,7 +184,7 @@ sealed class MainForm : Form
             {
                 token.ThrowIfCancellationRequested();
                 Log($"{(repair ? "Repairing" : "Analyzing")} {mod}");
-                var progress = new Progress<UpdateProgress>(ShowProgress);
+                var progress = new UiProgress(this, ++_progressGeneration);
                 UpdateReport report;
                 try
                 {
@@ -189,8 +198,10 @@ sealed class MainForm : Form
                     report = new UpdateReport([new ModelResult(Path.GetFileName(mod), ModelOutcome.Failed, ex.Message)], false, null, null);
                     Log(ex.Message);
                 }
+                ++_progressGeneration;
                 _reports.RemoveAll(r => r.ModPath.Equals(mod, StringComparison.OrdinalIgnoreCase));
                 _reports.Add(new ArchiveReport(mod, report));
+                foreach (var result in report.Results) Log($"{result.Outcome}: {result.Model}: {result.Detail}");
                 if (report.BackupPath != null) Log("Original backup: " + report.BackupPath);
                 RenderReports();
             }
@@ -207,10 +218,12 @@ sealed class MainForm : Form
         }
         finally
         {
+            ++_progressGeneration;
             _cancellation.Dispose(); _cancellation = null;
             _picker.Enabled = true; _analyze.Enabled = true; _cancel.Enabled = false;
             _repair.Enabled = _analyzedGame == game && _reports.Any(r => r.Report.CanRepair);
             _export.Enabled = _reports.Count > 0;
+            _progress.Style = ProgressBarStyle.Blocks;
             RenderReports();
         }
     }
@@ -229,7 +242,7 @@ sealed class MainForm : Form
             item.ForeColor = result.Outcome switch
             {
                 ModelOutcome.Updated or ModelOutcome.Repairable => Color.DarkGreen,
-                ModelOutcome.NeedsReview or ModelOutcome.Skipped => Color.DarkOrange,
+                ModelOutcome.NeedsReview or ModelOutcome.Skipped => Color.FromArgb(145, 83, 0),
                 ModelOutcome.Failed => Color.DarkRed,
                 _ => SystemColors.WindowText,
             };
@@ -260,6 +273,19 @@ sealed class MainForm : Form
     }
 
     void Log(string message) => _log.AppendText(message + Environment.NewLine);
+
+    sealed class UiProgress(MainForm form, int generation) : IProgress<UpdateProgress>
+    {
+        public void Report(UpdateProgress value)
+        {
+            if (form.IsDisposed || !form.IsHandleCreated) return;
+            form.BeginInvoke((Action)(() =>
+            {
+                if (form._cancellation != null && form._progressGeneration == generation)
+                    form.ShowProgress(value);
+            }));
+        }
+    }
 }
 
 static class GameFolder

@@ -127,7 +127,7 @@ public static class HeroModelUpdater
             if (plan.Error != null || plan.Resolved == null)
                 continue;
 
-            progress?.Report(new UpdateProgress(i, plans.Count, $"Updating {plan.Entry.FullPath}..."));
+            progress?.Report(new UpdateProgress(i, plans.Count, $"Checking {plan.Entry.FullPath}..."));
             var gameEntry = FindEntry(game, plan.Resolved);
             try
             {
@@ -175,7 +175,7 @@ public static class HeroModelUpdater
             ModelResult result;
             if (plan.Error != null || plan.Resolved == null)
             {
-                result = new ModelResult(plan.Entry.FullPath, ModelOutcome.Failed, plan.Error ?? "No matching game model.");
+                result = new ModelResult(plan.Entry.FullPath, ModelOutcome.NeedsReview, plan.Error ?? "No matching game model.");
             }
             else if (edit == null)
             {
