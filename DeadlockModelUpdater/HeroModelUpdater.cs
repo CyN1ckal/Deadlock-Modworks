@@ -53,6 +53,8 @@ public static class HeroModelUpdater
             throw new ArgumentException("Mod VPK is required.", nameof(modVpkPath));
         if (!analyzeOnly && !replaceSource && string.IsNullOrWhiteSpace(outputPath))
             throw new ArgumentException("Output VPK is required.", nameof(outputPath));
+        if (!analyzeOnly && replaceSource && !makeBackup)
+            throw new InvalidOperationException("Replacing a mod requires a backup. Enable backups or write to a new file.");
 
         var gamePak = Path.GetFullPath(Path.Combine(gameDirectory, "pak01_dir.vpk"));
         var modFull = Path.GetFullPath(modVpkPath);
@@ -62,11 +64,16 @@ public static class HeroModelUpdater
             throw new FileNotFoundException("Could not find the mod VPK.", modFull);
         if (string.Equals(modFull, gamePak, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("That file is the game archive. Choose a mod VPK from the addons folder.");
+        var gameFolder = Path.GetDirectoryName(gamePak)!;
+        if (string.Equals(Path.GetDirectoryName(modFull), gameFolder, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Choose a mod outside the game's archive folder, such as a VPK in addons.");
 
         string? destination = null;
         if (!analyzeOnly && !replaceSource)
         {
             destination = Path.GetFullPath(outputPath!);
+            if (string.Equals(Path.GetDirectoryName(destination), gameFolder, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Output must not be placed beside the official game archives.");
             if (string.Equals(destination, gamePak, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Refusing to overwrite the game archive.");
             if (string.Equals(destination, modFull, StringComparison.OrdinalIgnoreCase))
@@ -76,6 +83,7 @@ public static class HeroModelUpdater
         progress?.Report(new UpdateProgress(0, 0, "Reading the game archive..."));
         cancellationToken.ThrowIfCancellationRequested();
         var game = VpkArchive.Open(gamePak);
+        using var gameLease = game.LockSources();
         var gameHeroes = new List<string>();
         foreach (var entry in game.Entries)
         {
@@ -89,7 +97,12 @@ public static class HeroModelUpdater
 
         cancellationToken.ThrowIfCancellationRequested();
         var mod = VpkArchive.Open(modFull);
+        using var modLease = mod.LockSources();
+        progress?.Report(new UpdateProgress(0, 0, "Checking mod archive integrity..."));
+        mod.Validate(cancellationToken);
         var modHeroes = mod.Entries.Where(entry => HeroPaths.IsHeroModel(entry.FullPath)).ToList();
+        var availableResources = game.Entries.Concat(mod.Entries).Select(e => e.FullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         progress?.Report(new UpdateProgress(0, modHeroes.Count, $"Game hero models: {gameHeroes.Count}. Mod hero models: {modHeroes.Count}."));
 
         var plans = new List<Plan>(modHeroes.Count);
@@ -119,6 +132,18 @@ public static class HeroModelUpdater
             try
             {
                 edits[i] = ModelMigration.Migrate(mod.Read(plan.Entry), plan.Entry.FullPath, game.Read(gameEntry), plan.Resolved);
+                if (edits[i]!.Outcome is ModelOutcome.Updated or ModelOutcome.Current)
+                {
+                    using var resource = ModelFile.Load(mod.Read(plan.Entry), plan.Entry.FullPath);
+                    var missing = resource.Resource.ExternalReferences?.ResourceRefInfoList
+                        .Select(reference => reference.Name)
+                        .Where(IsRigReference)
+                        .Where(path => !availableResources.Contains(VpkArchive.Normalize(path.EndsWith("_c", StringComparison.Ordinal) ? path : path + "_c")))
+                        .Distinct().ToArray() ?? [];
+                    if (missing.Length > 0)
+                        edits[i] = new MigrationEdit(null, ModelOutcome.NeedsReview,
+                            $"Rig dependencies are missing from the game and this mod: {string.Join(", ", missing.Take(6))}. The mod may depend on another addon or need author repair.");
+                }
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException)
             {
@@ -195,55 +220,22 @@ public static class HeroModelUpdater
             return new UpdateReport(results, false, null, null);
         }
 
-        if (replaceSource)
-        {
-            string? backupPath = null;
-            if (makeBackup)
-            {
-                backupPath = modFull + ".bak-before-bone-update";
-                if (File.Exists(backupPath))
-                    backupPath = modFull + ".bak-before-bone-update-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-                progress?.Report(new UpdateProgress(plans.Count, plans.Count, "Copying a backup..."));
-                File.Copy(modFull, backupPath);
-            }
+        cancellationToken.ThrowIfCancellationRequested();
+        var finalPath = replaceSource ? modFull : destination!;
+        progress?.Report(new UpdateProgress(plans.Count, plans.Count, "Writing and validating the repaired VPK..."));
+        var backup = ArchiveTransaction.Write(mod, modFull, finalPath, changes, replaceSource, cancellationToken, modLease.Dispose);
+        var completed = results.Select(result => result.Outcome == ModelOutcome.Repairable
+            ? result with { Outcome = ModelOutcome.Updated } : result).ToArray();
+        progress?.Report(new UpdateProgress(plans.Count, plans.Count,
+            backup == null ? $"Wrote {finalPath}." : $"Repaired VPK. Original backup: {backup}"));
+        return new UpdateReport(completed, true, finalPath, backup);
+    }
 
-            var temp = modFull + ".new";
-            progress?.Report(new UpdateProgress(plans.Count, plans.Count, "Writing the updated VPK..."));
-            try
-            {
-                mod.Write(temp, changes);
-                File.Replace(temp, modFull, destinationBackupFileName: null);
-            }
-            catch
-            {
-                if (File.Exists(temp))
-                {
-                    try
-                    {
-                        File.Delete(temp);
-                    }
-                    catch (IOException)
-                    {
-                    }
-                }
-
-                throw;
-            }
-
-            var replaced = backupPath == null
-                ? "Replaced the mod VPK."
-                : $"Replaced the mod VPK. Backup: {backupPath}";
-            progress?.Report(new UpdateProgress(plans.Count, plans.Count, replaced));
-            return new UpdateReport(results, true, modFull, backupPath);
-        }
-
-        var outputDirectory = Path.GetDirectoryName(destination);
-        if (!string.IsNullOrEmpty(outputDirectory))
-            Directory.CreateDirectory(outputDirectory);
-        progress?.Report(new UpdateProgress(plans.Count, plans.Count, $"Writing {destination}..."));
-        mod.Write(destination!, changes);
-        progress?.Report(new UpdateProgress(plans.Count, plans.Count, $"Wrote {destination}."));
-        return new UpdateReport(results, true, destination, null);
+    static bool IsRigReference(string path)
+    {
+        if (path.EndsWith("_c", StringComparison.Ordinal)) path = path[..^2];
+        return Path.GetExtension(path).ToLowerInvariant() is ".vmdl" or ".vagrp" or ".vanim" or ".vanmgrph"
+            or ".vnmskel" or ".vnmclip" or ".vnmgraph" or ".vphys";
     }
 
     static void AcceptEdits(List<Plan> plans, MigrationEdit?[] edits, List<VpkEntry> entries)
@@ -309,6 +301,8 @@ public static class HeroModelUpdater
 
     static string OutcomeText(ModelOutcome outcome) => outcome switch
     {
+        ModelOutcome.Repairable => "Repairable",
+        ModelOutcome.NeedsReview => "Needs review",
         ModelOutcome.Updated => "Updated",
         ModelOutcome.Current => "Current",
         ModelOutcome.Skipped => "Skipped",
@@ -401,6 +395,8 @@ static class ModelMigration
     {
         using var mod = ModelFile.Load(modBytes, modPath);
         using var game = ModelFile.Load(gameBytes, gamePath);
+        ValidateRawSkeleton(mod);
+        ValidateRawSkeleton(game);
         var modBones = mod.Model.Skeleton.Bones;
         var gameBones = game.Model.Skeleton.Bones;
         if (modBones.Length == 0)
@@ -482,6 +478,37 @@ static class ModelMigration
         var scales = RequireArray(root["m_modelSkeleton"], "m_boneScaleParent", bones.Length, "Model");
         return bones.Select((b, i) => new BoneShape(b.Name, b.Parent?.Name, b.Position, b.Angle,
             (float)scales[i].ToDouble())).ToArray();
+    }
+
+    static void ValidateRawSkeleton(ModelFile file)
+    {
+        KVObject root = ReadData(file).Data;
+        if (!root.ContainsKey("m_modelSkeleton"))
+            throw new InvalidDataException("Model has no supported embedded skeleton.");
+        var skeleton = root["m_modelSkeleton"];
+        if (!skeleton.ContainsKey("m_boneName") || !skeleton["m_boneName"].IsArray)
+            throw new InvalidDataException("Skeleton has no bone-name array.");
+        var names = skeleton["m_boneName"];
+        var parents = RequireArray(skeleton, "m_nParent", names.Count, "Model");
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < names.Count; i++)
+        {
+            var name = names[i].ToString();
+            if (string.IsNullOrWhiteSpace(name) || !unique.Add(name))
+                throw new InvalidDataException("Skeleton has an empty or duplicate bone name.");
+            var visited = new HashSet<int> { i };
+            var parent = IntOf(parents[i]);
+            while (parent != -1)
+            {
+                if (parent < 0 || parent >= names.Count)
+                    throw new InvalidDataException($"Bone {name} has an out-of-range parent index.");
+                if (!visited.Add(parent))
+                    throw new InvalidDataException($"Skeleton has a parent cycle at {name}.");
+                parent = IntOf(parents[parent]);
+            }
+        }
+        foreach (var key in new[] { "m_nFlag", "m_boneSphere", "m_bonePosParent", "m_boneRotParent", "m_boneScaleParent" })
+            RequireArray(skeleton, key, names.Count, "Model");
     }
 
     static MigrationEdit MoveWithoutSkeletonChange(
@@ -829,3 +856,4 @@ sealed class ModelFile : IDisposable
         Stream.Dispose();
     }
 }
+

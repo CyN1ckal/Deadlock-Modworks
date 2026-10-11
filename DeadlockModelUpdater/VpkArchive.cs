@@ -30,6 +30,35 @@ public sealed class VpkArchive
 
     public List<VpkEntry> Entries { get; }
 
+    public IDisposable LockSources()
+    {
+        var handles = new List<Stream>();
+        try
+        {
+            handles.Add(File.Open(_directoryPath, FileMode.Open, FileAccess.Read, FileShare.Read));
+            foreach (var index in Entries.Select(e => e.ArchiveIndex).Where(i => i != EmbeddedArchive).Distinct())
+            {
+                var chunk = Path.Combine(Path.GetDirectoryName(_directoryPath)!, $"{_baseName}_{index:000}.vpk");
+                handles.Add(File.Open(chunk, FileMode.Open, FileAccess.Read, FileShare.Read));
+            }
+            return new ReadLease(handles);
+        }
+        catch
+        {
+            foreach (var handle in handles) handle.Dispose();
+            throw;
+        }
+    }
+
+    sealed class ReadLease(List<Stream> handles) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var handle in handles) handle.Dispose();
+            handles.Clear();
+        }
+    }
+
     public static VpkArchive Open(string directoryPath)
     {
         using var stream = File.Open(directoryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -41,34 +70,43 @@ public sealed class VpkArchive
         var fileDataSize = BitConverter.ToUInt32(header[12..]);
         if (signature != Signature || version != 2)
             throw new InvalidDataException($"{Path.GetFileName(directoryPath)} is not a Source 2 VPK.");
+        if (treeSize < 0 || treeSize > stream.Length - 28 || 28L + treeSize + fileDataSize > stream.Length)
+            throw new InvalidDataException("VPK directory or embedded data is outside the file.");
         // Bytes 16..28 are the archive MD5, other MD5, and signature sizes.
         // Chunked game archives fill those in. The tree still begins after this header,
         // and Write() emits a new embedded mod archive instead of copying those sections.
 
         var tree = new byte[treeSize];
         stream.ReadExactly(tree);
-        return new VpkArchive(directoryPath, ParseTree(tree), fileDataSize, treeSize);
+        var entries = ParseTree(tree);
+        if (entries.Select(e => e.FullPath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != entries.Count)
+            throw new InvalidDataException("VPK contains duplicate resource paths.");
+        return new VpkArchive(directoryPath, entries, fileDataSize, treeSize);
     }
 
     public byte[] Read(VpkEntry entry)
     {
-        if (entry.PreloadBytes != 0)
-            throw new InvalidDataException($"{entry.FullPath} uses preload data.");
-
-        using var stream = OpenData(entry);
-        stream.Seek(DataOffset(entry), SeekOrigin.Begin);
-        var data = new byte[entry.Length];
-        stream.ReadExactly(data);
-        return data;
+        using var output = new MemoryStream(checked((int)entry.Length + entry.PreloadBytes));
+        CopyTo(entry, output);
+        return output.ToArray();
     }
 
     public void CopyTo(VpkEntry entry, Stream destination)
     {
-        if (entry.PreloadBytes != 0)
-            throw new InvalidDataException($"{entry.FullPath} uses preload data.");
-
         using var stream = OpenData(entry);
+        var offset = DataOffset(entry);
+        if (offset > stream.Length || entry.Length > stream.Length - offset
+            || (entry.ArchiveIndex == EmbeddedArchive && (long)entry.Offset + entry.Length > _fileDataSize))
+            throw new InvalidDataException($"{entry.FullPath} data is outside its archive.");
         stream.Seek(DataOffset(entry), SeekOrigin.Begin);
+        var crc = new Crc32();
+        if (entry.PreloadBytes > 0)
+        {
+            if (entry.PreloadData?.Length != entry.PreloadBytes)
+                throw new InvalidDataException($"{entry.FullPath} has invalid preload data.");
+            destination.Write(entry.PreloadData);
+            crc.Append(entry.PreloadData);
+        }
         var remaining = entry.Length;
         var buffer = new byte[1024 * 1024];
         while (remaining > 0)
@@ -77,7 +115,19 @@ public sealed class VpkArchive
             if (n == 0)
                 throw new EndOfStreamException(entry.FullPath);
             destination.Write(buffer, 0, n);
+            crc.Append(buffer.AsSpan(0, n));
             remaining -= (uint)n;
+        }
+        if (crc.GetCurrentHashAsUInt32() != entry.Crc32)
+            throw new InvalidDataException($"CRC mismatch in {entry.FullPath}; the archive is damaged.");
+    }
+
+    public void Validate(CancellationToken cancellationToken = default)
+    {
+        foreach (var entry in Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CopyTo(entry, Stream.Null);
         }
     }
 
@@ -111,7 +161,7 @@ public sealed class VpkArchive
 
         var planned = output.Select(item =>
         {
-            var length = item.Replacement?.Length ?? (int)item.Source!.Length;
+            var length = item.Replacement?.Length ?? checked((int)item.Source!.Length + item.Source.PreloadBytes);
             var (extension, directory, name) = Split(item.Path);
             return new PlannedFile(item.Path, extension, directory, name, item.Source, item.Replacement, length);
         }).ToList();
@@ -124,7 +174,7 @@ public sealed class VpkArchive
                      .ThenBy(file => file.Name, StringComparer.Ordinal))
         {
             located.Add(new LocatedFile(file, offset));
-            offset += (uint)file.Length;
+            offset = checked(offset + (uint)file.Length);
         }
 
         var tree = BuildTree(located);
@@ -197,6 +247,8 @@ public sealed class VpkArchive
                     var name = ReadString(tree, ref cursor);
                     if (name.Length == 0)
                         break;
+                    if (cursor > tree.Length - 18)
+                        throw new InvalidDataException("Truncated VPK directory entry.");
                     var crc = BitConverter.ToUInt32(tree, cursor);
                     var preload = BitConverter.ToUInt16(tree, cursor + 4);
                     var archive = BitConverter.ToUInt16(tree, cursor + 6);
@@ -205,12 +257,15 @@ public sealed class VpkArchive
                     var term = BitConverter.ToUInt16(tree, cursor + 16);
                     if (term != 0xFFFF)
                         throw new InvalidDataException("Broken VPK directory entry.");
+                    if (preload > tree.Length - cursor - 18)
+                        throw new InvalidDataException("Truncated VPK preload data.");
+                    var preloadData = tree.AsSpan(cursor + 18, preload).ToArray();
                     cursor += 18 + preload;
                     // A single space is the Source 2 marker for the archive root.
                     if (directory == " ")
                         directory = "";
                     var full = directory.Length == 0 ? $"{name}.{extension}" : $"{directory}/{name}.{extension}";
-                    entries.Add(new VpkEntry(full, crc, preload, archive, offset, length));
+                    entries.Add(new VpkEntry(full, crc, preload, archive, offset, length, preloadData));
                 }
             }
         }
@@ -349,4 +404,4 @@ public sealed class VpkArchive
     }
 }
 
-public sealed record VpkEntry(string FullPath, uint Crc32, ushort PreloadBytes, ushort ArchiveIndex, uint Offset, uint Length);
+public sealed record VpkEntry(string FullPath, uint Crc32, ushort PreloadBytes, ushort ArchiveIndex, uint Offset, uint Length, byte[]? PreloadData = null);
