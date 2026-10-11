@@ -91,7 +91,7 @@ public sealed class VpkArchive
         return output.ToArray();
     }
 
-    public void CopyTo(VpkEntry entry, Stream destination)
+    public void CopyTo(VpkEntry entry, Stream destination, CancellationToken cancellationToken = default)
     {
         using var stream = OpenData(entry);
         var offset = DataOffset(entry);
@@ -111,6 +111,7 @@ public sealed class VpkArchive
         var buffer = new byte[1024 * 1024];
         while (remaining > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var n = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
             if (n == 0)
                 throw new EndOfStreamException(entry.FullPath);
@@ -127,7 +128,7 @@ public sealed class VpkArchive
         foreach (var entry in Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            CopyTo(entry, Stream.Null);
+            CopyTo(entry, Stream.Null, cancellationToken);
         }
     }
 
@@ -135,7 +136,7 @@ public sealed class VpkArchive
     /// Writes a new embedded directory VPK. A null change removes a file. A path that is not
     /// already in the archive is added.
     /// </summary>
-    public void Write(string destinationPath, IReadOnlyDictionary<string, byte[]?> changes)
+    public void Write(string destinationPath, IReadOnlyDictionary<string, byte[]?> changes, CancellationToken cancellationToken = default)
     {
         var byPath = Entries.ToDictionary(entry => entry.FullPath, StringComparer.OrdinalIgnoreCase);
         var output = new List<(string Path, VpkEntry? Source, byte[]? Replacement)>();
@@ -187,11 +188,12 @@ public sealed class VpkArchive
         BitConverter.TryWriteBytes(header.AsSpan(20), 48u);
 
         using var dest = File.Create(destinationPath);
-        var whole = new Md5Builder();
+        using var whole = new Md5Builder();
         WriteHashed(dest, whole, header);
         WriteHashed(dest, whole, tree);
         foreach (var file in located)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (file.Plan.Replacement != null)
             {
                 WriteHashed(dest, whole, file.Plan.Replacement);
@@ -199,7 +201,7 @@ public sealed class VpkArchive
             else
             {
                 using var copy = new HashingStream(dest, whole);
-                CopyTo(file.Plan.Source!, copy);
+                CopyTo(file.Plan.Source!, copy, cancellationToken);
             }
         }
 
@@ -394,13 +396,14 @@ public sealed class VpkArchive
         }
     }
 
-    sealed class Md5Builder
+    sealed class Md5Builder : IDisposable
     {
         readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
 
         public void Append(ReadOnlySpan<byte> data) => _hash.AppendData(data);
 
         public byte[] Hash() => _hash.GetHashAndReset();
+        public void Dispose() => _hash.Dispose();
     }
 }
 

@@ -434,6 +434,11 @@ static class ModelMigration
         var assessment = SkeletonCompatibility.Assess(ReadShapes(mod), ReadShapes(game));
         if (assessment.NeedsReview)
             return new MigrationEdit(null, ModelOutcome.NeedsReview, assessment.Detail);
+        var flagChanges = gameBones.Where(b => modIndex.TryGetValue(b.Name, out var i) && b.Flags != modBones[i].Flags)
+            .Select(b => b.Name).ToArray();
+        if (flagChanges.Length > 0)
+            return new MigrationEdit(null, ModelOutcome.NeedsReview,
+                $"Bone usage or procedural flags differ ({flagChanges.Length}): {string.Join(", ", flagChanges.Take(6))}. These changes need author review.");
         var aligned = modBones.Length >= gameBones.Length;
         if (aligned)
         {
@@ -458,6 +463,14 @@ static class ModelMigration
         if (!modRoot.ContainsKey("m_remappingTable") || modRoot["m_remappingTable"].Count == 0)
             return new MigrationEdit(null, ModelOutcome.NeedsReview,
                 "Skeleton differs, but no mesh bone remap table is available. Direct mesh indices require author review.");
+        var supportedSkeletonKeys = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "m_boneName", "m_nParent", "m_boneSphere", "m_nFlag", "m_bonePosParent", "m_boneRotParent", "m_boneScaleParent",
+        };
+        var unknownSkeletonKeys = modRoot["m_modelSkeleton"].Keys.Where(key => !supportedSkeletonKeys.Contains(key)).ToArray();
+        if (unknownSkeletonKeys.Length > 0)
+            return new MigrationEdit(null, ModelOutcome.NeedsReview,
+                $"Skeleton contains unsupported metadata: {string.Join(", ", unknownSkeletonKeys)}. Its bone references need author review.");
 
         // These blocks may contain additional bone indices. Preserve them, but do not
         // change the skeleton underneath them until their remapping is supported.
@@ -509,6 +522,17 @@ static class ModelMigration
         }
         foreach (var key in new[] { "m_nFlag", "m_boneSphere", "m_bonePosParent", "m_boneRotParent", "m_boneScaleParent" })
             RequireArray(skeleton, key, names.Count, "Model");
+        if (root.ContainsKey("m_remappingTable"))
+        {
+            var remap = root["m_remappingTable"];
+            if (!remap.IsArray) throw new InvalidDataException("Mesh remapping table is not an array.");
+            for (var i = 0; i < remap.Count; i++)
+            {
+                var value = IntOf(remap[i]);
+                if (value < -1 || value >= names.Count)
+                    throw new InvalidDataException($"Mesh remapping entry {i} points outside the skeleton.");
+            }
+        }
     }
 
     static MigrationEdit MoveWithoutSkeletonChange(

@@ -125,6 +125,83 @@ try
         catch (OperationCanceledException) { Assert(File.ReadAllBytes(modPath).SequenceEqual(before)); return; }
         throw new Exception("Expected cancellation");
     });
+    Test("Actual cyclic skeletons fail before building a hierarchy", () =>
+    {
+        var cyclePath = Path.Combine(fixtureDirectory, "cycle.vpk");
+        Fixtures.Archive(cyclePath, new() { [Fixtures.ModelPath] = Fixtures.Model(["root", "arm"], [1, 0], [0, 1]) });
+        var report = HeroModelUpdater.Analyze(gameDirectory, cyclePath);
+        Assert(report.HasFailures && report.Results.Single().Detail.Contains("cycle"));
+    });
+    Test("Out-of-range mesh indices fail even when bone order matches", () =>
+    {
+        var badRemapPath = Path.Combine(fixtureDirectory, "bad-remap.vpk");
+        Fixtures.Archive(badRemapPath, new() { [Fixtures.ModelPath] = Fixtures.Model(["root", "arm"], [-1, 0], [2]) });
+        Assert(HeroModelUpdater.Analyze(gameDirectory, badRemapPath).HasFailures);
+    });
+    Test("Missing remap blocks an actual reorder", () =>
+    {
+        var directPath = Path.Combine(fixtureDirectory, "direct.vpk");
+        Fixtures.Archive(directPath, new() { [Fixtures.ModelPath] = Fixtures.Model(["arm", "root"], [1, -1]) });
+        var report = HeroModelUpdater.Analyze(gameDirectory, directPath);
+        Assert(report.HasBlockers && report.Results.Single().Outcome == ModelOutcome.NeedsReview);
+    });
+    Test("Additive skeleton repair preserves existing skinning", () =>
+    {
+        var additivePath = Path.Combine(fixtureDirectory, "additive.vpk");
+        Fixtures.Archive(additivePath, new() { [Fixtures.ModelPath] = Fixtures.Model(["root"], [-1], [0]) });
+        var report = HeroModelUpdater.Update(gameDirectory, additivePath, null, true, true, null);
+        Assert(report.WroteFile && HeroModelUpdater.Analyze(gameDirectory, additivePath).Results.Single().Outcome == ModelOutcome.Current);
+    });
+    Test("Failed copy never installs a partial archive", () =>
+    {
+        var corruptPath = Path.Combine(fixtureDirectory, "bad-copy.vpk");
+        Fixtures.Archive(corruptPath, new() { ["a.txt"] = [1, 2, 3] });
+        var bytes = File.ReadAllBytes(corruptPath);
+        bytes[28 + BitConverter.ToInt32(bytes, 8)] ^= 0xFF;
+        File.WriteAllBytes(corruptPath, bytes);
+        Invalid(() => ArchiveTransaction.Write(VpkArchive.Open(corruptPath), corruptPath, corruptPath,
+            new Dictionary<string, byte[]?>(), true));
+        Assert(File.ReadAllBytes(corruptPath).SequenceEqual(bytes));
+        Assert(Directory.GetFiles(fixtureDirectory, "*.new").Length == 0);
+    });
+    Test("CLI analysis and JSON report agree", () =>
+    {
+        var reportPath = Path.Combine(fixtureDirectory, "report.json");
+        using var log = new StringWriter();
+        Assert(CommandLine.Execute(["--analyze", gameDirectory, modPath, "--report", reportPath], log) == 0);
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(reportPath));
+        var archive = json.RootElement.GetProperty("Archives")[0];
+        Assert(archive.GetProperty("Report").GetProperty("WroteFile").GetBoolean() == false);
+        Assert(archive.GetProperty("Report").GetProperty("Results")[0].GetProperty("Outcome").GetString() == "Current");
+    });
+    Test("CLI unsupported mod exits with review status", () =>
+    {
+        var nonModelPath = Path.Combine(fixtureDirectory, "non-model.vpk");
+        Fixtures.Archive(nonModelPath, new() { ["a.txt"] = [1] });
+        Assert(CommandLine.Execute(["--analyze", gameDirectory, nonModelPath], new StringWriter()) == 1);
+    });
+    Test("CLI errors can be exported for troubleshooting", () =>
+    {
+        var reportPath = Path.Combine(fixtureDirectory, "error-report.json");
+        Assert(CommandLine.Execute(["--analyze", gameDirectory, Path.Combine(fixtureDirectory, "missing.vpk"), "--report", reportPath], new StringWriter()) == 2);
+        Assert(File.ReadAllText(reportPath).Contains("Failed"));
+    });
+    Test("Report filename cannot overwrite a VPK", () =>
+    {
+        Assert(CommandLine.Execute(["--analyze", gameDirectory, modPath, "--report", modPath], new StringWriter()) == 2);
+    });
+    Test("Truncated directories are rejected", () =>
+    {
+        var truncatedPath = Path.Combine(fixtureDirectory, "truncated.vpk");
+        File.WriteAllBytes(truncatedPath, original[..28]);
+        Invalid(() => VpkArchive.Open(truncatedPath));
+    });
+    Test("Resource table overflow is rejected", () =>
+    {
+        var broken = gameModel.ToArray();
+        BitConverter.TryWriteBytes(broken.AsSpan(12), int.MaxValue);
+        Invalid(() => ResourceData.ReplaceDataBlock(broken, [0x00, 0x33, 0x56, 0x4B]));
+    });
 }
 finally { Directory.Delete(fixtureDirectory, recursive: true); }
 

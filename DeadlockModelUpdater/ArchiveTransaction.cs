@@ -20,7 +20,7 @@ public static class ArchiveTransaction
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            source.Write(temp, changes);
+            source.Write(temp, changes, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             var check = VpkArchive.Open(temp);
             check.Validate(cancellationToken);

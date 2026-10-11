@@ -23,8 +23,12 @@ public static class ResourceData
         if (blockCount <= 0 || blockOffset < 8)
             throw new InvalidDataException("Resource block table is invalid.");
 
-        var tableStart = 16 + (int)blockOffset - 8;
-        var tableBytes = blockCount * 12;
+        var tableStartLong = 8L + blockOffset;
+        var tableBytesLong = (long)blockCount * 12;
+        if (tableStartLong > file.Length || tableBytesLong > file.Length - tableStartLong)
+            throw new InvalidDataException("Resource block table is outside the file.");
+        var tableStart = (int)tableStartLong;
+        var tableBytes = (int)tableBytesLong;
         if (tableStart < 16 || tableStart > file.Length || tableBytes > file.Length - tableStart)
             throw new InvalidDataException("Resource block table is outside the file.");
 
@@ -71,6 +75,8 @@ public static class ResourceData
                 throw new InvalidDataException("A block size is negative.");
             var abs = (long)pos + 4 + rel;
             var end = abs + size;
+            if (abs < tableEnd || end > file.Length)
+                throw new InvalidDataException("A block is outside the resource data area.");
             if (abs < dataEnd && end > dataAbs)
                 throw new InvalidDataException("A block overlaps the DATA block.");
         }
