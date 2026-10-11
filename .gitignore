@@ -1,5 +1,7 @@
 bin/
 obj/
+build/
+CMakeUserPresets.json
 input/
 *.user
 *.new

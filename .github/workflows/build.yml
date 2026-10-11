@@ -28,3 +28,21 @@ jobs:
         with:
           name: DeadlockModelUpdater-win-x64
           path: dist/DeadlockModelUpdater-win-x64.zip
+
+  cpp:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        shell: pwsh
+        run: |
+          foreach ($generator in @("Visual Studio 18 2026", "Visual Studio 17 2022")) {
+            if (Test-Path build/release) { Remove-Item -Recurse -Force build/release }
+            cmake -G $generator -A x64 -S . -B build/release
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+          }
+          throw "No supported Visual Studio generator was found."
+      - name: Build
+        run: cmake --build build/release --config Release
+      - name: Test
+        run: .\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
