@@ -28,8 +28,7 @@ public sealed record UpdateReport(IReadOnlyList<ModelResult> Results, bool Wrote
 }
 
 /// <summary>
-/// Rewrites every hero model in a mod VPK onto the current game skeleton.
-/// Game bones stay in official order. Bones that exist only in the mod are appended.
+/// Analyzes hero rig resources and applies targeted repairs without replacing custom render rigs.
 /// </summary>
 public static class HeroModelUpdater
 {

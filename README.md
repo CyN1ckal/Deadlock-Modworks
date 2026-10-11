@@ -21,20 +21,24 @@ To undo a repair, close the game, move the repaired VPK out of the addons folder
 | --- | --- |
 | Repairable | A supported skeleton rewrite passed the structural checks. |
 | Updated | The complete repaired VPK was written, reopened, and validated. |
-| Current | No supported skeleton differences were found. This does **not** certify in-game compatibility. |
-| Needs review | A possible rename, changed hierarchy/rest pose/flags, missing rig dependency, or unsupported structure needs a mod author's judgment. |
+| Current | No actionable supported rig issue was found. Custom render bones, poses and cloth can differ from the stock model. This does **not** certify in-game compatibility. |
+| Needs review | An incompatible animation override, unresolved declared rig dependency, ambiguous legacy mapping, or unsupported structure needs a mod author's judgment. |
 | Failed | The input could not be read or validated, or the operation failed. |
 | Skipped | No supported hero models were found, or the model has no bones. The tool cannot assess that content. |
 
 ## MVP scope and limits
 
-The tool supports VPK version 2 and embedded KV3 skeletons in hero `.vmdl_c` resources. It can reorder compatible bones and add missing official bones when there are no ambiguous mod-only bones. It updates the model's mesh remapping table and preserves the mod's existing transforms and other archive contents.
+The tool supports VPK version 2, hero `.vmdl_c` resources and AG2 `.vnmskel_c` animation-skeleton overrides. A custom render skeleton is not a copy of the stock mesh skeleton: different proportions, helper bones, cloth topology, LOD flags and bone order can be intentional. Models declaring external AG2 skeleton bindings keep their render skeletons unchanged. These differences appear as non-blocking notes in the UI and JSON report.
 
-It checks archive bounds and per-file CRCs, skeleton array sizes, duplicate names, parent cycles, transform validity, mesh remapping indices, shared bone parents/rest poses/flags, and availability of referenced rig resources in the current game and selected VPK. Models with embedded physics or animation blocks, unknown skeleton metadata, or missing remap tables are blocked when a rewrite would be required.
+A bundled stock-named `.vnmskel_c` can override the installed game and break animation when its binding order or low-LOD sampling layout is outdated. The updater checks that layout separately and migrates compatible overrides onto the current game binding order. It preserves existing parent-space reference poses and authored masks, adds new stock bones, recomputes world-space poses, and updates the low-LOD sampling count. A changed parent hierarchy, custom/removed animation bone, or unsupported secondary skeleton blocks that migration rather than silently replacing custom content. Model geometry and other archive resources remain unchanged.
 
-The updater does not infer bone renames, migrate resource paths, rewrite animation/physics/cloth systems, or recompile source assets. It does not inspect the other installed addons when resolving dependencies. A mod that depends on another addon may therefore need review.
+For embedded/legacy rigs without external AG2 bindings, the existing supported skeleton normalization can reorder compatible bones and add unambiguous missing bones. It updates the mesh remapping table while preserving authored transforms and flags.
 
-Two-way comparison cannot always distinguish an intentional custom rig from an obsolete official rig. In particular, custom proportions can produce rest-pose review alerts even for working mods. Both game-only and mod-only bones trigger review rather than a guessed rename. The local samples used during development currently require review under these rules; they are not declared definitely broken.
+It checks archive bounds and per-file CRCs, skeleton array sizes, duplicate names, parent cycles, transform validity, mesh remapping indices, and declared rig dependencies in the current game and selected VPK. Rest-pose and LOD-usage differences alone are not blockers. Missing legacy AG1 graphs are notes for models declaring AG2 bindings; missing declared animation includes or active AG2 dependencies remain review alerts. Models with embedded physics or animation blocks, unknown skeleton metadata, or missing remap tables are blocked if a render-skeleton rewrite would be required.
+
+The updater does not infer arbitrary bone renames, migrate resource paths, rewrite animation clips/physics/cloth systems, or recompile source assets. It does not inspect other installed addons when resolving dependencies. A mod that depends on another addon may therefore need review.
+
+Two-way comparison cannot always distinguish intentional customization from an obsolete binding, so unresolved cases remain review alerts. The known-working local Necro, Hornet and McGinnis samples now produce `Current` and are left byte-identical. Unicorn's outdated bundled animation skeleton is repairable separately from its custom model. Geist reports its missing declared `geist_backup.vmdl` animation include; this is a specific dependency alert, not proof that the whole mod is unusable.
 
 Reopening a compiled model proves structural readability, not correct animation, skinning, attachments, or appearance in Deadlock. Automatic gameplay validation is outside this MVP. Future work should add versioned original-game baselines and explicit migration mappings to make more custom mods repairable.
 
@@ -65,6 +69,14 @@ dotnet run --project DeadlockModelUpdater.Tests -c Release --no-build -- --ui-re
 The dependency-free regression runner exercises skeleton classification, real synthetic compiled-model migrations, exact backups, unchanged assets, independent ValvePak checksum verification, corrupt input, blocked mixed packages, cancellation, and CLI reports. It returns a nonzero exit code on failure.
 
 The UI smoke check drives Analyze and Repair using synthetic fixtures, verifies the backup and button states, checks that late progress cannot replace the completion summary, and saves a rendered screenshot.
+
+To verify the five local samples and create a separate repaired Unicorn copy, choose a fresh output directory:
+
+```powershell
+dotnet run --project DeadlockModelUpdater.Tests -c Release --no-build -- --verify-samples "C:\Games\Deadlock\game\citadel" "input" "input/repaired-check"
+```
+
+This check verifies that the three known-working mods are not rewritten, only Unicorn's animation skeleton changes, its authored poses/masks and every other asset are preserved, and the original inputs remain untouched. It saves `input/deadlock-mod-report-fixed.json`.
 
 Optional local sample checks (the game and samples are not committed):
 

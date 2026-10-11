@@ -69,7 +69,7 @@ public static class CommandLine
 
     static void Usage(TextWriter output)
     {
-        output.WriteLine("Deadlock Model Updater — hero model skeleton repairs");
+        output.WriteLine("Deadlock Model Updater — hero models and animation skeleton repairs");
         output.WriteLine("  --analyze <citadel-folder> <mod.vpk> [--report <report.json>]");
         output.WriteLine("  --update  <citadel-folder> <mod.vpk> <new-output.vpk> [--report <report.json>]");
         output.WriteLine("  --repair  <citadel-folder> <mod.vpk> [--report <report.json>]");
