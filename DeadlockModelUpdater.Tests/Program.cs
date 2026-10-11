@@ -1,6 +1,12 @@
 using System.Numerics;
 using DeadlockModelUpdater;
 
+if (args.Length == 4 && args[0] == "--verify-samples")
+{
+    SampleRegression.Run(args[1], args[2], args[3]);
+    return;
+}
+
 if (args.Length == 4 && args[0] == "--ui-smoke")
 {
     UiSmoke.Run(args[1], args[2], args[3]);
@@ -13,10 +19,13 @@ if (args.Length == 2 && args[0] == "--ui-repair-smoke")
     var modPath = Path.Combine(smokeDirectory, "mod.vpk");
     try
     {
+        const string skeleton = "models/heroes/test/test.vnmskel";
         Fixtures.Archive(Path.Combine(gameDirectory, "pak01_dir.vpk"), new()
-            { [Fixtures.ModelPath] = Fixtures.Model(["root", "arm"], [-1, 0], [0, 1]) });
+            { [Fixtures.ModelPath] = Fixtures.Model(["root", "arm"], [-1, 0], [0, 1], animationSkeleton: skeleton),
+              [skeleton + "_c"] = Fixtures.AnimationSkeleton(["root", "arm", "attachWorld"], [-1, 0, 0], 2) });
         Fixtures.Archive(modPath, new()
-            { [Fixtures.ModelPath] = Fixtures.Model(["arm", "root"], [1, -1], [0, 1]) });
+            { [Fixtures.ModelPath] = Fixtures.Model(["arm", "root", "custom_helper"], [1, -1, 1], [0, 1, 2], animationSkeleton: skeleton, customPose: 5),
+              [skeleton + "_c"] = Fixtures.AnimationSkeleton(["arm", "root"], [1, -1], 2, customPose: 7) });
         UiSmoke.Run(gameDirectory, modPath, args[1], expectRepair: true);
     }
     finally { Directory.Delete(smokeDirectory, recursive: true); }
@@ -48,9 +57,13 @@ Test("Additions without ambiguous old bones are supported", () => Assert(!Skelet
 Test("Custom helper is preserved", () => Assert(!SkeletonCompatibility.Assess([root, arm], [root]).NeedsReview));
 Test("Potential rename needs review", () => Assert(SkeletonCompatibility.Assess([root, arm], [root, Bone("new_arm", "root")]).NeedsReview));
 Test("Parent change needs review even when names match", () => Assert(SkeletonCompatibility.Assess([root, arm], [root, arm with { Parent = null }]).NeedsReview));
-Test("Rest-pose change needs review", () => Assert(SkeletonCompatibility.Assess([root, arm], [root, arm with { Position = Vector3.UnitX }]).NeedsReview));
+Test("Custom rest poses are non-blocking notes", () =>
+{
+    var assessment = SkeletonCompatibility.Assess([root, arm], [root, arm with { Position = Vector3.UnitX }]);
+    Assert(!assessment.NeedsReview && assessment.Warnings.Count > 0);
+});
 Test("Equivalent quaternion signs match", () => Assert(!SkeletonCompatibility.Assess([root], [root with { Rotation = new Quaternion(0, 0, 0, -1) }]).NeedsReview));
-Test("Scale change needs review", () => Assert(SkeletonCompatibility.Assess([root], [root with { Scale = 2 }]).NeedsReview));
+Test("Custom scale is a non-blocking note", () => Assert(!SkeletonCompatibility.Assess([root], [root with { Scale = 2 }]).NeedsReview));
 Test("Duplicate bones fail", () => Invalid(() => SkeletonCompatibility.Assess([root, root], [root])));
 Test("Missing parent fails", () => Invalid(() => SkeletonCompatibility.Assess([arm], [root])));
 Test("Parent cycle fails", () => Invalid(() => SkeletonCompatibility.Assess([root with { Parent = "arm" }, arm], [root])));
@@ -236,6 +249,68 @@ try
         var broken = gameModel.ToArray();
         BitConverter.TryWriteBytes(broken.AsSpan(12), int.MaxValue);
         Invalid(() => ResourceData.ReplaceDataBlock(broken, [0x00, 0x33, 0x56, 0x4B]));
+    });
+    var ag2GameDirectory = Path.Combine(fixtureDirectory, "ag2-game");
+    var ag2ModPath = Path.Combine(fixtureDirectory, "ag2-mod.vpk");
+    const string skeletonName = "models/heroes/test/test.vnmskel";
+    const string skeletonPath = skeletonName + "_c";
+    var stockAnimation = Fixtures.AnimationSkeleton(["root", "arm", "attachWorld"], [-1, 0, 0], 2);
+    var customRenderModel = Fixtures.Model(["arm", "root", "custom_helper"], [1, -1, 1], [0, 1, 2],
+        animationSkeleton: skeletonName, customPose: 5);
+    Fixtures.Archive(Path.Combine(ag2GameDirectory, "pak01_dir.vpk"), new()
+        { [Fixtures.ModelPath] = Fixtures.Model(["root", "arm", "stock_cloth"], [-1, 0, 0], [0, 1, 2], animationSkeleton: skeletonName),
+          [skeletonPath] = stockAnimation });
+    Fixtures.Archive(ag2ModPath, new() { [Fixtures.ModelPath] = customRenderModel });
+    Test("Working AG2 custom render rigs stay unchanged", () =>
+    {
+        var before = File.ReadAllBytes(ag2ModPath);
+        var report = HeroModelUpdater.Update(ag2GameDirectory, ag2ModPath, null, true, true, null);
+        Assert(!report.HasBlockers && !report.WroteFile && report.Results.Single().Outcome == ModelOutcome.Current);
+        Assert(report.Results.Single().Warnings!.Count > 0 && File.ReadAllBytes(ag2ModPath).SequenceEqual(before));
+    });
+    Test("Missing active AG2 skeleton still blocks repair", () =>
+    {
+        var missingBinding = Path.Combine(fixtureDirectory, "missing-binding.vpk");
+        Fixtures.Archive(missingBinding, new() { [Fixtures.ModelPath] = Fixtures.Model(["root", "arm"], [-1, 0], [0, 1],
+            animationSkeleton: "models/heroes/test/missing.vnmskel") });
+        Assert(HeroModelUpdater.Analyze(ag2GameDirectory, missingBinding).HasBlockers);
+    });
+    var oldAnimation = Fixtures.AnimationSkeleton(["arm", "root"], [1, -1], 2, customPose: 7);
+    Fixtures.Archive(ag2ModPath, new() { [Fixtures.ModelPath] = customRenderModel, [skeletonPath] = oldAnimation });
+    Test("Outdated animation override is repairable without rewriting the model", () =>
+    {
+        var report = HeroModelUpdater.Analyze(ag2GameDirectory, ag2ModPath);
+        Assert(report.CanRepair && report.Results.Single(r => r.Model == skeletonPath).Outcome == ModelOutcome.Repairable);
+        Assert(report.Results.Single(r => r.Model == Fixtures.ModelPath).Outcome == ModelOutcome.Current);
+    });
+    Test("Animation repair preserves mesh bytes, custom poses and masks", () =>
+    {
+        var report = HeroModelUpdater.Update(ag2GameDirectory, ag2ModPath, null, true, true, null);
+        Assert(report.WroteFile);
+        var archive = VpkArchive.Open(ag2ModPath);
+        Assert(archive.Read(archive.Entries.Single(e => e.FullPath == Fixtures.ModelPath)).SequenceEqual(customRenderModel));
+        using var skeleton = new ValveResourceFormat.Resource { FileName = skeletonPath };
+        skeleton.Read(new MemoryStream(archive.Read(archive.Entries.Single(e => e.FullPath == skeletonPath))));
+        ValveKeyValue.KVObject data = ((ValveResourceFormat.ResourceTypes.BinaryKV3)skeleton.DataBlock!).Data;
+        Assert(data["m_boneIDs"][0].ToString() == "root" && data["m_boneIDs"].Count == 3);
+        Assert(data["m_parentSpaceReferencePose"][0][0].ToDouble() == 7 && data["m_parentSpaceReferencePose"][1][0].ToDouble() == 7);
+        Assert(data["m_maskDefinitions"][0]["m_authoredValue"].ToDouble() == 0.75);
+        Assert(!HeroModelUpdater.Analyze(ag2GameDirectory, ag2ModPath).CanRepair);
+    });
+    Test("Invalid animation override indices block the whole VPK", () =>
+    {
+        var badAnimation = Path.Combine(fixtureDirectory, "bad-animation.vpk");
+        Fixtures.Archive(badAnimation, new() { [Fixtures.ModelPath] = customRenderModel,
+            [skeletonPath] = Fixtures.AnimationSkeleton(["root", "arm"], [-1, 8], 2) });
+        Assert(HeroModelUpdater.Analyze(ag2GameDirectory, badAnimation).HasFailures);
+    });
+    Test("Custom animation bone names are not silently replaced", () =>
+    {
+        var customAnimation = Path.Combine(fixtureDirectory, "custom-animation.vpk");
+        Fixtures.Archive(customAnimation, new() { [Fixtures.ModelPath] = customRenderModel,
+            [skeletonPath] = Fixtures.AnimationSkeleton(["root", "custom_helper"], [-1, 0], 2) });
+        var report = HeroModelUpdater.Analyze(ag2GameDirectory, customAnimation);
+        Assert(report.HasBlockers && report.Results.Single(r => r.Model == skeletonPath).Outcome == ModelOutcome.NeedsReview);
     });
 }
 finally { Directory.Delete(fixtureDirectory, recursive: true); }

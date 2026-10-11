@@ -46,7 +46,10 @@ public static class CommandLine
                 report = new UpdateReport([new ModelResult(positional[2], ModelOutcome.Failed, ex.Message)], false, null, null);
             }
             foreach (var result in report.Results)
+            {
                 output.WriteLine($"{result.Outcome}: {result.Model}: {result.Detail}");
+                foreach (var warning in result.Warnings ?? []) output.WriteLine("  Note: " + warning);
+            }
             output.WriteLine(report.WroteFile ? $"Wrote {report.OutputPath}." : "No VPK was written.");
             if (report.BackupPath != null) output.WriteLine("Original backup: " + report.BackupPath);
             if (reportPath != null)

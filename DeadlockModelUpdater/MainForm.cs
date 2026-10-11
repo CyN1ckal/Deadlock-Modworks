@@ -33,7 +33,7 @@ sealed class MainForm : Form
         Font = new Font("Segoe UI", 9f);
         AllowDrop = true;
         _results.Columns.Add("VPK", 140);
-        _results.Columns.Add("Model", 310);
+        _results.Columns.Add("Resource", 310);
         _results.Columns.Add("Result", 110);
         _results.Columns.Add("Detail", 460);
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12) };
@@ -201,7 +201,11 @@ sealed class MainForm : Form
                 ++_progressGeneration;
                 _reports.RemoveAll(r => r.ModPath.Equals(mod, StringComparison.OrdinalIgnoreCase));
                 _reports.Add(new ArchiveReport(mod, report));
-                foreach (var result in report.Results) Log($"{result.Outcome}: {result.Model}: {result.Detail}");
+                foreach (var result in report.Results)
+                {
+                    Log($"{result.Outcome}: {result.Model}: {result.Detail}");
+                    foreach (var warning in result.Warnings ?? []) Log("Note: " + warning);
+                }
                 if (report.BackupPath != null) Log("Original backup: " + report.BackupPath);
                 RenderReports();
             }
@@ -235,10 +239,11 @@ sealed class MainForm : Form
         foreach (var archive in _reports)
         foreach (var result in archive.Report.Results)
         {
-            var item = new ListViewItem(Path.GetFileName(archive.ModPath)) { ToolTipText = result.Detail };
+            var detail = result.Detail + (result.Warnings is { Count: > 0 } ? " Notes: " + string.Join(" ", result.Warnings) : "");
+            var item = new ListViewItem(Path.GetFileName(archive.ModPath)) { ToolTipText = detail };
             item.SubItems.Add(result.Model);
             item.SubItems.Add(result.Outcome == ModelOutcome.NeedsReview ? "Needs review" : result.Outcome.ToString());
-            item.SubItems.Add(result.Detail);
+            item.SubItems.Add(detail);
             item.ForeColor = result.Outcome switch
             {
                 ModelOutcome.Updated or ModelOutcome.Repairable => Color.DarkGreen,

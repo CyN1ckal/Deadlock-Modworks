@@ -4,12 +4,13 @@ namespace DeadlockModelUpdater;
 
 public sealed record BoneShape(string Name, string? Parent, Vector3 Position, Quaternion Rotation, float Scale);
 
-public sealed record SkeletonAssessment(bool NeedsReview, string Detail);
+public sealed record SkeletonAssessment(bool NeedsReview, string Detail, IReadOnlyList<string> Warnings);
 
 /// <summary>Conservative two-way comparison. It never guesses bone renames or author intent.</summary>
 public static class SkeletonCompatibility
 {
-    public static SkeletonAssessment Assess(IReadOnlyList<BoneShape> mod, IReadOnlyList<BoneShape> game)
+    public static SkeletonAssessment Assess(IReadOnlyList<BoneShape> mod, IReadOnlyList<BoneShape> game,
+        bool usesExternalAnimationSkeleton = false)
     {
         Validate(mod, "Mod");
         Validate(game, "Game");
@@ -21,18 +22,28 @@ public static class SkeletonCompatibility
         var parents = shared.Where(b => b.Parent != old[b.Name].Parent).Select(b => b.Name).ToArray();
         var poses = shared.Where(b => !SamePose(b, old[b.Name])).Select(b => b.Name).ToArray();
         var reasons = new List<string>();
+        var warnings = new List<string>();
         if (shared.Length == 0)
             reasons.Add("No shared bones; a different rig or renamed skeleton needs author review.");
         if (parents.Length > 0)
-            reasons.Add($"Parent changes ({parents.Length}): {Examples(parents)}.");
+        {
+            var note = $"Authored hierarchy differs ({parents.Length}): {Examples(parents)}. Mod parents are preserved.";
+            if (usesExternalAnimationSkeleton) warnings.Add(note);
+            else reasons.Add(note);
+        }
         if (poses.Length > 0)
-            reasons.Add($"Rest-pose changes ({poses.Length}): {Examples(poses)}. These may be intentional customizations or game changes.");
+            warnings.Add($"Custom rest poses ({poses.Length}): {Examples(poses)}. Mod transforms are preserved; this is not evidence of a broken mod.");
         if (added.Length > 0 && extra.Length > 0)
-            reasons.Add("Both game-only and mod-only bones exist; without an old game baseline, additions cannot be distinguished reliably from renames or removals.");
+        {
+            if (usesExternalAnimationSkeleton)
+                warnings.Add("Stock-only bones and custom helpers differ. The render skeleton does not need to copy the stock mesh's bone list.");
+            else
+                reasons.Add("An embedded/legacy skeleton has both missing and extra bones; a rename mapping cannot be inferred safely.");
+        }
         var summary = $"Game-only bones: {added.Length}; mod-only bones: {extra.Length}.";
         if (added.Length > 0) summary += $" Game-only examples: {Examples(added)}.";
         if (extra.Length > 0) summary += $" Mod-only examples: {Examples(extra)}.";
-        return new SkeletonAssessment(reasons.Count > 0, string.Join(" ", reasons.Append(summary)));
+        return new SkeletonAssessment(reasons.Count > 0, string.Join(" ", reasons.Append(summary)), warnings);
     }
 
     static string Examples(IEnumerable<string> names) => string.Join(", ", names.Take(6));

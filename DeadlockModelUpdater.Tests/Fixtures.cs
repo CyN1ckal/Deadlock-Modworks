@@ -20,7 +20,8 @@ static class Fixtures
         finally { File.Delete(seed); }
     }
 
-    public static byte[] Model(string[] names, int[] parents, int[]? remap = null, string? extraBlock = null)
+    public static byte[] Model(string[] names, int[] parents, int[]? remap = null, string? extraBlock = null,
+        string? animationSkeleton = null, float customPose = 0)
     {
         KVObject Vector(params float[] components) => KVObject.Array(components.Select(x => new KVObject(x)));
         var skeleton = new KVObject();
@@ -28,12 +29,13 @@ static class Fixtures
         skeleton.Add("m_nParent", KVObject.Array(parents.Select(x => new KVObject(x))));
         skeleton.Add("m_boneSphere", KVObject.Array(names.Select(_ => new KVObject(1f))));
         skeleton.Add("m_nFlag", KVObject.Array(names.Select(_ => new KVObject(0))));
-        skeleton.Add("m_bonePosParent", KVObject.Array(names.Select(_ => Vector(0, 0, 0))));
+        skeleton.Add("m_bonePosParent", KVObject.Array(names.Select(_ => Vector(customPose, 0, 0))));
         skeleton.Add("m_boneRotParent", KVObject.Array(names.Select(_ => Vector(0, 0, 0, 1))));
         skeleton.Add("m_boneScaleParent", KVObject.Array(names.Select(_ => new KVObject(1f))));
         var root = new KVObject();
         root.Add("m_name", new KVObject("models/heroes/test/test.vmdl"));
         root.Add("m_modelSkeleton", skeleton);
+        if (animationSkeleton != null) root.Add("m_vecNmSkeletonRefs", KVObject.Array([new KVObject(animationSkeleton)]));
         if (remap != null) root.Add("m_remappingTable", KVObject.Array(remap.Select(x => new KVObject(x))));
         using var resource = new ValveResourceFormat.Resource { FileName = ModelPath };
         var kv = new BinaryKV3(root, new KV3ID("generic", Guid.Parse("7412167c-06e9-4698-aff2-e63eb59037e7"))) { Resource = resource };
@@ -59,6 +61,40 @@ static class Fixtures
             BitConverter.TryWriteBytes(file.AsSpan(36), 4);
         }
         return file;
+    }
+
+    public static byte[] AnimationSkeleton(string[] names, int[] parents, int lowLod, float customPose = 0)
+    {
+        KVObject Pose() => KVObject.Array(new[] { customPose, 0f, 0f, 1f, 0f, 0f, 0f, 1f }.Select(value => new KVObject(value)));
+        var root = new KVObject();
+        root.Add("m_ID", new KVObject("models/heroes/test/test.vnmskel"));
+        root.Add("m_boneIDs", KVObject.Array(names.Select(name => new KVObject(name))));
+        root.Add("m_parentIndices", KVObject.Array(parents.Select(parent => new KVObject(parent))));
+        root.Add("m_parentSpaceReferencePose", KVObject.Array(names.Select(_ => Pose())));
+        root.Add("m_modelSpaceReferencePose", KVObject.Array(names.Select(_ => Pose())));
+        root.Add("m_numBonesToSampleAtLowLOD", new KVObject(lowLod));
+        var mask = new KVObject();
+        mask.Add("m_ID", new KVObject("custom-mask"));
+        mask.Add("m_authoredValue", new KVObject(0.75f));
+        root.Add("m_maskDefinitions", KVObject.Array([mask]));
+        root.Add("m_secondarySkeletons", KVObject.Array());
+        root.Add("m_bIsPropSkeleton", new KVObject(false));
+        using var resource = new ValveResourceFormat.Resource();
+        var kv = new BinaryKV3(root, new KV3ID("generic", Guid.Parse("7412167c-06e9-4698-aff2-e63eb59037e7"))) { Resource = resource };
+        using var serialized = new MemoryStream();
+        kv.Serialize(serialized);
+        var data = serialized.ToArray();
+        var bytes = new byte[28 + data.Length];
+        BitConverter.TryWriteBytes(bytes.AsSpan(), (uint)bytes.Length);
+        BitConverter.TryWriteBytes(bytes.AsSpan(4), (ushort)12);
+        BitConverter.TryWriteBytes(bytes.AsSpan(6), (ushort)1);
+        BitConverter.TryWriteBytes(bytes.AsSpan(8), 8u);
+        BitConverter.TryWriteBytes(bytes.AsSpan(12), 1);
+        Encoding.ASCII.GetBytes("DATA").CopyTo(bytes, 16);
+        BitConverter.TryWriteBytes(bytes.AsSpan(20), 8u);
+        BitConverter.TryWriteBytes(bytes.AsSpan(24), data.Length);
+        data.CopyTo(bytes, 28);
+        return bytes;
     }
 
     public static void PreloadArchive(string path)

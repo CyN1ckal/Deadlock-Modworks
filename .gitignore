@@ -7,3 +7,6 @@ input/
 *.bak-*
 dist/
 artifacts/
+.vs/
+Backup/
+UpgradeLog.htm

@@ -31,10 +31,10 @@ public static class ReportExporter
     public static string Serialize(string gameDirectory, IReadOnlyList<ArchiveReport> archives) =>
         JsonSerializer.Serialize(new
         {
-            SchemaVersion = 1,
+            SchemaVersion = 2,
             GeneratedUtc = DateTimeOffset.UtcNow,
             GameDirectory = gameDirectory,
-            Scope = "Hero model skeleton compatibility. In-game appearance and animation are not verified.",
+            Scope = "Hero models and AG2 animation-skeleton overrides. Non-blocking custom-rig differences are notes; in-game playback is not verified.",
             Archives = archives,
         }, Options);
 }

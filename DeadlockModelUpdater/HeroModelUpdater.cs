@@ -16,7 +16,7 @@ public enum ModelOutcome
     Failed,
 }
 
-public sealed record ModelResult(string Model, ModelOutcome Outcome, string Detail);
+public sealed record ModelResult(string Model, ModelOutcome Outcome, string Detail, IReadOnlyList<string>? Warnings = null);
 
 public sealed record UpdateProgress(int Completed, int Total, string Message);
 
@@ -87,7 +87,7 @@ public static class HeroModelUpdater
         var gameHeroes = new List<string>();
         foreach (var entry in game.Entries)
         {
-            if (HeroPaths.IsHeroModel(entry.FullPath))
+            if (HeroPaths.IsHeroResource(entry.FullPath))
                 gameHeroes.Add(entry.FullPath);
         }
 
@@ -100,10 +100,10 @@ public static class HeroModelUpdater
         using var modLease = mod.LockSources();
         progress?.Report(new UpdateProgress(0, 0, "Checking mod archive integrity..."));
         mod.Validate(cancellationToken);
-        var modHeroes = mod.Entries.Where(entry => HeroPaths.IsHeroModel(entry.FullPath)).ToList();
+        var modHeroes = mod.Entries.Where(entry => HeroPaths.IsHeroResource(entry.FullPath)).ToList();
         var availableResources = game.Entries.Concat(mod.Entries).Select(e => e.FullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        progress?.Report(new UpdateProgress(0, modHeroes.Count, $"Game hero models: {gameHeroes.Count}. Mod hero models: {modHeroes.Count}."));
+        progress?.Report(new UpdateProgress(0, modHeroes.Count, $"Game hero rig resources: {gameHeroes.Count}. Mod hero rig resources: {modHeroes.Count}."));
 
         var plans = new List<Plan>(modHeroes.Count);
         var seenSource = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -131,18 +131,40 @@ public static class HeroModelUpdater
             var gameEntry = FindEntry(game, plan.Resolved);
             try
             {
-                edits[i] = ModelMigration.Migrate(mod.Read(plan.Entry), plan.Entry.FullPath, game.Read(gameEntry), plan.Resolved);
-                if (edits[i]!.Outcome is ModelOutcome.Updated or ModelOutcome.Current)
+                edits[i] = plan.Entry.FullPath.EndsWith(".vnmskel_c", StringComparison.OrdinalIgnoreCase)
+                    ? AnimationSkeletonMigration.Migrate(mod.Read(plan.Entry), plan.Entry.FullPath, game.Read(gameEntry), plan.Resolved)
+                    : ModelMigration.Migrate(mod.Read(plan.Entry), plan.Entry.FullPath, game.Read(gameEntry), plan.Resolved);
+                if (HeroPaths.IsHeroModel(plan.Entry.FullPath) && edits[i]!.Outcome is ModelOutcome.Updated or ModelOutcome.Current)
                 {
                     using var resource = ModelFile.Load(mod.Read(plan.Entry), plan.Entry.FullPath);
-                    var missing = resource.Resource.ExternalReferences?.ResourceRefInfoList
-                        .Select(reference => reference.Name)
+                    KVObject data = resource.Model.Data;
+                    var declared = new[] { "m_vecNmSkeletonRefs", "m_refAnimIncludeModels", "m_refAnimGroups", "m_refPhysicsData" }
+                        .Where(data.ContainsKey).SelectMany(key => data[key].Values).Select(value => value.ToString());
+                    var graphs = data.ContainsKey("m_animGraph2Refs")
+                        ? data["m_animGraph2Refs"].Values.Where(value => value.ContainsKey("m_hGraph")).Select(value => value["m_hGraph"].ToString()) : [];
+                    var usesAg2 = data.ContainsKey("m_vecNmSkeletonRefs") && data["m_vecNmSkeletonRefs"].Count > 0;
+                    var legacyGraphs = new List<string>();
+                    var missing = (resource.Resource.ExternalReferences?.ResourceRefInfoList.Select(reference => reference.Name) ?? [])
+                        .Concat(declared).Concat(graphs).Where(path => !string.IsNullOrWhiteSpace(path))
                         .Where(IsRigReference)
                         .Where(path => !availableResources.Contains(VpkArchive.Normalize(path.EndsWith("_c", StringComparison.Ordinal) ? path : path + "_c")))
-                        .Distinct().ToArray() ?? [];
+                        .Where(path =>
+                        {
+                            if (usesAg2 && (path.EndsWith(".vanmgrph", StringComparison.OrdinalIgnoreCase)
+                                || path.EndsWith(".vanmgrph_c", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                legacyGraphs.Add(path);
+                                return false;
+                            }
+                            return true;
+                        })
+                        .Distinct().ToArray();
+                    if (legacyGraphs.Count > 0)
+                        edits[i] = edits[i]! with { Warnings = (edits[i]!.Warnings ?? []).Append(
+                            "Legacy AG1 graph references are absent, but this model declares AG2 graph/skeleton bindings: " + string.Join(", ", legacyGraphs.Distinct())).ToArray() };
                     if (missing.Length > 0)
                         edits[i] = new MigrationEdit(null, ModelOutcome.NeedsReview,
-                            $"Rig dependencies are missing from the game and this mod: {string.Join(", ", missing.Take(6))}. The mod may depend on another addon or need author repair.");
+                            $"Rig dependencies are missing from the game and this mod: {string.Join(", ", missing.Take(6))}. The mod may depend on another addon or need author repair.", edits[i]!.Warnings);
                 }
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException)
@@ -184,7 +206,7 @@ public static class HeroModelUpdater
             else
             {
                 result = new ModelResult(plan.Entry.FullPath,
-                    edit.Outcome == ModelOutcome.Updated ? ModelOutcome.Repairable : edit.Outcome, edit.Detail);
+                    edit.Outcome == ModelOutcome.Updated ? ModelOutcome.Repairable : edit.Outcome, edit.Detail, edit.Warnings);
                 if (edit.Bytes != null)
                 {
                     var pathMoved = !plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase);
@@ -319,6 +341,9 @@ public static class HeroModelUpdater
 
 static class HeroPaths
 {
+    public static bool IsHeroResource(string path) => IsHeroModel(path) ||
+        (path.EndsWith(".vnmskel_c", StringComparison.OrdinalIgnoreCase) && IsHeroModel(path[..^10] + ".vmdl_c"));
+
     public static bool IsHeroModel(string path)
     {
         if (!path.EndsWith(".vmdl_c", StringComparison.OrdinalIgnoreCase))
@@ -431,14 +456,24 @@ static class ModelMigration
             return new MigrationEdit(null, ModelOutcome.NeedsReview,
                 $"Possible model move to {gamePath}. Path migration requires checking dependent resources; this MVP will not guess.");
 
-        var assessment = SkeletonCompatibility.Assess(ReadShapes(mod), ReadShapes(game));
+        KVObject modRoot = ReadData(mod).Data;
+        var usesExternalSkeleton = modRoot.ContainsKey("m_vecNmSkeletonRefs")
+            && modRoot["m_vecNmSkeletonRefs"].IsArray && modRoot["m_vecNmSkeletonRefs"].Count > 0;
+        var assessment = SkeletonCompatibility.Assess(ReadShapes(mod), ReadShapes(game), usesExternalSkeleton);
         if (assessment.NeedsReview)
-            return new MigrationEdit(null, ModelOutcome.NeedsReview, assessment.Detail);
+            return new MigrationEdit(null, ModelOutcome.NeedsReview, assessment.Detail, assessment.Warnings);
+        // AG2 models bind to a separate named animation skeleton. Their authored
+        // render-bone order, cloth topology, LOD flags and rest poses can differ.
+        // Copying the stock render rig would alter working custom models.
+        if (usesExternalSkeleton)
+            return new MigrationEdit(null, ModelOutcome.Current,
+                "External animation skeleton bindings are used. No render-skeleton rewrite is needed. " + assessment.Detail,
+                assessment.Warnings);
         var flagChanges = gameBones.Where(b => modIndex.TryGetValue(b.Name, out var i) && b.Flags != modBones[i].Flags)
             .Select(b => b.Name).ToArray();
+        var warnings = assessment.Warnings.ToList();
         if (flagChanges.Length > 0)
-            return new MigrationEdit(null, ModelOutcome.NeedsReview,
-                $"Bone usage or procedural flags differ ({flagChanges.Length}): {string.Join(", ", flagChanges.Take(6))}. These changes need author review.");
+            warnings.Add($"Authored bone usage/LOD flags differ ({flagChanges.Length}); mod flags are preserved.");
         var aligned = modBones.Length >= gameBones.Length;
         if (aligned)
         {
@@ -454,12 +489,11 @@ static class ModelMigration
 
         if (aligned && !pathMoved)
             return new MigrationEdit(null, ModelOutcome.Current,
-                "No supported skeleton differences found. In-game animation is not verified. " + assessment.Detail);
+                "No supported skeleton differences found. In-game animation is not verified. " + assessment.Detail, warnings);
 
         if (aligned)
             return MoveWithoutSkeletonChange(mod, game, modBytes, modNames, modParents, gamePath);
 
-        KVObject modRoot = ReadData(mod).Data;
         if (!modRoot.ContainsKey("m_remappingTable") || modRoot["m_remappingTable"].Count == 0)
             return new MigrationEdit(null, ModelOutcome.NeedsReview,
                 "Skeleton differs, but no mesh bone remap table is available. Direct mesh indices require author review.");
@@ -481,7 +515,7 @@ static class ModelMigration
                 $"Skeleton differs and the model has embedded {string.Join(", ", unsupported)} data. Its bone references need author review.");
 
         var edit = RewriteSkeleton(mod, game, modBytes, modNames, modParents, modIndex, gameNames, gameParents, gameIndex, gamePath, pathMoved);
-        return edit with { Detail = edit.Detail + " " + assessment.Detail + " Test animations and attachments in-game before keeping the repair." };
+        return edit with { Detail = edit.Detail + " " + assessment.Detail + " Test animations and attachments in-game before keeping the repair.", Warnings = warnings };
     }
 
     static BoneShape[] ReadShapes(ModelFile file)
@@ -834,7 +868,7 @@ static class ModelMigration
     static int IntOf(KVObject value) => checked((int)value.ToInt64());
 }
 
-sealed record MigrationEdit(byte[]? Bytes, ModelOutcome Outcome, string Detail);
+sealed record MigrationEdit(byte[]? Bytes, ModelOutcome Outcome, string Detail, IReadOnlyList<string>? Warnings = null);
 
 sealed class ModelFile : IDisposable
 {
