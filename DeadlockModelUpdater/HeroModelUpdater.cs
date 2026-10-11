@@ -1,0 +1,771 @@
+using System.Text;
+using ValveKeyValue;
+using ValveResourceFormat;
+using ValveResourceFormat.ResourceTypes;
+using ValveResourceFormat.ResourceTypes.ModelAnimation;
+
+namespace DeadlockModelUpdater;
+
+public enum ModelOutcome
+{
+    Updated,
+    Current,
+    Skipped,
+    Failed,
+}
+
+public sealed record ModelResult(string Model, ModelOutcome Outcome, string Detail);
+
+public sealed record UpdateProgress(int Completed, int Total, string Message);
+
+public sealed record UpdateReport(IReadOnlyList<ModelResult> Results, bool WroteFile, string? OutputPath, string? BackupPath)
+{
+    public bool HasFailures => Results.Any(result => result.Outcome == ModelOutcome.Failed);
+}
+
+/// <summary>
+/// Rewrites every hero model in a mod VPK onto the current game skeleton.
+/// Game bones stay in official order. Bones that exist only in the mod are appended.
+/// </summary>
+public static class HeroModelUpdater
+{
+    public static UpdateReport Update(
+        string gameDirectory,
+        string modVpkPath,
+        string? outputPath,
+        bool replaceSource,
+        bool makeBackup,
+        IProgress<UpdateProgress>? progress,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(gameDirectory))
+            throw new ArgumentException("Game folder is required.", nameof(gameDirectory));
+        if (string.IsNullOrWhiteSpace(modVpkPath))
+            throw new ArgumentException("Mod VPK is required.", nameof(modVpkPath));
+        if (!replaceSource && string.IsNullOrWhiteSpace(outputPath))
+            throw new ArgumentException("Output VPK is required.", nameof(outputPath));
+
+        var gamePak = Path.GetFullPath(Path.Combine(gameDirectory, "pak01_dir.vpk"));
+        var modFull = Path.GetFullPath(modVpkPath);
+        if (!File.Exists(gamePak))
+            throw new FileNotFoundException("Could not find pak01_dir.vpk in the game folder.", gamePak);
+        if (!File.Exists(modFull))
+            throw new FileNotFoundException("Could not find the mod VPK.", modFull);
+        if (string.Equals(modFull, gamePak, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("That file is the game archive. Choose a mod VPK from the addons folder.");
+
+        string? destination = null;
+        if (!replaceSource)
+        {
+            destination = Path.GetFullPath(outputPath!);
+            if (string.Equals(destination, gamePak, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Refusing to overwrite the game archive.");
+            if (string.Equals(destination, modFull, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The output VPK has to be a different file from the mod. The tool reads the mod while it writes.");
+        }
+
+        progress?.Report(new UpdateProgress(0, 0, "Reading the game archive..."));
+        cancellationToken.ThrowIfCancellationRequested();
+        var game = VpkArchive.Open(gamePak);
+        var gameHeroes = new List<string>();
+        foreach (var entry in game.Entries)
+        {
+            if (HeroPaths.IsHeroModel(entry.FullPath))
+                gameHeroes.Add(entry.FullPath);
+        }
+
+        var exact = new Dictionary<string, string>(gameHeroes.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var path in gameHeroes)
+            exact.TryAdd(path, path);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var mod = VpkArchive.Open(modFull);
+        var modHeroes = mod.Entries.Where(entry => HeroPaths.IsHeroModel(entry.FullPath)).ToList();
+        progress?.Report(new UpdateProgress(0, modHeroes.Count, $"Game hero models: {gameHeroes.Count}. Mod hero models: {modHeroes.Count}."));
+
+        var plans = new List<Plan>(modHeroes.Count);
+        var seenSource = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in modHeroes)
+        {
+            if (!seenSource.Add(entry.FullPath))
+            {
+                plans.Add(new Plan(entry, null, "Duplicate path in the mod VPK."));
+                continue;
+            }
+
+            var resolved = HeroPaths.Resolve(entry.FullPath, exact, gameHeroes, out var error);
+            plans.Add(new Plan(entry, resolved, resolved == null ? error : null));
+        }
+
+        var edits = new MigrationEdit?[plans.Count];
+        for (var i = 0; i < plans.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var plan = plans[i];
+            if (plan.Error != null || plan.Resolved == null)
+                continue;
+
+            progress?.Report(new UpdateProgress(i, plans.Count, $"Updating {plan.Entry.FullPath}..."));
+            var gameEntry = FindEntry(game, plan.Resolved);
+            edits[i] = ModelMigration.Migrate(mod.Read(plan.Entry), plan.Entry.FullPath, game.Read(gameEntry), plan.Resolved);
+        }
+
+        AcceptEdits(plans, edits, mod.Entries);
+
+        var results = new List<ModelResult>(plans.Count);
+        var changes = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
+        var writtenTo = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < plans.Count; i++)
+        {
+            var plan = plans[i];
+            var edit = edits[i];
+            if (edit?.Bytes != null && plan.Error == null && plan.Resolved != null)
+            {
+                var pathMoved = !plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase);
+                var destinationPath = pathMoved ? plan.Resolved : plan.Entry.FullPath;
+                writtenTo.Add(destinationPath);
+            }
+        }
+
+        for (var i = 0; i < plans.Count; i++)
+        {
+            var plan = plans[i];
+            var edit = edits[i];
+            ModelResult result;
+            if (plan.Error != null || plan.Resolved == null)
+            {
+                result = new ModelResult(plan.Entry.FullPath, ModelOutcome.Failed, plan.Error ?? "No matching game model.");
+            }
+            else if (edit == null)
+            {
+                result = new ModelResult(plan.Entry.FullPath, ModelOutcome.Failed, "The model was not processed.");
+            }
+            else
+            {
+                result = new ModelResult(plan.Entry.FullPath, edit.Outcome, edit.Detail);
+                if (edit.Bytes != null)
+                {
+                    var pathMoved = !plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase);
+                    var destinationPath = pathMoved ? plan.Resolved : plan.Entry.FullPath;
+                    if (pathMoved && !writtenTo.Contains(plan.Entry.FullPath))
+                        changes[plan.Entry.FullPath] = null;
+                    changes[destinationPath] = edit.Bytes;
+                }
+            }
+
+            results.Add(result);
+            progress?.Report(new UpdateProgress(i + 1, plans.Count, $"{result.Model}: {OutcomeText(result.Outcome)}. {result.Detail}"));
+        }
+
+        if (changes.Count == 0)
+        {
+            var idle = modHeroes.Count == 0
+                ? "No hero models in this VPK. Nothing was written."
+                : "No hero models needed an update. The VPK was not modified.";
+            progress?.Report(new UpdateProgress(plans.Count, plans.Count, idle));
+            return new UpdateReport(results, false, null, null);
+        }
+
+        if (replaceSource)
+        {
+            string? backupPath = null;
+            if (makeBackup)
+            {
+                backupPath = modFull + ".bak-before-bone-update";
+                if (File.Exists(backupPath))
+                    backupPath = modFull + ".bak-before-bone-update-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                progress?.Report(new UpdateProgress(plans.Count, plans.Count, "Copying a backup..."));
+                File.Copy(modFull, backupPath);
+            }
+
+            var temp = modFull + ".new";
+            progress?.Report(new UpdateProgress(plans.Count, plans.Count, "Writing the updated VPK..."));
+            try
+            {
+                mod.Write(temp, changes);
+                File.Replace(temp, modFull, destinationBackupFileName: null);
+            }
+            catch
+            {
+                if (File.Exists(temp))
+                {
+                    try
+                    {
+                        File.Delete(temp);
+                    }
+                    catch (IOException)
+                    {
+                    }
+                }
+
+                throw;
+            }
+
+            var replaced = backupPath == null
+                ? "Replaced the mod VPK."
+                : $"Replaced the mod VPK. Backup: {backupPath}";
+            progress?.Report(new UpdateProgress(plans.Count, plans.Count, replaced));
+            return new UpdateReport(results, true, modFull, backupPath);
+        }
+
+        var outputDirectory = Path.GetDirectoryName(destination);
+        if (!string.IsNullOrEmpty(outputDirectory))
+            Directory.CreateDirectory(outputDirectory);
+        progress?.Report(new UpdateProgress(plans.Count, plans.Count, $"Writing {destination}..."));
+        mod.Write(destination!, changes);
+        progress?.Report(new UpdateProgress(plans.Count, plans.Count, $"Wrote {destination}."));
+        return new UpdateReport(results, true, destination, null);
+    }
+
+    static void AcceptEdits(List<Plan> plans, MigrationEdit?[] edits, List<VpkEntry> entries)
+    {
+        var owners = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var pass = 0; pass < 2; pass++)
+        {
+            for (var i = 0; i < plans.Count; i++)
+            {
+                var plan = plans[i];
+                if (edits[i]?.Bytes == null || plan.Resolved == null || plan.Error != null)
+                    continue;
+                var moved = !plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase);
+                if ((pass == 0 && moved) || (pass == 1 && !moved))
+                    continue;
+                if (!owners.TryAdd(plan.Resolved, i))
+                    plan.Error = $"Another model in this VPK already uses {plan.Resolved}.";
+            }
+        }
+
+        var movingAway = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < plans.Count; i++)
+        {
+            var plan = plans[i];
+            if (edits[i]?.Bytes == null || plan.Resolved == null || plan.Error != null)
+                continue;
+            if (!plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase))
+                movingAway.Add(plan.Entry.FullPath);
+        }
+
+        for (var i = 0; i < plans.Count; i++)
+        {
+            var plan = plans[i];
+            if (edits[i]?.Bytes == null || plan.Resolved == null || plan.Error != null)
+                continue;
+            if (plan.Resolved.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase))
+                continue;
+            foreach (var entry in entries)
+            {
+                if (!entry.FullPath.Equals(plan.Resolved, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (entry.FullPath.Equals(plan.Entry.FullPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (movingAway.Contains(entry.FullPath))
+                    continue;
+                plan.Error = $"{plan.Resolved} is already used by {entry.FullPath}.";
+                movingAway.Remove(plan.Entry.FullPath);
+                break;
+            }
+        }
+    }
+
+    static VpkEntry FindEntry(VpkArchive archive, string path)
+    {
+        foreach (var entry in archive.Entries)
+        {
+            if (entry.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase))
+                return entry;
+        }
+
+        throw new InvalidDataException($"Game archive is missing {path}.");
+    }
+
+    static string OutcomeText(ModelOutcome outcome) => outcome switch
+    {
+        ModelOutcome.Updated => "Updated",
+        ModelOutcome.Current => "Current",
+        ModelOutcome.Skipped => "Skipped",
+        _ => "Failed",
+    };
+
+    sealed class Plan(VpkEntry entry, string? resolved, string? error)
+    {
+        public VpkEntry Entry { get; } = entry;
+        public string? Resolved { get; } = resolved;
+        public string? Error { get; set; } = error;
+    }
+}
+
+static class HeroPaths
+{
+    public static bool IsHeroModel(string path)
+    {
+        if (!path.EndsWith(".vmdl_c", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        foreach (var part in path.Split('/'))
+        {
+            if (part.Equals("heroes", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (part.StartsWith("heroes_", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static string? Resolve(string modPath, Dictionary<string, string> exact, IReadOnlyList<string> gamePaths, out string error)
+    {
+        error = "";
+        var norm = VpkArchive.Normalize(modPath);
+        if (exact.TryGetValue(norm, out var canonical))
+            return canonical;
+
+        var parts = norm.Split('/');
+        for (var segments = parts.Length - 1; segments >= 1; segments--)
+        {
+            var suffix = string.Join('/', parts[^segments..]);
+            string? match = null;
+            var count = 0;
+            foreach (var path in gamePaths)
+            {
+                if (path.Equals(suffix, StringComparison.OrdinalIgnoreCase)
+                    || path.EndsWith("/" + suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                    match = path;
+                    if (count > 1)
+                        break;
+                }
+            }
+
+            if (count == 1)
+                return match;
+            if (count > 1)
+            {
+                error = $"Ambiguous: {count} game models end with {suffix}.";
+                return null;
+            }
+        }
+
+        error = "No matching model in the current game.";
+        return null;
+    }
+}
+
+static class ModelMigration
+{
+    public static MigrationEdit Migrate(byte[] modBytes, string modPath, byte[] gameBytes, string gamePath)
+    {
+        try
+        {
+            return MigrateCore(modBytes, modPath, gameBytes, gamePath);
+        }
+        catch (Exception ex)
+        {
+            var message = ex is InvalidDataException && !string.IsNullOrWhiteSpace(ex.Message)
+                ? ex.Message
+                : ex.ToString();
+            return new MigrationEdit(null, ModelOutcome.Failed, message);
+        }
+    }
+
+    static MigrationEdit MigrateCore(byte[] modBytes, string modPath, byte[] gameBytes, string gamePath)
+    {
+        using var mod = ModelFile.Load(modBytes, modPath);
+        using var game = ModelFile.Load(gameBytes, gamePath);
+        var modBones = mod.Model.Skeleton.Bones;
+        var gameBones = game.Model.Skeleton.Bones;
+        if (modBones.Length == 0)
+            return new MigrationEdit(null, ModelOutcome.Skipped, "No bones.");
+        if (gameBones.Length == 0)
+            throw new InvalidDataException("The game model has no bones.");
+
+        var modNames = new string[modBones.Length];
+        var modParents = new string?[modBones.Length];
+        var modIndex = new Dictionary<string, int>(modBones.Length, StringComparer.Ordinal);
+        for (var i = 0; i < modBones.Length; i++)
+        {
+            modNames[i] = modBones[i].Name;
+            modParents[i] = modBones[i].Parent?.Name;
+            if (!modIndex.TryAdd(modNames[i], i))
+                throw new InvalidDataException($"Duplicate bone name {modNames[i]}.");
+        }
+
+        var gameNames = new string[gameBones.Length];
+        var gameParents = new string?[gameBones.Length];
+        var gameIndex = new Dictionary<string, int>(gameBones.Length, StringComparer.Ordinal);
+        for (var i = 0; i < gameBones.Length; i++)
+        {
+            gameNames[i] = gameBones[i].Name;
+            gameParents[i] = gameBones[i].Parent?.Name;
+            if (!gameIndex.TryAdd(gameNames[i], i))
+                throw new InvalidDataException($"The game model has a duplicate bone name {gameNames[i]}.");
+        }
+
+        var pathMoved = !modPath.Equals(gamePath, StringComparison.OrdinalIgnoreCase);
+        var aligned = modBones.Length >= gameBones.Length;
+        if (aligned)
+        {
+            for (var i = 0; i < gameBones.Length; i++)
+            {
+                if (!string.Equals(modNames[i], gameNames[i], StringComparison.Ordinal))
+                {
+                    aligned = false;
+                    break;
+                }
+            }
+        }
+
+        if (aligned && !pathMoved)
+            return new MigrationEdit(null, ModelOutcome.Current, "Already matches the current game skeleton.");
+
+        if (aligned)
+            return MoveWithoutSkeletonChange(mod, game, modBytes, modNames, modParents, gamePath);
+
+        return RewriteSkeleton(mod, game, modBytes, modNames, modParents, modIndex, gameNames, gameParents, gameIndex, gamePath, pathMoved);
+    }
+
+    static MigrationEdit MoveWithoutSkeletonChange(
+        ModelFile mod,
+        ModelFile game,
+        byte[] modBytes,
+        string[] modNames,
+        string?[] modParents,
+        string gamePath)
+    {
+        var modKv = ReadData(mod);
+        var gameKv = ReadData(game);
+        var gameName = RequiredName(gameKv);
+        var modName = RequiredName(modKv);
+        if (string.Equals(modName, gameName, StringComparison.Ordinal))
+        {
+            return new MigrationEdit(
+                modBytes,
+                ModelOutcome.Updated,
+                $"Already matches the current game skeleton. The file moves to {gamePath}.");
+        }
+
+        SetName(modKv, gameName);
+        var patched = Splice(modBytes, modKv);
+        VerifySameSkeleton(patched, mod.Resource.FileName ?? "model.vmdl_c", modNames, modParents);
+        return new MigrationEdit(patched, ModelOutcome.Updated, $"Skeleton already matched. Model name updated. Saved as {gamePath}.");
+    }
+
+    static MigrationEdit RewriteSkeleton(
+        ModelFile mod,
+        ModelFile game,
+        byte[] modBytes,
+        string[] modNames,
+        string?[] modParents,
+        Dictionary<string, int> modIndex,
+        string[] gameNames,
+        string?[] gameParents,
+        Dictionary<string, int> gameIndex,
+        string gamePath,
+        bool pathMoved)
+    {
+        var modKv = ReadData(mod);
+        var gameKv = ReadData(game);
+        KVObject modRoot = modKv.Data;
+        KVObject gameRoot = gameKv.Data;
+        if (!modRoot.ContainsKey("m_modelSkeleton") || !gameRoot.ContainsKey("m_modelSkeleton"))
+            throw new InvalidDataException("Model is missing m_modelSkeleton.");
+
+        var modSkel = modRoot["m_modelSkeleton"];
+        var gameSkel = gameRoot["m_modelSkeleton"];
+        var modBoneNames = RequireArray(modSkel, "m_boneName", modNames.Length, "Mod");
+        var oldParents = RequireArray(modSkel, "m_nParent", modNames.Length, "Mod");
+        var oldSphere = RequireArray(modSkel, "m_boneSphere", modNames.Length, "Mod");
+        var oldFlag = RequireArray(modSkel, "m_nFlag", modNames.Length, "Mod");
+        var oldPos = RequireArray(modSkel, "m_bonePosParent", modNames.Length, "Mod");
+        var oldRot = RequireArray(modSkel, "m_boneRotParent", modNames.Length, "Mod");
+        var oldScale = RequireArray(modSkel, "m_boneScaleParent", modNames.Length, "Mod");
+        var gameSphere = RequireArray(gameSkel, "m_boneSphere", gameNames.Length, "Game");
+        var gameFlag = RequireArray(gameSkel, "m_nFlag", gameNames.Length, "Game");
+        var gamePos = RequireArray(gameSkel, "m_bonePosParent", gameNames.Length, "Game");
+        var gameRot = RequireArray(gameSkel, "m_boneRotParent", gameNames.Length, "Game");
+        var gameScale = RequireArray(gameSkel, "m_boneScaleParent", gameNames.Length, "Game");
+        var gameParentValues = RequireArray(gameSkel, "m_nParent", gameNames.Length, "Game");
+        _ = modBoneNames;
+
+        // Official bones occupy 0..gameCount-1, so a game parent index is already the new index.
+        // Mod-only helpers stay after them and do not shift the game's bone numbers.
+        var newNames = new List<string>(gameNames.Length + 64);
+        newNames.AddRange(gameNames);
+        var modOnly = new List<int>();
+        for (var i = 0; i < modNames.Length; i++)
+        {
+            if (gameIndex.ContainsKey(modNames[i]))
+                continue;
+            modOnly.Add(i);
+            newNames.Add(modNames[i]);
+        }
+
+        var newIndexOfOld = new int[modNames.Length];
+        for (var i = 0; i < newNames.Count; i++)
+        {
+            if (modIndex.TryGetValue(newNames[i], out var old))
+                newIndexOfOld[old] = i;
+        }
+
+        for (var i = 0; i < modNames.Length; i++)
+        {
+            if (!string.Equals(newNames[newIndexOfOld[i]], modNames[i], StringComparison.Ordinal))
+                throw new InvalidDataException($"Bone {modNames[i]} was not placed in the new skeleton.");
+        }
+
+        KVObject Take(KVObject modArray, KVObject gameArray, int newIndex)
+        {
+            var name = newNames[newIndex];
+            if (modIndex.TryGetValue(name, out var old))
+                return modArray[old];
+            return gameArray[gameIndex[name]];
+        }
+
+        int NewParent(int newIndex)
+        {
+            var name = newNames[newIndex];
+            if (modIndex.TryGetValue(name, out var old))
+            {
+                var parent = IntOf(oldParents[old]);
+                if (parent < 0)
+                    return -1;
+                if ((uint)parent >= (uint)newIndexOfOld.Length)
+                    throw new InvalidDataException($"Bone {name} has parent index {parent} outside the skeleton.");
+                return newIndexOfOld[parent];
+            }
+
+            var gameParent = IntOf(gameParentValues[gameIndex[name]]);
+            if (gameParent < 0)
+                return -1;
+            if ((uint)gameParent >= (uint)gameNames.Length)
+                throw new InvalidDataException($"Game bone {name} has parent index {gameParent} outside the skeleton.");
+            var parentName = gameNames[gameParent];
+            if (!gameIndex.ContainsKey(parentName))
+                throw new InvalidDataException($"Game bone {name} parent {parentName} is missing.");
+            return gameIndex[parentName];
+        }
+
+        Replace(modSkel, "m_boneName", KVObject.Array(newNames.Select(name => new KVObject(name))));
+        Replace(modSkel, "m_nParent", KVObject.Array(Enumerable.Range(0, newNames.Count).Select(index => new KVObject(NewParent(index)))));
+        Replace(modSkel, "m_boneSphere", KVObject.Array(Enumerable.Range(0, newNames.Count).Select(index => Take(oldSphere, gameSphere, index))));
+        Replace(modSkel, "m_nFlag", KVObject.Array(Enumerable.Range(0, newNames.Count).Select(index => Take(oldFlag, gameFlag, index))));
+        Replace(modSkel, "m_bonePosParent", KVObject.Array(Enumerable.Range(0, newNames.Count).Select(index => Take(oldPos, gamePos, index))));
+        Replace(modSkel, "m_boneRotParent", KVObject.Array(Enumerable.Range(0, newNames.Count).Select(index => Take(oldRot, gameRot, index))));
+        Replace(modSkel, "m_boneScaleParent", KVObject.Array(Enumerable.Range(0, newNames.Count).Select(index => Take(oldScale, gameScale, index))));
+
+        var hadRemap = modRoot.ContainsKey("m_remappingTable");
+        var oldRemapCount = 0;
+        if (hadRemap)
+        {
+            var oldRemap = modRoot["m_remappingTable"];
+            if (!oldRemap.IsArray)
+                throw new InvalidDataException("m_remappingTable is not an array.");
+            oldRemapCount = oldRemap.Count;
+            var newRemap = new KVObject[oldRemapCount];
+            for (var i = 0; i < oldRemapCount; i++)
+            {
+                var value = IntOf(oldRemap[i]);
+                if (value < 0)
+                    newRemap[i] = new KVObject(value);
+                else if ((uint)value >= (uint)newIndexOfOld.Length)
+                    throw new InvalidDataException($"Remap entry {i} points at bone {value}, which is outside the skeleton.");
+                else
+                    newRemap[i] = new KVObject(newIndexOfOld[value]);
+            }
+
+            Replace(modRoot, "m_remappingTable", KVObject.Array(newRemap));
+        }
+
+        if (pathMoved)
+            SetName(modKv, RequiredName(gameKv));
+
+        var patched = Splice(modBytes, modKv);
+        VerifyRewritten(patched, gamePath, newNames, modOnly, modNames, modParents, gameNames, gameParents, modIndex, newIndexOfOld, hadRemap, oldRemapCount);
+
+        var remapNote = hadRemap
+            ? "Mesh bone indices were remapped."
+            : "This model has no mesh bone remap table.";
+        var move = pathMoved ? $" Saved as {gamePath}." : "";
+        var detail = $"Bones {modNames.Length} to {newNames.Count} ({gameNames.Length} from the game, {modOnly.Count} kept from the mod). {remapNote}{move}";
+        return new MigrationEdit(patched, ModelOutcome.Updated, detail);
+    }
+
+    static void VerifyRewritten(
+        byte[] patched,
+        string path,
+        List<string> newNames,
+        List<int> modOnly,
+        string[] modNames,
+        string?[] modParents,
+        string[] gameNames,
+        string?[] gameParents,
+        Dictionary<string, int> modIndex,
+        int[] newIndexOfOld,
+        bool hadRemap,
+        int oldRemapCount)
+    {
+        using var check = ModelFile.Load(patched, path);
+        var bones = check.Model.Skeleton.Bones;
+        if (bones.Length != newNames.Count)
+            throw new InvalidDataException($"Verified bone count is {bones.Length}, expected {newNames.Count}.");
+
+        for (var i = 0; i < gameNames.Length; i++)
+        {
+            if (bones[i].Name != gameNames[i])
+                throw new InvalidDataException($"Bone {i} is {bones[i].Name}, expected {gameNames[i]}.");
+            if (!modIndex.ContainsKey(gameNames[i]) && bones[i].Parent?.Name != gameParents[i])
+                throw new InvalidDataException($"Parent of game bone {gameNames[i]} changed.");
+        }
+
+        for (var i = 0; i < modOnly.Count; i++)
+        {
+            var expect = modNames[modOnly[i]];
+            if (bones[gameNames.Length + i].Name != expect)
+                throw new InvalidDataException($"Mod-only bone {expect} was not kept in order.");
+        }
+
+        for (var i = 0; i < modNames.Length; i++)
+        {
+            var parent = bones[newIndexOfOld[i]].Parent?.Name;
+            if (!string.Equals(parent, modParents[i], StringComparison.Ordinal))
+                throw new InvalidDataException($"Parent of {modNames[i]} changed from {modParents[i] ?? "(none)"} to {parent ?? "(none)"}.");
+        }
+
+        if (!hadRemap)
+            return;
+
+        KVObject root = ReadData(check).Data;
+        if (!root.ContainsKey("m_remappingTable"))
+            throw new InvalidDataException("Remap table disappeared.");
+        var remap = root["m_remappingTable"];
+        if (remap.Count != oldRemapCount)
+            throw new InvalidDataException("Remap table length changed.");
+        for (var i = 0; i < remap.Count; i++)
+        {
+            var value = IntOf(remap[i]);
+            if (value >= bones.Length)
+                throw new InvalidDataException($"Remap entry {i} points at bone {value}, past the skeleton.");
+        }
+    }
+
+    static void VerifySameSkeleton(byte[] patched, string path, string[] names, string?[] parents)
+    {
+        using var check = ModelFile.Load(patched, path);
+        var bones = check.Model.Skeleton.Bones;
+        if (bones.Length != names.Length)
+            throw new InvalidDataException("Bone count changed while updating the model name.");
+        for (var i = 0; i < names.Length; i++)
+        {
+            if (bones[i].Name != names[i])
+                throw new InvalidDataException($"Bone {i} changed while updating the model name.");
+            if (bones[i].Parent?.Name != parents[i])
+                throw new InvalidDataException($"Parent of {names[i]} changed while updating the model name.");
+        }
+    }
+
+    static byte[] Splice(byte[] modBytes, BinaryKV3 kv)
+    {
+        using var serialized = new MemoryStream();
+        kv.Serialize(serialized);
+        return ResourceData.ReplaceDataBlock(modBytes, serialized.ToArray());
+    }
+
+    static BinaryKV3 ReadData(ModelFile file)
+    {
+        var block = file.Resource.GetBlockByType(BlockType.DATA) ?? throw new InvalidDataException("Model has no DATA block.");
+        var offset = checked((int)block.Offset);
+        var size = checked((int)block.Size);
+        if (offset < 0 || size < 0 || offset > file.Bytes.Length || size > file.Bytes.Length - offset)
+            throw new InvalidDataException("DATA block is outside the model file.");
+
+        var kv = new BinaryKV3(BlockType.DATA) { Resource = file.Resource };
+        using var reader = new BinaryReader(new MemoryStream(file.Bytes, offset, size, writable: false), Encoding.UTF8, leaveOpen: true);
+        kv.Read(reader);
+        return kv;
+    }
+
+    static string RequiredName(BinaryKV3 kv)
+    {
+        KVObject root = kv.Data;
+        if (!root.ContainsKey("m_name"))
+            throw new InvalidDataException("Model is missing m_name.");
+        var name = root["m_name"].ToString();
+        if (string.IsNullOrEmpty(name))
+            throw new InvalidDataException("Model m_name is empty.");
+        return name;
+    }
+
+    static void SetName(BinaryKV3 kv, string name)
+    {
+        KVObject root = kv.Data;
+        var value = new KVObject(name);
+        if (root.ContainsKey("m_name"))
+            root.Remove("m_name");
+        root.Add("m_name", value);
+    }
+
+    static KVObject RequireArray(KVObject skeleton, string key, int count, string who)
+    {
+        if (!skeleton.ContainsKey(key))
+            throw new InvalidDataException($"{who} skeleton is missing {key}.");
+        var array = skeleton[key];
+        if (!array.IsArray || array.Count != count)
+            throw new InvalidDataException($"{who} {key} has {array.Count} items, expected {count}.");
+        return array;
+    }
+
+    static void Replace(KVObject parent, string key, KVObject value)
+    {
+        parent.Remove(key);
+        parent.Add(key, value);
+    }
+
+    static int IntOf(KVObject value) => checked((int)value.ToInt64());
+}
+
+sealed record MigrationEdit(byte[]? Bytes, ModelOutcome Outcome, string Detail);
+
+sealed class ModelFile : IDisposable
+{
+    public required Resource Resource { get; init; }
+    public required Model Model { get; init; }
+    public required byte[] Bytes { get; init; }
+    public required MemoryStream Stream { get; init; }
+
+    public static ModelFile Load(byte[] bytes, string path)
+    {
+        var stream = new MemoryStream(bytes, writable: false);
+        var resource = new Resource { FileName = path };
+        try
+        {
+            resource.Read(stream, verifyFileSize: false, leaveOpen: true);
+        }
+        catch
+        {
+            resource.Dispose();
+            stream.Dispose();
+            throw;
+        }
+
+        if (resource.DataBlock is not Model model)
+        {
+            resource.Dispose();
+            stream.Dispose();
+            throw new InvalidDataException($"{path} is not a compiled model.");
+        }
+
+        return new ModelFile
+        {
+            Resource = resource,
+            Model = model,
+            Bytes = bytes,
+            Stream = stream,
+        };
+    }
+
+    public void Dispose()
+    {
+        Resource.Dispose();
+        Stream.Dispose();
+    }
+}
