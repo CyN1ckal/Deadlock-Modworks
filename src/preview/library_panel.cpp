@@ -1,4 +1,5 @@
 #include "library_panel.hpp"
+#include "character_view.hpp"
 #include "strings.hpp"
 #include "ui.hpp"
 #define WIN32_LEAN_AND_MEAN
@@ -10,6 +11,7 @@
 #include <imgui_internal.h>
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <fstream>
 #include <numeric>
@@ -441,6 +443,24 @@ void LibraryPanel::DrawModelMenu(size_t index, const std::vector<size_t>& shown,
     ImGui::TextDisabled("%s", SkinTitle(model).c_str());
     ImGui::Separator();
     if (ImGui::MenuItem("Inspect", "Enter")) preview(model);
+    if (open_multi_) {
+        const auto character = CharacterOfModel(model.Model);
+        size_t character_models = 0;
+        if (character) {
+            for (const auto& other : models_) {
+                const auto name = CharacterOfModel(other.Model);
+                if (name && EqualsIgnoreCase(*name, *character)) ++character_models;
+            }
+        }
+        if (ImGui::MenuItem("Multi view", nullptr, false, character.has_value())) open_multi_(model);
+        if (character) {
+            char tip[160];
+            std::snprintf(tip, sizeof(tip), "Show %zu %s models together. Orbit, pan and zoom stay linked.", character_models, character->c_str());
+            ImGui::SetItemTooltip("%s", tip);
+        } else {
+            ImGui::SetItemTooltip("Multi view groups models stored under models/heroes/<character>/.");
+        }
+    }
     if (ImGui::MenuItem(in_pack ? "Remove from pack" : "Include in pack", "Space")) SetInPack(index, !in_pack);
     if (ImGui::BeginMenu("Pack")) {
         if (ImGui::MenuItem(("Include the " + std::to_string(shown.size()) + " shown skins").c_str())) for (const size_t i : shown) SetInPack(i, true);

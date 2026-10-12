@@ -15,6 +15,7 @@
 #include "model_geometry.hpp"
 #include "model_renderer.hpp"
 #include "comparison_view.hpp"
+#include "multi_view.hpp"
 #include "history_panel.hpp"
 #include "model_versions.hpp"
 #include "preview_panel.hpp"
@@ -472,7 +473,7 @@ Inspection InspectModelFile(const std::filesystem::path& path) {
 // Archives, the model list, and the two views that show the selection.
 // Archives are opened and models decoded on worker threads; this thread only applies finished results and uploads them.
 struct App {
-    enum class Page { Gallery, Pack, History, Inspect, Repair };
+    enum class Page { Gallery, Pack, History, Inspect, Repair, Multi };
     Page CurrentPage = Page::Gallery;
     Page PreviousPage = Page::Gallery;
     // Set while a page shown from code waits for its tab to become selected.
@@ -485,6 +486,9 @@ struct App {
     std::shared_ptr<ArchiveCache> Archives = std::make_shared<ArchiveCache>();
     PreviewPanel Panel;
     ComparisonView Compare;
+    MultiView Multi;
+    // Set when a repair or rename drops viewport uploads. The next finished import reloads them.
+    bool MultiSuspended = false;
     ArchivePtr Mod;
     std::string ModName;
     std::string Selected;
@@ -729,6 +733,10 @@ struct App {
         }
         // Imports and merges add models to the version history too.
         History.Refresh();
+        if (MultiSuspended) {
+            MultiSuspended = false;
+            Multi.Reload();
+        }
     }
 
     void SyncSources() {
@@ -742,7 +750,12 @@ struct App {
         catch (const std::exception&) { return {}; }
     }
 
-    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device, Archives), History(ContentDirectory()) {
+    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Multi(device), Builder(device, Archives), History(ContentDirectory()) {
+        Multi.SetArchives(Archives);
+        Builder.SetMultiViewHandler([this](const LibraryModel& model) {
+            Multi.Open(model, Builder.Models());
+            ShowPage(Page::Multi);
+        });
         try {
             Store.emplace(LocalModStore::DefaultRoot());
             StartRestore();
@@ -777,8 +790,10 @@ struct App {
             for (const VpkEntry& entry : Game->Archive().Entries()) {
                 if (EndsWith(entry.FullPath, ".vnmclip_c")) GameClips.push_back(entry.FullPath);
             }
+            Multi.SetGame(Game);
         } catch (const std::exception& error) {
             GameError = Narrow(GameLoading.wstring()) + ": " + error.what();
+            Multi.SetGame(nullptr);
         }
         // The comparison and textures depend on the game, so reload the model being inspected.
         if (!ActiveMod.empty()) StartInspect(ActiveMod, Selected);
@@ -930,8 +945,8 @@ struct App {
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, global)) ShowExplorer = !ShowExplorer;
         if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_LeftArrow, global)) ShowPage(PreviousPage);
         if (ImGui::Shortcut(ImGuiKey_F1, global)) OpenShortcuts = true;
-        const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect};
-        const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5};
+        const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect, Page::Multi};
+        const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5, ImGuiKey_6};
         for (size_t i = 0; i < std::size(pages); ++i) {
             if (ImGui::Shortcut(ImGuiMod_Ctrl | keys[i], global)) ShowPage(pages[i]);
         }
@@ -972,7 +987,8 @@ struct App {
         if (ImGui::BeginMenu("View")) {
             const struct { const char* Label; const char* Keys; Page Value; } pages[] = {
                 {"Mod library", "Ctrl+1", Page::Gallery}, {"VPK builder", "Ctrl+2", Page::Pack}, {"Version history", "Ctrl+3", Page::History},
-                {"Skin repairs", "Ctrl+4", Page::Repair}, {"Model inspector", "Ctrl+5", Page::Inspect}};
+                {"Skin repairs", "Ctrl+4", Page::Repair}, {"Model inspector", "Ctrl+5", Page::Inspect},
+                {"Multi view", "Ctrl+6", Page::Multi}};
             for (const auto& page : pages) {
                 if (ImGui::MenuItem(page.Label, page.Keys, CurrentPage == page.Value)) ShowPage(page.Value);
             }
@@ -1239,6 +1255,8 @@ struct App {
         Mod.reset();
         Panel.ShowError("", "");
         Compare.ShowError("", "");
+        Multi.Release();
+        MultiSuspended = true;
     }
 
     // The page tabs. A tab the user clicks becomes the page; a page shown from code selects its tab.
@@ -1253,6 +1271,7 @@ struct App {
             {"Version history###history", "Every stored copy of each model, and how repairs changed it (Ctrl+3)", Page::History},
             {"Skin repairs###repair", "Check and repair your mods after game updates (Ctrl+4)", Page::Repair},
             {inspect_label.c_str(), "Textures, animations and skeleton of one model (Ctrl+5)", Page::Inspect},
+            {"Multi view###multi", "Several models of one character, with one shared camera (Ctrl+6)", Page::Multi},
         };
         Page visible = CurrentPage;
         for (const auto& tab : tabs) {
@@ -1309,6 +1328,11 @@ struct App {
                     ui::CopyMenuItem("Copy source path", Narrow(ActiveMod.wstring()));
                     if (ImGui::MenuItem("Reveal source in Explorer")) ui::RevealInExplorer(ActiveMod);
                     if (ImGui::MenuItem("Show source in library")) { Builder.SetSourceFilter(ActiveMod); ShowPage(Page::Gallery); }
+                    if (ImGui::MenuItem("Multi view", nullptr, false, CharacterOfModel(Selected).has_value())) {
+                        Multi.Open({ActiveMod, Selected}, Builder.Models());
+                        ShowPage(Page::Multi);
+                    }
+                    ImGui::SetItemTooltip("Show this character's models together, with one shared camera.");
                 }
                 ImGui::EndPopup();
             }
@@ -1326,6 +1350,8 @@ struct App {
                 }
                 ImGui::EndTabBar();
             }
+        } else if (CurrentPage == Page::Multi) {
+            Multi.Draw(Builder.Models());
         } else {
             ImGui::BeginDisabled(Builder.Busy() || ImportBusy());
             Repair.Draw(hwnd, [&] { ReleaseArchives(); });
@@ -1345,7 +1371,7 @@ struct App {
             static const char* const kShortcuts[][2] = {
                 {"Ctrl+O", "Add mods"}, {"Ctrl+Shift+O", "Add every mod in a folder"}, {"Ctrl+G", "Choose the game archive"},
                 {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins"}, {"F5", "Reopen every source and reload thumbnails"},
-                {"Ctrl+1 ... Ctrl+5", "Library, builder, history, repairs, inspector"}, {"Alt+Left", "Back to the previous page"},
+                {"Ctrl+1 ... Ctrl+6", "Library, builder, history, repairs, inspector, multi view"}, {"Alt+Left", "Back to the previous page"},
                 {"Ctrl+Shift+E", "Show or hide the explorer"}, {"Double-click", "Inspect a skin, view a version"},
                 {"Enter / Space", "Inspect the clicked skin / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
                 {"Drag / right-drag / wheel", "Orbit / pan / zoom a viewport"}, {"F", "Frame the model in the hovered viewport"},
@@ -1604,6 +1630,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
             app.PollImport();
             app.PollGame();
             app.PollInspect();
+            app.Multi.Poll();
             app.StartPendingRename();
 
             // A repair from the version history may replace one of the gallery's stored copies too.
@@ -1616,6 +1643,10 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 if (app.Store) app.StartImport(app.Builder.Snapshot(app.ModPaths, app.ConfiguredGame), false);
             }
             if (repaired && !app.ActiveMod.empty()) app.StartInspect(app.ActiveMod, app.Selected);
+            if (repaired) {
+                app.MultiSuspended = false;
+                app.Multi.Reload();
+            }
             if (!g_dropped.empty()) {
                 if (!app.FilesBusy()) app.AddPaths(g_dropped);
                 g_dropped.clear();
@@ -1650,6 +1681,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 FrameRender(draw_data, [&](VkCommandBuffer command_buffer) {
                     app.Panel.Record(command_buffer);
                     app.Compare.Record(command_buffer);
+                    app.Multi.Record(command_buffer);
                 });
                 FramePresent();
             }

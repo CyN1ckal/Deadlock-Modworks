@@ -27,6 +27,9 @@ public:
     void StopLoading();
     size_t SelectedCount() const { return selected_.size(); }
     size_t ModelCount() const { return models_.size(); }
+    const std::vector<LibraryModel>& Models() const { return models_; }
+    // Right-click Multi view on a skin. Empty hides the command.
+    void SetMultiViewHandler(std::function<void(const LibraryModel&)> open) { open_multi_ = std::move(open); }
     // Skins the gallery showed on the last frame it was drawn, after search and filters.
     size_t ShownCount() const { return shown_count_; }
     // Models the last scan found in one source archive.
@@ -146,6 +149,7 @@ private:
     size_t shown_count_ = 0;
     // The model last clicked, which Enter and Space act on.
     std::optional<size_t> current_;
+    std::function<void(const LibraryModel&)> open_multi_;
     std::map<std::filesystem::path, size_t> source_counts_;
     // Indexes of models_ in display order, and whether each model is in the pack. Rebuilt when marked stale.
     std::vector<size_t> order_;

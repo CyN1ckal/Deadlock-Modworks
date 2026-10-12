@@ -75,7 +75,7 @@ The installed game provides the reference models, textures, and animation resour
 
 You can also drop multiple VPKs onto the window or executable. Existing library entries are not added twice. Adding a batch keeps you in the gallery. Thumbnails load as cards become visible and stay in a bounded cache. Right-click a source in the explorer and choose **Remove from library** to remove it; this does not delete the files.
 
-Most items have a right-click menu: skins (inspect, pack selection, copy paths, reveal in Explorer), sources, history versions and copies, repair results, meshes and the 3D viewports. Press **F1** for the keyboard shortcuts.
+Most items have a right-click menu: skins (inspect, multi view, pack selection, copy paths, reveal in Explorer), sources, history versions and copies, repair results, meshes and the 3D viewports. Press **F1** for the keyboard shortcuts.
 
 A standalone compiled `.vmdl_c` file can be opened for viewing. Version comparison requires a model from a mod VPK.
 
@@ -118,6 +118,10 @@ Only reachable resource overrides are included. Unreferenced scripts, sounds, ad
 | Middle or right mouse drag | Pan |
 | **Frame** or **F** | Fit the model in view |
 | Right-click | Display options: bones, grid, coloring, LOD |
+
+### Multi view
+
+Right-click a skin and choose **Multi view**, or open the **Multi view** tab (**Ctrl+6**) and pick a character. The page shows up to four models of that character (`models/heroes/<character>/...`), one in each viewport. The clicked model is shown first, then one model from each other mod of that character, with further files from those mods filling any viewports that remain. Each viewport's list can show a different model. **Link** keeps orbit, pan, and zoom on one shared camera, and one animation clip plays on every viewport that has an animation skeleton. The viewport count can be 1, 2, 3, or 4.
 
 ### Compare versions
 

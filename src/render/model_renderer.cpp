@@ -475,9 +475,6 @@ ModelRenderer::Buffer ModelRenderer::Upload(const void* data, VkDeviceSize size,
 }
 
 void ModelRenderer::SetScene(const PreviewScene& scene) {
-    if (vertices_.Handle != VK_NULL_HANDLE || indices_.Handle != VK_NULL_HANDLE || lines_.Handle != VK_NULL_HANDLE) {
-        Check(vkDeviceWaitIdle(device_.Device), "vkDeviceWaitIdle");
-    }
     ClearScene();
 
     if (!scene.Indices.empty()) {
@@ -557,6 +554,12 @@ void ModelRenderer::SetSkeleton(std::span<const LineVertex> skeleton) {
 }
 
 void ModelRenderer::ClearScene() {
+    // SetScene waits here too. Clearing a viewport directly, as a model swap does, must not free buffers a
+    // recorded frame still owns: that loses the device.
+    if (vertices_.Handle != VK_NULL_HANDLE || indices_.Handle != VK_NULL_HANDLE || lines_.Handle != VK_NULL_HANDLE
+        || bones_.Handle != VK_NULL_HANDLE || !textures_.empty()) {
+        Check(vkDeviceWaitIdle(device_.Device), "vkDeviceWaitIdle");
+    }
     Destroy(vertices_);
     Destroy(indices_);
     Destroy(lines_);

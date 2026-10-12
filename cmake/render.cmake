@@ -59,6 +59,8 @@ add_library(sr_model_tools STATIC
     src/preview/model_viewport.cpp
     src/preview/preview_panel.cpp
     src/preview/comparison_view.cpp
+    src/preview/multi_view.cpp
+    src/preview/character_view.cpp
     src/preview/repair_panel.cpp
     src/preview/library_panel.cpp
     src/preview/history_panel.cpp
