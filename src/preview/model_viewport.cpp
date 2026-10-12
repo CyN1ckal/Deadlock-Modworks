@@ -159,7 +159,7 @@ ModelViewport::~ModelViewport() {
     }
 }
 
-void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read) {
+void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read, uint32_t max_texture_size) {
     textured_materials_ = 0;
     material_count_ = 0;
     material_notes_.clear();
@@ -181,7 +181,7 @@ void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const Resou
     if (read == nullptr) {
         return;
     }
-    const std::vector<PreviewMaterial> materials = LoadPreviewMaterials(scene_, *read);
+    const std::vector<PreviewMaterial> materials = LoadPreviewMaterials(scene_, *read, max_texture_size);
     material_notes_ = renderer_.SetMaterials(materials);
     material_count_ = materials.size();
     textured_materials_ = renderer_.TextureCount();
@@ -238,7 +238,7 @@ void ModelViewport::SetLod(int lod) {
     visible_ = DefaultVisibility(scene_, std::clamp(lod, 0, std::max(scene_.LodCount - 1, 0)));
 }
 
-bool ModelViewport::Draw(const char* id, ImVec2 size, OrbitCamera& camera) {
+bool ModelViewport::Draw(const char* id, ImVec2 size, OrbitCamera& camera, bool interactive) {
     drawn_ = false;
     size.x = std::max(size.x, 32.0f);
     size.y = std::max(size.y, 32.0f);
@@ -250,6 +250,13 @@ bool ModelViewport::Draw(const char* id, ImVec2 size, OrbitCamera& camera) {
     }
 
     const ImVec2 origin = ImGui::GetCursorScreenPos();
+    if (!interactive) {
+        ImGui::Dummy(size);
+        ImGui::GetWindowDrawList()->AddImage(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture_)), origin,
+            ImVec2(origin.x + size.x, origin.y + size.y));
+        drawn_ = true;
+        return false;
+    }
     ImGui::InvisibleButton(id, size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
     ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
     const ImGuiIO& io = ImGui::GetIO();

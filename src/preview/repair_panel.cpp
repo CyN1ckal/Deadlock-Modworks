@@ -121,7 +121,7 @@ bool RepairPanel::Poll() {
 }
 
 void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) {
-    ImGui::SeparatorText("Analyze & repair");
+    ImGui::SeparatorText("Check skin compatibility");
     ImGui::TextWrapped("Check hero models and animation skeletons against your installed game. Repair rechecks the files and keeps a .bak backup. Archives needing review are left untouched.");
     ImGui::TextDisabled("Close Deadlock and wait for Steam updates to finish before repairing.");
     ImGui::Spacing();

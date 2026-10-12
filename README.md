@@ -1,6 +1,6 @@
-# Deadlock Model Tools
+# Deadlock Mod Manager
 
-A native C++20 app for Windows x64 that lets you view Deadlock model mods, compare them with the installed game, and repair supported skeleton changes.
+A native C++20 mod manager for Windows x64. Browse Deadlock skins in a thumbnail gallery, assemble a custom VPK, inspect models, and repair supported skeleton changes.
 
 The main executable is **`DeadlockSkeletonRepair.exe`**. Launch it without arguments to open the GUI, or use command-line options to analyze and repair a mod from a terminal.
 
@@ -42,6 +42,19 @@ Choose the commands for your installed Visual Studio version. If you switch gene
 
 You can also double-click that executable in File Explorer. Close the app before rebuilding it, so Windows can replace the executable.
 
+## Build and run in CLion
+
+Open the repository's `CMakeLists.txt` in CLion. In **Settings > Build, Execution, Deployment > Toolchains**, create or select a **Visual Studio** toolchain named **Visual Studio**, with the architecture set to **amd64**. Use its bundled CMake and Ninja. The Vulkan SDK must be installed and visible to CLion; restart the IDE after installing it.
+
+Reload the CMake presets and enable **clion-debug** (or **clion-release**) in **Settings > Build, Execution, Deployment > CMake**. Select the enabled profile and the **DeadlockSkeletonRepair** target to build, run, or debug the full model tools app. The profiles use separate `build/clion-debug` and `build/clion-release` directories and do not depend on a specific Visual Studio release.
+
+For command-line use of these presets, run CMake from an **x64 Native Tools Command Prompt** with Ninja on `PATH`:
+
+```powershell
+cmake --preset clion-debug
+cmake --build --preset clion-debug
+```
+
 ## Use the GUI
 
 ### Connect the installed game
@@ -56,17 +69,30 @@ The installed game provides the reference models, textures, and animation resour
 
 ### Add your mods
 
-1. Click **Add VPKs or model...**.
+1. Click **Add mods...** in the sidebar or gallery.
 2. Select one or more mod `.vpk` files. Use **Ctrl-click** for individual files or **Shift-click** for a range, then click **Open**.
-3. Choose an archive from the library dropdown and a model from its model list. Use the filter to find a model by path.
+3. Browse the **Mod library** gallery. Search by model or source, filter to a source archive, and choose **Inspect** on a card to open its model.
 
-You can also drop multiple VPKs onto the window or executable. Existing library entries are not added twice. Adding a batch opens the first selected file; the other VPKs remain available in the library.
+You can also drop multiple VPKs onto the window or executable. Existing library entries are not added twice. Adding a batch keeps you in the gallery. Thumbnails load as cards become visible and stay in a bounded cache. Use **Manage sources** in the sidebar to remove archives from the library; this does not delete the files.
 
 A standalone compiled `.vmdl_c` file can be opened for viewing. Version comparison requires a model from a mod VPK.
 
 ### View a model
 
-Open **View model** to inspect textures, mesh visibility, levels of detail (LOD), and the skeleton. Choose an animation clip and click **Play** when animation resources are available.
+Choose **Inspect** on a gallery card to open the **Model inspector**. Its **Preview** tab shows textures, mesh visibility, levels of detail (LOD), and the skeleton. Choose an animation clip and click **Play** when animation resources are available.
+
+### Build a combined model VPK
+
+1. Use **Add mods...** to add your reference mod VPKs to the library.
+2. Check **Include in pack** on the gallery cards you want. Selected cards are highlighted. The **In pack** filter shows only your selections. Missing materials fall back to clay; hover **No preview** for an error. Use **Refresh** after changing source files.
+3. Connect the installed game archive to resolve dependencies supplied by Deadlock.
+4. Open **VPK builder** in the sidebar to review your selected skins. Click **Build VPK...** and choose a new `.vpk` filename. Export runs in the background and can be cancelled. The output is reopened and validated before it is published. Existing output files and source archives are never overwritten.
+
+Export follows external resource references and supported KV3 resource/skeleton references recursively. It includes selected models and reachable overrides from each model's own source archive; base-game dependencies stay in the game. Identical files at the same internal path are deduplicated. Different contents at the same path block export and identify both sources: deselect one of the conflicting models. A missing dependency also blocks export. Dependencies supplied only by another reference VPK are not resolved automatically.
+
+Use **Save library...** to save your source paths and checked models to a JSON library file, and **Open library...** to restore them later. Keep the original source VPKs and any chunk files at their saved locations. **Refresh** rescans changed archives; missing checked models are shown so you can remove them explicitly. Sources are read again when exporting.
+
+Only reachable resource overrides are included. Unreferenced scripts, sounds, addon metadata, or other extras bundled by a mod author are not automatically copied. Test the exported pack in Deadlock; packaging does not repair models or guarantee in-game compatibility.
 
 | Control | Action |
 | --- | --- |
@@ -77,7 +103,7 @@ Open **View model** to inspect textures, mesh visibility, levels of detail (LOD)
 
 ### Compare versions
 
-Open **Compare versions** and choose the versions shown on the left and right: **Mod**, **Game**, or **Repaired**, when available. **Link cameras** keeps the two views aligned. The panel also shows skeleton differences, skin-binding checks, and available animation playback.
+Open **Compare versions** in the **Model inspector** and choose the versions shown on the left and right: **Mod**, **Game**, or **Repaired**, when available. **Link cameras** keeps the two views aligned. The panel also shows skeleton differences, skin-binding checks, and available animation playback.
 
 **Repaired** is a proposed repair held in memory. Viewing it does not change a VPK. The comparison previews model and animation-skeleton migrations; the repair workflow also checks the archive's dependent resources.
 
@@ -86,7 +112,7 @@ Open **Compare versions** and choose the versions shown on the left and right: *
 Close Deadlock and wait for Steam updates to finish before repairing.
 
 1. Add the VPKs you want to check to the library.
-2. Open **Repair mods** and click **Analyze mods**. This checks every VPK in the library without changing it.
+2. Open **Skin repairs** in the sidebar and click **Analyze mods**. This checks every VPK in the library without changing it.
 3. Read the results. Click **Repair supported mods** to repair the archives eligible for automatic fixes.
 4. Use **Save JSON report...** to export the results. Test repaired mods in Deadlock.
 

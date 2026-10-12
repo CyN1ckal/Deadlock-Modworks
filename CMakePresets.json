@@ -15,6 +15,29 @@
       "generator": "Visual Studio 18 2026",
       "architecture": { "value": "x64", "strategy": "set" },
       "binaryDir": "${sourceDir}/build/release"
+    },
+    {
+      "name": "clion-debug",
+      "displayName": "CLion Debug x64",
+      "description": "Full model tools app with Ninja and the CLion Visual Studio toolchain.",
+      "generator": "Ninja",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "binaryDir": "${sourceDir}/build/clion-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "SR_BUILD_MODEL_TOOLS": true
+      },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "vendor": { "jetbrains.com/clion": { "toolchain": "Visual Studio" } }
+    },
+    {
+      "name": "clion-release",
+      "displayName": "CLion Release x64",
+      "description": "Full model tools app optimized for release with Ninja and the CLion Visual Studio toolchain.",
+      "inherits": "clion-debug",
+      "binaryDir": "${sourceDir}/build/clion-release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     }
   ],
   "buildPresets": [
@@ -27,6 +50,14 @@
       "name": "windows-release",
       "configurePreset": "windows-release",
       "configuration": "Release"
+    },
+    {
+      "name": "clion-debug",
+      "configurePreset": "clion-debug"
+    },
+    {
+      "name": "clion-release",
+      "configurePreset": "clion-release"
     }
   ]
 }

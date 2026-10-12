@@ -68,7 +68,8 @@ public:
     ModelViewport& operator=(const ModelViewport&) = delete;
 
     // Null clears the viewport. With a reader, materials and color maps are loaded for Textured mode.
-    void SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read = nullptr);
+    // A lower texture limit keeps thumbnail viewports small.
+    void SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read = nullptr, uint32_t max_texture_size = 2048);
     // The skeleton drawn as lines. `animation` says whether it is the animation skeleton (else the render skeleton),
     // which decides which posed bones replace it while a clip plays.
     void SetSkeleton(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors, bool animation = false);
@@ -88,7 +89,8 @@ public:
     const std::vector<std::string>& MaterialNotes() const { return material_notes_; }
 
     // Shows the image at the cursor and applies mouse input to `camera`. Returns true while the user moves the camera.
-    bool Draw(const char* id, ImVec2 size, OrbitCamera& camera);
+    // Non-interactive images leave scrolling and mouse input to the containing library.
+    bool Draw(const char* id, ImVec2 size, OrbitCamera& camera, bool interactive = true);
     // Records the offscreen pass if Draw ran this frame. Call before the ImGui render pass.
     void Record(VkCommandBuffer command_buffer, const OrbitCamera& camera, const ViewSettings& settings);
 

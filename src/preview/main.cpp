@@ -21,6 +21,8 @@
 #include "game_folder.hpp"
 #include "model_tools.hpp"
 #include "repair_panel.hpp"
+#include "library_panel.hpp"
+#include "mod_store.hpp"
 
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
@@ -40,6 +42,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <future>
+#include <atomic>
+#include <chrono>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
 
@@ -67,7 +72,7 @@ void CheckVk(VkResult result) {
 
 void SetupVulkan() {
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    app.pApplicationName = "Deadlock Model Tools";
+    app.pApplicationName = "Deadlock Mod Manager";
     app.apiVersion = VK_API_VERSION_1_3;
     const char* extensions[] = {"VK_KHR_surface", "VK_KHR_win32_surface"};
     VkInstanceCreateInfo instance{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -110,7 +115,7 @@ void SetupVulkan() {
     CheckVk(vkCreateDevice(g_device.Physical, &device, nullptr, &g_device.Device));
     vkGetDeviceQueue(g_device.Device, g_device.QueueFamily, 0, &g_device.Queue);
 
-    VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE + 4};
+    VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE + 128};
     VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pool.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     pool.maxSets = pool_size.descriptorCount;
@@ -304,6 +309,8 @@ std::filesystem::path GamePak(const std::filesystem::path& chosen) {
 
 // Archives, the model list, and the two views that show the selection.
 struct App {
+    enum class Page { Gallery, Pack, Inspect, Repair };
+    Page CurrentPage = Page::Gallery;
     PreviewPanel Panel;
     ComparisonView Compare;
     std::optional<VpkArchive> Mod;
@@ -315,9 +322,88 @@ struct App {
     std::string GameName;
     std::string GameError;
     RepairPanel Repair;
+    LibraryPanel Builder;
     std::vector<std::filesystem::path> ModPaths;
     std::filesystem::path ActiveMod;
     bool StandaloneModel = false;
+    std::optional<LocalModStore> Store;
+    std::filesystem::path ConfiguredGame;
+    std::optional<ModelLibrary> SavedState;
+    std::string StoreStatus;
+    std::string SaveError;
+    double LastSaveAttempt = -10;
+    struct ImportResult { ModelLibrary Library; std::string Errors; };
+    std::future<ImportResult> ImportWorker;
+    CancellationSource ImportCancellation;
+    std::atomic<size_t> ImportedCount = 0;
+    size_t ImportTotal = 0;
+
+    bool ImportBusy() const { return ImportWorker.valid(); }
+    bool FilesBusy() const { return Repair.Busy() || Builder.Busy() || ImportBusy(); }
+
+    void ApplyLibrary(const ModelLibrary& library) {
+        ModPaths = library.Sources;
+        Mod.reset(); Models.clear(); Selected.clear(); ActiveMod.clear(); StandaloneModel = false;
+        Panel.ShowError("", ""); Compare.ShowError("", "");
+        Builder.Restore(library);
+        if (!library.GameArchive.empty() && library.GameArchive != ConfiguredGame) OpenGame(library.GameArchive);
+        SyncSources();
+    }
+
+    void Persist(bool force = false) {
+        if (!Store || ImportBusy()) return;
+        const auto current = Builder.Snapshot(ModPaths, ConfiguredGame);
+        if (SavedState && *SavedState == current) return;
+        if (!force && !SaveError.empty() && ImGui::GetTime() - LastSaveAttempt < 5) return;
+        LastSaveAttempt = ImGui::GetTime();
+        try { Store->Save(current); SavedState = current; SaveError.clear(); }
+        catch (const std::exception& error) { SaveError = error.what(); }
+    }
+
+    void StartImport(const ModelLibrary& incoming, bool replace) {
+        if (FilesBusy()) return;
+        if (!Store) { StoreStatus = "Local mod storage is unavailable. " + SaveError; return; }
+        ImportCancellation = CancellationSource{};
+        ImportedCount = 0; ImportTotal = incoming.Sources.size();
+        StoreStatus = "Importing mods into local storage...";
+        auto starting = replace ? incoming : Builder.Snapshot(ModPaths, ConfiguredGame);
+        if (replace) starting.Sources.clear();
+        ImportWorker = std::async(std::launch::async, [root = Store->Root(), incoming, starting = std::move(starting),
+            token = ImportCancellation.Token(), completed = &ImportedCount]() mutable {
+            ImportResult result{std::move(starting), {}};
+            LocalModStore store(root);
+            for (const auto& source : incoming.Sources) {
+                try {
+                    const auto cached = store.Import(source, token);
+                    if (std::none_of(result.Library.Sources.begin(), result.Library.Sources.end(), [&](const auto& other) {
+                        return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(cached.wstring()));
+                    })) result.Library.Sources.push_back(cached);
+                    for (auto& model : result.Library.Selected) if (skeleton_repair::EqualsIgnoreCase(
+                        Narrow(std::filesystem::absolute(model.Archive).lexically_normal().wstring()),
+                        Narrow(std::filesystem::absolute(source).lexically_normal().wstring()))) model.Archive = cached;
+                    auto checkpoint = result.Library;
+                    std::erase_if(checkpoint.Selected, [&](const auto& model) { return std::none_of(checkpoint.Sources.begin(), checkpoint.Sources.end(),
+                        [&](const auto& path) { return skeleton_repair::EqualsIgnoreCase(Narrow(path.wstring()), Narrow(model.Archive.wstring())); }); });
+                    store.Save(checkpoint);
+                } catch (const OperationCancelled&) { result.Errors += "Import cancelled. Completed imports were kept.\n"; break; }
+                catch (const std::exception& error) { result.Errors += Narrow(source.filename().wstring()) + ": " + error.what() + "\n"; }
+                ++*completed;
+            }
+            std::erase_if(result.Library.Selected, [&](const auto& model) { return std::none_of(result.Library.Sources.begin(), result.Library.Sources.end(),
+                [&](const auto& source) { return skeleton_repair::EqualsIgnoreCase(Narrow(source.wstring()), Narrow(model.Archive.wstring())); }); });
+            return result;
+        });
+    }
+
+    void PollImport() {
+        if (!ImportBusy() || ImportWorker.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+        try {
+            const auto result = ImportWorker.get();
+            ApplyLibrary(result.Library);
+            StoreStatus = result.Errors.empty() ? "Imports saved locally. Your collection will reopen automatically." : result.Errors;
+            Persist(true);
+        } catch (const std::exception& error) { StoreStatus = error.what(); }
+    }
 
     void SyncSources() {
         std::vector<std::string> paths;
@@ -325,13 +411,29 @@ struct App {
         Repair.SetSources(Game ? Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring()) : "", std::move(paths));
     }
 
-    explicit App(const VulkanDevice& device) : Panel(device), Compare(device) {}
+    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device) {
+        try {
+            Store.emplace(LocalModStore::DefaultRoot());
+            const auto library = Store->Load();
+            ApplyLibrary(library);
+            SavedState = library;
+        } catch (const std::exception& error) {
+            SaveError = error.what();
+            SavedState = Builder.Snapshot(ModPaths, ConfiguredGame);
+        }
+    }
+    ~App() {
+        ImportCancellation.Cancel();
+        if (ImportBusy()) { ImportWorker.wait(); PollImport(); }
+        Persist(true);
+    }
 
     void OpenGame(const std::filesystem::path& chosen) {
         Game.reset();
         GameName.clear();
         GameError.clear();
         const std::filesystem::path pak = GamePak(chosen);
+        ConfiguredGame = std::filesystem::absolute(pak).lexically_normal();
         try {
             Game.emplace(VpkArchive::Open(pak));
             GameName = Narrow(pak.wstring());
@@ -373,7 +475,8 @@ struct App {
     }
 
     std::filesystem::path AddArchive(const std::filesystem::path& path) {
-        const auto full = std::filesystem::absolute(path).lexically_normal();
+        if (!Store) throw IoError("Local mod storage is unavailable.");
+        const auto full = Store->Import(path);
         if (std::none_of(ModPaths.begin(), ModPaths.end(), [&](const auto& other) {
             return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(full.wstring()));
         })) ModPaths.push_back(full);
@@ -382,11 +485,15 @@ struct App {
 
     void AddPaths(const std::vector<std::filesystem::path>& paths) {
         if (paths.empty()) return;
-        // Register the whole selection, but decode only the model shown in the workspace.
+        ModelLibrary incoming;
         for (const auto& path : paths) {
-            if (skeleton_repair::EqualsIgnoreCase(Narrow(path.extension().wstring()), ".vpk")) AddArchive(path);
+            if (skeleton_repair::EqualsIgnoreCase(Narrow(path.extension().wstring()), ".vpk")) incoming.Sources.push_back(path);
         }
-        OpenPath(paths.front());
+        if (!incoming.Sources.empty()) StartImport(incoming, false);
+        if (skeleton_repair::EqualsIgnoreCase(Narrow(paths.front().extension().wstring()), ".vmdl_c")) {
+            OpenPath(paths.front());
+            CurrentPage = Page::Inspect;
+        } else CurrentPage = Page::Gallery;
         SyncSources();
     }
 
@@ -522,97 +629,118 @@ struct App {
         return sources;
     }
 
+    void AddMods(HWND hwnd) {
+        AddPaths(AskForFiles(hwnd, L"Mod VPKs and models (*.vpk;*.vmdl_c)\0*.vpk;*.vmdl_c\0All files\0*.*\0",
+            L"Add reference mods (Ctrl / Shift to select multiple)", true));
+    }
+
     void DrawBrowser(HWND hwnd) {
-        ImGui::Begin("Library", nullptr, ImGuiWindowFlags_NoCollapse);
-        ImGui::TextColored({.45f, .81f, .91f, 1.f}, "DEADLOCK");
-        ImGui::TextUnformatted("Model Tools");
-        ImGui::TextDisabled("View / Compare / Repair");
+        ImGui::Begin("Navigation", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+        ImGui::TextColored({.47f, .85f, .77f, 1.f}, "DEADLOCK");
+        ImGui::SetWindowFontScale(1.45f);
+        ImGui::TextUnformatted("Mod Manager");
+        ImGui::SetWindowFontScale(1.f);
+        ImGui::TextDisabled("Your skins. Your loadout.");
+        ImGui::Spacing(); ImGui::Spacing();
+        const auto nav = [&](const char* label, Page page) {
+            if (ImGui::Selectable(label, CurrentPage == page, 0, {0, 36})) CurrentPage = page;
+        };
+        nav("Mod library", Page::Gallery);
+        nav("VPK builder", Page::Pack);
+        nav("Skin repairs", Page::Repair);
+        nav("Model inspector", Page::Inspect);
         ImGui::Spacing();
-        ImGui::SeparatorText("Installed game");
-        if (Game) {
-            ImGui::TextColored({.47f, .85f, .67f, 1.f}, "Connected");
-            ImGui::TextWrapped("%s", GameName.c_str());
-        } else if (!GameError.empty()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", GameError.c_str());
-        } else {
-            ImGui::TextDisabled("Not set. Comparisons need the installed game.");
+        ImGui::SeparatorText("Collection");
+        ImGui::Text("%zu source archives", ModPaths.size());
+        ImGui::Text("%zu skins in pack", Builder.SelectedCount());
+        ImGui::BeginDisabled(FilesBusy());
+        if (ImGui::Button("Add mods...", {-1, 38})) AddMods(hwnd);
+        if (!ModPaths.empty() && ImGui::CollapsingHeader("Manage sources")) {
+            std::optional<std::filesystem::path> remove;
+            for (const auto& path : ModPaths) {
+                const auto key = Narrow(path.wstring());
+                ImGui::PushID(key.c_str());
+                ImGui::TextWrapped("%s", Narrow(path.filename().wstring()).c_str());
+                ImGui::SetItemTooltip("%s", key.c_str());
+                if (ImGui::SmallButton("Remove from library")) remove = path;
+                ImGui::PopID();
+                ImGui::Spacing();
+            }
+            if (remove) {
+                std::erase(ModPaths, *remove);
+                if (ActiveMod == *remove) {
+                    Mod.reset(); Models.clear(); Selected.clear(); ActiveMod.clear();
+                    Panel.ShowError("", ""); Compare.ShowError("", "");
+                }
+                SyncSources();
+                Builder.Restore(Builder.Snapshot(ModPaths, ConfiguredGame));
+            }
         }
-        ImGui::BeginDisabled(Repair.Busy());
+        ImGui::Spacing();
+        ImGui::SeparatorText("Deadlock connection");
+        if (Game) {
+            ImGui::TextColored({.47f, .85f, .67f, 1.f}, "Game connected");
+            ImGui::SetItemTooltip("%s", GameName.c_str());
+        } else {
+            ImGui::TextDisabled("Game not connected");
+            ImGui::TextWrapped("Connect Deadlock for textures, skin repairs and pack dependencies.");
+        }
+        if (!GameError.empty()) ImGui::TextWrapped("%s", GameError.c_str());
         if (ImGui::Button("Choose game archive...", {-1, 32})) {
             const auto paths = AskForFiles(hwnd, L"Game archive (pak01_dir.vpk)\0pak01_dir.vpk\0VPK archives (*.vpk)\0*.vpk\0",
-                    L"Select game\\citadel\\pak01_dir.vpk");
-            if (!paths.empty()) {
-                OpenGame(paths.front());
-            }
-        }
-
-        ImGui::SeparatorText("Mod library");
-        if (ImGui::Button("Add VPKs or model...", {-1, 36})) {
-            AddPaths(AskForFiles(hwnd, L"Mod VPKs and models (*.vpk;*.vmdl_c)\0*.vpk;*.vmdl_c\0All files\0*.*\0",
-                L"Add mod archives or a compiled model (Ctrl / Shift to select multiple)", true));
-        }
-        if (!ModPaths.empty()) {
-            ImGui::TextDisabled("%zu archives in library", ModPaths.size());
-            const std::string active = ActiveMod.empty() ? "Choose an archive" : Narrow(ActiveMod.filename().wstring());
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::BeginCombo("##archives", active.c_str())) {
-                for (const auto& path : ModPaths) {
-                    if (ImGui::Selectable(Narrow(path.filename().wstring()).c_str(), path == ActiveMod)) OpenMod(path);
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", Narrow(path.wstring()).c_str());
-                }
-                ImGui::EndCombo();
-            }
-            if (ImGui::Button("Clear library", {-1, 0})) {
-                Mod.reset(); Models.clear(); Selected.clear(); ActiveMod.clear(); ModPaths.clear();
-                StandaloneModel = false;
-                Panel.ShowError("", ""); Compare.ShowError("", ""); SyncSources();
-            }
+                L"Select game\\citadel\\pak01_dir.vpk");
+            if (!paths.empty()) OpenGame(paths.front());
         }
         ImGui::EndDisabled();
-        if (Mod) {
-            ImGui::SeparatorText("Models");
-            ImGui::TextDisabled("%zu models in this archive", Models.size());
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputTextWithHint("##filter", "Filter", Filter, sizeof(Filter));
-
-            std::vector<const VpkEntry*> shown;
-            for (const VpkEntry* entry : Models) {
-                if (Filter[0] == '\0' || entry->FullPath.find(Filter) != std::string::npos) {
-                    shown.push_back(entry);
-                }
-            }
-            std::optional<std::string> clicked;
-            if (ImGui::BeginChild("models", {0, -50})) {
-                ImGuiListClipper clipper;
-                clipper.Begin(static_cast<int>(shown.size()));
-                while (clipper.Step()) {
-                    for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-                        const VpkEntry* entry = shown[static_cast<size_t>(i)];
-                        const auto label = Narrow(std::filesystem::path(Widen(entry->FullPath)).stem().wstring());
-                        ImGui::BeginDisabled(Repair.Busy());
-                        if (ImGui::Selectable((label + "##" + entry->FullPath).c_str(), entry->FullPath == Selected)) {
-                            clicked = entry->FullPath;
-                        }
-                        ImGui::EndDisabled();
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry->FullPath.c_str());
-                    }
-                }
-            }
-            ImGui::EndChild();
-            if (clicked) {
-                Select(*clicked);
-            }
+        if (Store) {
+            ImGui::TextDisabled("Stored on this computer");
+            ImGui::SetItemTooltip("%s", Narrow(Store->Root().wstring()).c_str());
         }
-        else {
+        if (!SaveError.empty()) ImGui::TextWrapped("%s", SaveError.c_str());
+        if (ImportBusy()) {
+            ImGui::Text("Importing %zu / %zu", ImportedCount.load(), ImportTotal);
+            if (ImGui::Button("Cancel import")) ImportCancellation.Cancel();
+        } else if (!StoreStatus.empty()) ImGui::TextWrapped("%s", StoreStatus.c_str());
+        if (Repair.Busy() || Builder.Busy()) {
             ImGui::Spacing();
-            ImGui::TextWrapped("Drop a mod VPK here to get started. Choose a model to view its textures, play animation clips, or compare its rig.");
+            ImGui::TextColored({1.f, .76f, .43f, 1.f}, Repair.Busy() ? "Checking / repairing skins..." : "Building your VPK...");
         }
-        ImGui::TextDisabled("Drag: orbit   /   Scroll: zoom");
-        ImGui::TextDisabled("Middle / right drag: pan");
+        ImGui::End();
+    }
+
+    void DrawWorkspace(HWND hwnd) {
+        ImGui::Begin("Workspace", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+        if (CurrentPage == Page::Gallery || CurrentPage == Page::Pack) {
+            Builder.Draw(hwnd, ModPaths, Game ? std::filesystem::path(Widen(GameName)) : std::filesystem::path{},
+                Repair.Busy() || ImportBusy(), CurrentPage == Page::Pack, [&] { AddMods(hwnd); },
+                [&](const ModelLibrary& library) {
+                    StartImport(library, true);
+                },
+                [&](const LibraryModel& model) { OpenMod(model.Archive); Select(model.Model); CurrentPage = Page::Inspect; });
+        } else if (CurrentPage == Page::Inspect) {
+            if (ImGui::Button("< Back to library")) CurrentPage = Page::Gallery;
+            ImGui::SameLine(); ImGui::TextDisabled("%s", ModName.c_str());
+            ImGui::SeparatorText("Model inspector");
+            if (Selected.empty() && !StandaloneModel) {
+                ImGui::TextWrapped("Choose Inspect on a skin in the gallery to view its textures, animations and skeleton, or compare it with the installed game.");
+                if (ImGui::Button("Browse skins", {150, 36})) CurrentPage = Page::Gallery;
+            } else if (ImGui::BeginTabBar("inspection")) {
+                if (ImGui::BeginTabItem("Preview")) { Panel.Draw(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Compare versions")) { Compare.Draw(); ImGui::EndTabItem(); }
+                ImGui::EndTabBar();
+            }
+        } else {
+            ImGui::TextColored({.47f, .85f, .77f, 1.f}, "COLLECTION TOOLS");
+            ImGui::SetWindowFontScale(1.6f); ImGui::TextUnformatted("Skin repairs"); ImGui::SetWindowFontScale(1.f);
+            ImGui::TextDisabled("Keep your collection compatible with game updates.");
+            ImGui::Spacing();
+            ImGui::BeginDisabled(Builder.Busy() || ImportBusy());
+            Repair.Draw(hwnd, [&] { Mod.reset(); Models.clear(); });
+            ImGui::EndDisabled();
+        }
         ImGui::End();
     }
 };
-
 void ApplyTheme(float scale) {
     ImGui::StyleColorsDark();
     auto& style = ImGui::GetStyle();
@@ -655,7 +783,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
     ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, GetModuleHandleW(nullptr), nullptr, nullptr, nullptr, nullptr, L"DeadlockModelPreview", nullptr};
     RegisterClassExW(&wc);
-    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, L"Deadlock Model Tools", WS_OVERLAPPEDWINDOW, 100, 100, 1440, 960, nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, L"Deadlock Mod Manager", WS_OVERLAPPEDWINDOW, 100, 100, 1440, 960, nullptr, nullptr, wc.hInstance, nullptr);
     if (!hwnd) throw std::runtime_error("Could not create the model tools window.");
 
     SetupVulkan();
@@ -712,7 +840,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 positional.push_back(args[i]);
             }
         }
-        if (!game_folder) {
+        if (!game_folder && !app.Game) {
             try {
                 if (const auto detected = FindGameFolder()) game_folder = Widen(*detected);
             } catch (const std::exception& error) {
@@ -723,15 +851,16 @@ int Run(const std::vector<std::filesystem::path>& args) {
             app.OpenGame(*game_folder);
         }
         if (!positional.empty()) {
-            app.OpenPath(positional[0]);
-            if (positional.size() > 1 && app.Mod && EndsWith(Narrow(positional[1].wstring()), ".vmdl_c")) {
+            if (positional.size() > 1 && EndsWith(Narrow(positional[0].wstring()), ".vpk") && EndsWith(Narrow(positional[1].wstring()), ".vmdl_c")) {
+                app.OpenPath(positional[0]);
                 app.Select(VpkArchive::Normalize(Narrow(positional[1].wstring())));
+                app.CurrentPage = App::Page::Inspect;
                 if (clip) {
                     app.Panel.PlayClip(*clip);
                     app.Compare.PlayClip(*clip);
                 }
             } else {
-                for (size_t i = 1; i < positional.size(); ++i) app.OpenPath(positional[i]);
+                app.AddPaths(positional);
             }
         }
 
@@ -770,60 +899,39 @@ int Run(const std::vector<std::filesystem::path>& args) {
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
 
-            if (app.Repair.Poll() && !app.ActiveMod.empty()) {
+            app.Builder.Poll();
+            app.PollImport();
+
+            const bool repaired = app.Repair.Poll();
+            if (repaired) app.Builder.InvalidateThumbnails();
+            if (repaired && !app.ActiveMod.empty()) {
                 const auto path = app.ActiveMod;
                 const auto selected = app.Selected;
                 app.OpenMod(path);
                 if (!selected.empty()) app.Select(selected);
             }
             if (!g_dropped.empty()) {
-                if (!app.Repair.Busy()) app.AddPaths(g_dropped);
+                if (!app.FilesBusy()) app.AddPaths(g_dropped);
                 g_dropped.clear();
             }
 
             const ImGuiID dockspace = ImGui::DockSpaceOverViewport();
             if (first_frame) {
-                // Browser on the left, preview filling the rest.
+                // Collection navigation on the left, thumbnail gallery filling the workspace.
                 ImGui::DockBuilderRemoveNode(dockspace);
                 ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
                 ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
                 ImGuiID right = 0;
-                const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.24f, nullptr, &right);
-                ImGui::DockBuilderDockWindow("Library", left);
+                const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.19f, nullptr, &right);
+                ImGui::DockBuilderDockWindow("Navigation", left);
                 ImGui::DockBuilderDockWindow("Workspace", right);
                 ImGui::DockBuilderFinish(dockspace);
                 first_frame = false;
             }
 
             app.DrawBrowser(hwnd);
-            ImGui::Begin("Workspace", nullptr, ImGuiWindowFlags_NoCollapse);
-            if (ImGui::BeginTabBar("tools", ImGuiTabBarFlags_FittingPolicyResizeDown)) {
-                if (ImGui::BeginTabItem("View model")) {
-                    if (app.Selected.empty() && app.ActiveMod.empty() && !app.StandaloneModel) {
-                        ImGui::Spacing();
-                        ImGui::SeparatorText("Explore your models");
-                        ImGui::TextWrapped("Add or drop a mod VPK in the library. The first model opens automatically, with textures and animation controls when available.");
-                        ImGui::Spacing();
-                        ImGui::TextDisabled("Compare: mod, installed game and proposed repair");
-                        ImGui::TextDisabled("Repair: analyze archives, apply supported fixes and save a report");
-                    }
-                    app.Panel.Draw();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Compare versions")) {
-                    app.Compare.Draw();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Repair mods")) {
-                    app.Repair.Draw(hwnd, [&] {
-                        app.Mod.reset();
-                        app.Models.clear();
-                    });
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            }
-            ImGui::End();
+            app.DrawWorkspace(hwnd);
+            app.Persist();
 
             ImGui::Render();
             ImDrawData* draw_data = ImGui::GetDrawData();
@@ -832,6 +940,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 FrameRender(draw_data, [&](VkCommandBuffer command_buffer) {
                     app.Panel.Record(command_buffer);
                     app.Compare.Record(command_buffer);
+                    app.Builder.Record(command_buffer);
                 });
                 FramePresent();
             }
