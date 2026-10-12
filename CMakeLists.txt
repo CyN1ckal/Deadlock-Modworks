@@ -117,3 +117,5 @@ endif()
 enable_testing()
 include(GoogleTest)
 gtest_discover_tests(skeleton_repair_tests DISCOVERY_MODE PRE_TEST)
+
+include(cmake/render.cmake)
