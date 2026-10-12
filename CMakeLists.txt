@@ -75,6 +75,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(meshoptimizer)
 
+FetchContent_Declare(
+    sqlite3
+    URL https://www.sqlite.org/2026/sqlite-amalgamation-3540000.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_GetProperties(sqlite3)
+if(NOT sqlite3_POPULATED)
+    FetchContent_Populate(sqlite3)
+endif()
+add_library(sr_sqlite STATIC ${sqlite3_SOURCE_DIR}/sqlite3.c)
+target_include_directories(sr_sqlite PUBLIC ${sqlite3_SOURCE_DIR})
+target_compile_definitions(sr_sqlite PRIVATE
+    SQLITE_OMIT_LOAD_EXTENSION
+    SQLITE_DQS=0
+    SQLITE_THREADSAFE=1
+)
+if(MSVC)
+    target_compile_options(sr_sqlite PRIVATE /W0)
+endif()
+
 add_library(skeleton_repair_core STATIC
     src/core/strings.cpp
     src/core/skeleton.cpp
@@ -90,9 +110,11 @@ add_library(skeleton_repair_core STATIC
     src/core/model_geometry.cpp
     src/core/texture.cpp
     src/core/animation_clip.cpp
+    src/core/content_hash.cpp
+    src/core/content_store.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json meshoptimizer)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json meshoptimizer sr_sqlite)
 
 add_executable(DeadlockSkeletonRepair src/app/main.cpp)
 target_link_libraries(DeadlockSkeletonRepair PRIVATE skeleton_repair_core shell32)
@@ -108,6 +130,7 @@ add_executable(skeleton_repair_tests
     tests/geometry_tests.cpp
     tests/texture_tests.cpp
     tests/animation_clip_tests.cpp
+    tests/store_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
