@@ -680,7 +680,9 @@ MigrationEdit AnimationSkeletonMigration::Migrate(std::span<const uint8_t> mod_b
         edit.Bytes = patched;
         edit.Outcome = ModelOutcome::Updated;
         edit.Detail = std::move(detail);
-        edit.Warnings.push_back("Test this animation-skeleton repair in-game; structural verification cannot confirm animation playback.");
+        edit.Warnings = std::vector<std::string>{
+            "Test this animation-skeleton repair in-game; structural verification cannot confirm animation playback.",
+        };
         edit.BoneAliases = mapping.Aliases;
         return edit;
     } catch (const std::exception& ex) {

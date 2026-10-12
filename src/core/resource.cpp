@@ -178,4 +178,97 @@ std::vector<uint8_t> ReplaceDataBlock(std::span<const uint8_t> file, std::span<c
     return result;
 }
 
+std::vector<std::string> ExternalReferenceNames(std::span<const uint8_t> file) {
+    if (file.size() < 16) {
+        throw InvalidData("Resource is too small.");
+    }
+    if (Read<uint16_t>(file, 4) != 12) {
+        throw InvalidData("Resource header is not version 12.");
+    }
+
+    const auto block_offset = Read<uint32_t>(file, 8);
+    const auto block_count = Read<int32_t>(file, 12);
+    if (block_count <= 0 || block_offset < 8) {
+        throw InvalidData("Resource block table is invalid.");
+    }
+    const int64_t table_start_long = 8LL + block_offset;
+    const int64_t table_bytes_long = static_cast<int64_t>(block_count) * 12;
+    if (table_start_long > static_cast<int64_t>(file.size()) || table_bytes_long > static_cast<int64_t>(file.size()) - table_start_long) {
+        throw InvalidData("Resource block table is outside the file.");
+    }
+    const size_t table_start = static_cast<size_t>(table_start_long);
+
+    int entry = -1;
+    uint32_t relative = 0;
+    int32_t size = 0;
+    for (int i = 0; i < block_count; ++i) {
+        const size_t pos = table_start + static_cast<size_t>(i) * 12;
+        if (file[pos] == 'R' && file[pos + 1] == 'E' && file[pos + 2] == 'R' && file[pos + 3] == 'L') {
+            entry = static_cast<int>(pos);
+            relative = Read<uint32_t>(file, pos + 4);
+            size = Read<int32_t>(file, pos + 8);
+            break;
+        }
+    }
+    if (entry < 0 || size == 0) {
+        return {};
+    }
+    if (size < 0) {
+        throw InvalidData("RERL block is outside the file.");
+    }
+
+    const int64_t block_start_long = static_cast<int64_t>(entry) + 4 + relative;
+    if (block_start_long < 0 || block_start_long > static_cast<int64_t>(file.size())
+        || static_cast<int64_t>(size) > static_cast<int64_t>(file.size()) - block_start_long) {
+        throw InvalidData("RERL block is outside the file.");
+    }
+    const size_t block_start = static_cast<size_t>(block_start_long);
+    if (size < 8) {
+        throw InvalidData("RERL block is outside the file.");
+    }
+
+    const auto header_offset = Read<uint32_t>(file, block_start);
+    const auto count = Read<uint32_t>(file, block_start + 4);
+    if (count == 0) {
+        return {};
+    }
+    if (count > (file.size() / 16)) {
+        throw InvalidData("RERL reference is outside the block.");
+    }
+
+    const int64_t list_long = static_cast<int64_t>(block_start) + header_offset;
+    if (list_long < 0 || static_cast<uint64_t>(list_long) > file.size()) {
+        throw InvalidData("RERL reference is outside the block.");
+    }
+    const size_t list = static_cast<size_t>(list_long);
+    if (static_cast<uint64_t>(count) * 16 > file.size() - list) {
+        throw InvalidData("RERL reference is outside the block.");
+    }
+
+    std::vector<std::string> names;
+    names.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const size_t name_field = list + static_cast<size_t>(i) * 16 + 8;
+        const auto relative_name = Read<int32_t>(file, name_field);
+        // A zero offset is an empty name. Any other offset is relative to the int32 that stores it.
+        if (relative_name == 0) {
+            names.emplace_back();
+            continue;
+        }
+        const int64_t name_at = static_cast<int64_t>(name_field) + relative_name;
+        if (name_at < 0 || static_cast<uint64_t>(name_at) >= file.size()) {
+            throw InvalidData("RERL resource name is outside the file.");
+        }
+        size_t cursor = static_cast<size_t>(name_at);
+        while (cursor < file.size() && file[cursor] != 0) {
+            ++cursor;
+        }
+        if (cursor >= file.size()) {
+            throw InvalidData("RERL resource name is outside the file.");
+        }
+        names.emplace_back(reinterpret_cast<const char*>(file.data() + name_at), cursor - static_cast<size_t>(name_at));
+    }
+    return names;
+}
+
 }  // namespace skeleton_repair

@@ -59,6 +59,15 @@ set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
 set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
 add_subdirectory(${zstd_SOURCE_DIR}/build/cmake ${CMAKE_BINARY_DIR}/zstd-build EXCLUDE_FROM_ALL)
 
+FetchContent_Declare(
+    nlohmann_json
+    URL https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(nlohmann_json)
+
 add_library(skeleton_repair_core STATIC
     src/core/strings.cpp
     src/core/skeleton.cpp
@@ -68,9 +77,15 @@ add_library(skeleton_repair_core STATIC
     src/core/resource.cpp
     src/core/animation.cpp
     src/core/model.cpp
+    src/core/updater.cpp
+    src/core/report.cpp
+    src/core/command_line.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json)
+
+add_executable(DeadlockSkeletonRepair src/app/main.cpp)
+target_link_libraries(DeadlockSkeletonRepair PRIVATE skeleton_repair_core shell32)
 
 add_executable(skeleton_repair_tests
     tests/skeleton_tests.cpp
@@ -79,12 +94,14 @@ add_executable(skeleton_repair_tests
     tests/resource_tests.cpp
     tests/animation_tests.cpp
     tests/model_tests.cpp
+    tests/updater_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 if(MSVC)
     target_compile_options(skeleton_repair_core PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(DeadlockSkeletonRepair PRIVATE /W4 /permissive- /utf-8)
     target_compile_options(skeleton_repair_tests PRIVATE /W4 /permissive- /utf-8)
 endif()
 

@@ -159,3 +159,111 @@ TEST(Resource, RejectsBrokenTablesAndPayloads) {
     WriteU32(file, 32, 0);
     EXPECT_THROW(skeleton_repair::ReplaceDataBlock(file, kv), skeleton_repair::InvalidData);
 }
+
+void AppendU32(std::vector<uint8_t>& bytes, uint32_t value) {
+    const size_t offset = bytes.size();
+    bytes.resize(offset + 4);
+    WriteU32(bytes, offset, value);
+}
+
+void AppendI32(std::vector<uint8_t>& bytes, int32_t value) {
+    const size_t offset = bytes.size();
+    bytes.resize(offset + 4);
+    WriteI32(bytes, offset, value);
+}
+
+void AppendU64(std::vector<uint8_t>& bytes, uint64_t value) {
+    AppendU32(bytes, static_cast<uint32_t>(value));
+    AppendU32(bytes, static_cast<uint32_t>(value >> 32));
+}
+
+std::vector<uint8_t> RerlBlock(const std::vector<std::string>& names) {
+    std::vector<uint8_t> block;
+    const auto count = static_cast<uint32_t>(names.size());
+    AppendU32(block, 8);
+    AppendU32(block, count);
+    std::string strings;
+    std::vector<int32_t> offsets;
+    offsets.reserve(names.size());
+    size_t cursor = 8 + static_cast<size_t>(count) * 16;
+    for (uint32_t i = 0; i < count; ++i) {
+        const size_t name_field = 16 + static_cast<size_t>(i) * 16;
+        if (names[i].empty()) {
+            offsets.push_back(0);
+            continue;
+        }
+        offsets.push_back(static_cast<int32_t>(cursor - name_field));
+        strings += names[i];
+        strings.push_back('\0');
+        cursor += names[i].size() + 1;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        AppendU64(block, 0);
+        AppendI32(block, offsets[i]);
+        AppendI32(block, 0);
+    }
+    block.insert(block.end(), strings.begin(), strings.end());
+    return block;
+}
+
+std::vector<uint8_t> ResourceWithRerl(const std::vector<uint8_t>& data, const std::vector<uint8_t>& rerl) {
+    const size_t start = 40;
+    std::vector<uint8_t> file(start + data.size() + rerl.size());
+    WriteU32(file, 0, static_cast<uint32_t>(file.size()));
+    WriteU16(file, 4, 12);
+    WriteU16(file, 6, 1);
+    WriteU32(file, 8, 8);
+    WriteI32(file, 12, 2);
+    file[16] = 'D';
+    file[17] = 'A';
+    file[18] = 'T';
+    file[19] = 'A';
+    WriteU32(file, 20, 20);
+    WriteI32(file, 24, static_cast<int32_t>(data.size()));
+    file[28] = 'R';
+    file[29] = 'E';
+    file[30] = 'R';
+    file[31] = 'L';
+    WriteU32(file, 32, static_cast<uint32_t>(8 + data.size()));
+    WriteI32(file, 36, static_cast<int32_t>(rerl.size()));
+    std::memcpy(file.data() + start, data.data(), data.size());
+    if (!rerl.empty()) {
+        std::memcpy(file.data() + start + data.size(), rerl.data(), rerl.size());
+    }
+    return file;
+}
+
+TEST(Resource, ReadsTheFirstExternalReferenceList) {
+    const auto data = Load("empty-object.kv3");
+    EXPECT_TRUE(skeleton_repair::ExternalReferenceNames(Resource(data, false)).empty());
+
+    auto empty_list = Resource(data, false);
+    empty_list.resize(empty_list.size() + 12);
+    WriteU32(empty_list, 0, static_cast<uint32_t>(empty_list.size()));
+    WriteI32(empty_list, 12, 2);
+    const size_t entry = 28;
+    empty_list[entry] = 'R';
+    empty_list[entry + 1] = 'E';
+    empty_list[entry + 2] = 'R';
+    empty_list[entry + 3] = 'L';
+    WriteU32(empty_list, entry + 4, 8);
+    WriteI32(empty_list, entry + 8, 0);
+    EXPECT_TRUE(skeleton_repair::ExternalReferenceNames(empty_list).empty());
+    EXPECT_TRUE(skeleton_repair::ExternalReferenceNames(ResourceWithRerl(data, RerlBlock({}))).empty());
+
+    const auto names = skeleton_repair::ExternalReferenceNames(ResourceWithRerl(data, RerlBlock({
+        "models/heroes/test/missing.vnmskel",
+        "models/heroes/test/old.vanmgrph",
+    })));
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_EQ(names[0], "models/heroes/test/missing.vnmskel");
+    EXPECT_EQ(names[1], "models/heroes/test/old.vanmgrph");
+
+    const auto blank = skeleton_repair::ExternalReferenceNames(ResourceWithRerl(data, RerlBlock({""})));
+    ASSERT_EQ(blank.size(), 1u);
+    EXPECT_TRUE(blank[0].empty());
+
+    auto truncated = ResourceWithRerl(data, RerlBlock({"models/heroes/test/missing.vnmskel"}));
+    WriteI32(truncated, 36, 4);
+    EXPECT_THROW(skeleton_repair::ExternalReferenceNames(truncated), skeleton_repair::InvalidData);
+}

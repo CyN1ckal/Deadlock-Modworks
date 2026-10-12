@@ -193,8 +193,9 @@ TEST(Model, CustomHelperStaysWhenTheGamePrefixMatches) {
     EXPECT_EQ(edit.Outcome, ModelOutcome::Current);
     EXPECT_FALSE(edit.Bytes.has_value());
     EXPECT_NE(edit.Detail.find("custom_helper"), std::string::npos);
-    ASSERT_EQ(edit.Warnings.size(), 1u);
-    EXPECT_NE(edit.Warnings[0].find("Custom rest poses"), std::string::npos);
+    ASSERT_TRUE(edit.Warnings.has_value());
+    ASSERT_EQ(edit.Warnings->size(), 1u);
+    EXPECT_NE(edit.Warnings->at(0).find("Custom rest poses"), std::string::npos);
 }
 
 TEST(Model, Ag2RenderRigIsNotRewritten) {
@@ -215,7 +216,8 @@ TEST(Model, Ag2RenderRigIsNotRewritten) {
     EXPECT_EQ(edit.Outcome, ModelOutcome::Current);
     EXPECT_FALSE(edit.Bytes.has_value());
     EXPECT_TRUE(edit.Detail.starts_with("External animation skeleton bindings are used. No render-skeleton rewrite is needed."));
-    EXPECT_FALSE(edit.Warnings.empty());
+    ASSERT_TRUE(edit.Warnings.has_value());
+    EXPECT_FALSE(edit.Warnings->empty());
 }
 
 TEST(Model, ReviewAndFailureGates) {
@@ -269,8 +271,9 @@ TEST(Model, FlagDifferencesStayWithTheMod) {
     const auto mod = Model({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Remap = std::vector<int>{0, 1}, .Flags = {0, 1}});
     const auto edit = ModelMigration::Migrate(mod, kPath, game, kPath);
     EXPECT_EQ(edit.Outcome, ModelOutcome::Current);
-    ASSERT_EQ(edit.Warnings.size(), 1u);
-    EXPECT_EQ(edit.Warnings[0], "Authored bone usage/LOD flags differ (1); mod flags are preserved.");
+    ASSERT_TRUE(edit.Warnings.has_value());
+    ASSERT_EQ(edit.Warnings->size(), 1u);
+    EXPECT_EQ(edit.Warnings->at(0), "Authored bone usage/LOD flags differ (1); mod flags are preserved.");
 }
 
 TEST(Model, HelperParentIsRemappedWithTheGameOrder) {

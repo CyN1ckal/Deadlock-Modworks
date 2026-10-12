@@ -38,7 +38,8 @@ std::string Join(const std::vector<std::string>& parts) {
     return out;
 }
 
-MigrationEdit WithOutcome(ModelOutcome outcome, std::string detail, std::vector<std::string> warnings = {}) {
+MigrationEdit WithOutcome(ModelOutcome outcome, std::string detail,
+    std::optional<std::vector<std::string>> warnings = std::nullopt) {
     MigrationEdit edit;
     edit.Outcome = outcome;
     edit.Detail = std::move(detail);

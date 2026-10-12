@@ -173,8 +173,9 @@ TEST(Animation, ReordersBonesAndRebuildsWorldPoses) {
 
     EXPECT_EQ(edit.Outcome, ModelOutcome::Updated);
     ASSERT_TRUE(edit.Bytes.has_value());
-    EXPECT_EQ(edit.Warnings.size(), 1u);
-    EXPECT_EQ(edit.Warnings[0], "Test this animation-skeleton repair in-game; structural verification cannot confirm animation playback.");
+    ASSERT_TRUE(edit.Warnings.has_value());
+    EXPECT_EQ(edit.Warnings->size(), 1u);
+    EXPECT_EQ(edit.Warnings->at(0), "Test this animation-skeleton repair in-game; structural verification cannot confirm animation playback.");
     EXPECT_EQ(edit.Detail,
         "Animation override binding layout updated: 2 to 3 bones; low-LOD sampling 2 to 2. "
         "Authored parent-space poses and mask weights are preserved, world poses are rebuilt, and model geometry is untouched.");
@@ -198,7 +199,8 @@ TEST(Animation, ReordersBonesAndRebuildsWorldPoses) {
     EXPECT_FLOAT_EQ(world.At(1).At(0).Float(), 14.0f);
     EXPECT_FLOAT_EQ(world.At(2).At(0).Float(), 7.0f);
     EXPECT_FLOAT_EQ(Field(checked.Root, "m_maskDefinitions").At(0).Find("m_authoredValue")->Float(), 0.75f);
-    EXPECT_TRUE(edit.BoneAliases.empty());
+    ASSERT_TRUE(edit.BoneAliases.has_value());
+    EXPECT_TRUE(edit.BoneAliases->empty());
 }
 
 TEST(Animation, SpunWorldPoseMatchesDotNet) {
@@ -288,9 +290,10 @@ TEST(Animation, CaseRenameUpdatesOnlyTheMatchingMask) {
         "Animation override binding layout updated: 3 to 4 bones; low-LOD sampling 3 to 2. "
         "Authored parent-space poses and mask weights are preserved, world poses are rebuilt, and model geometry is untouched. "
         "Case-only bone renames (2): weapon_hand_l -> weapon_hand_L, magazine_l -> magazine_L; updated 2 mask references.");
-    ASSERT_EQ(edit.BoneAliases.size(), 2u);
-    EXPECT_EQ(edit.BoneAliases[0].first, "weapon_hand_l");
-    EXPECT_EQ(edit.BoneAliases[0].second, "weapon_hand_L");
+    ASSERT_TRUE(edit.BoneAliases.has_value());
+    ASSERT_EQ(edit.BoneAliases->size(), 2u);
+    EXPECT_EQ(edit.BoneAliases->at(0).first, "weapon_hand_l");
+    EXPECT_EQ(edit.BoneAliases->at(0).second, "weapon_hand_L");
 
     const KvDocument checked = ReadKv3(skeleton_repair::FindDataBlock(*edit.Bytes));
     const KvValue& bones = Field(checked.Root, "m_boneIDs");
