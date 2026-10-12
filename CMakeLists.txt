@@ -134,6 +134,7 @@ add_executable(skeleton_repair_tests
     tests/library_model_tests.cpp
     tests/store_reader_tests.cpp
     tests/history_compare_tests.cpp
+    tests/command_line_store_tests.cpp
     src/preview/library_model.cpp
     src/preview/store_reader.cpp
     src/preview/history_compare.cpp
