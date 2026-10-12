@@ -928,6 +928,7 @@ TEST(Store, GameArchiveIsNotImported) {
     const fs::path mod = game / "mod.vpk";
     const std::vector<uint8_t> payload{5, 5, 5, 5};
     ArchiveWith(pak, {VpkChange{"models/heroes/hero.vmdl_c", payload}});
+    WriteBytes(game / "pak01_000.vpk", {0});
     ArchiveWith(mod, {VpkChange{"models/heroes/hero.vmdl_c", payload}});
 
     ContentStore store = ContentStore::Open(store_path);
@@ -937,6 +938,22 @@ TEST(Store, GameArchiveIsNotImported) {
     EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 0);
     EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs"), 0);
     EXPECT_EQ(CountBlobFiles(store_path), 0);
+}
+
+TEST(Store, ModNamedLikeTheGameArchiveIsImported) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path downloads = dir.Path() / "downloads";
+    fs::create_directories(downloads);
+    const fs::path pak = downloads / "pak01_dir.vpk";
+    const fs::path other = downloads / "pak03_dir.vpk";
+    ArchiveWith(pak, {VpkChange{"models/heroes_staging/mina/mina.vmdl_c", std::vector<uint8_t>{1, 2}}});
+    ArchiveWith(other, {VpkChange{"models/heroes_staging/haze/haze.vmdl_c", std::vector<uint8_t>{3, 4}}});
+
+    // Without pak01_000.vpk beside it, pak01_dir.vpk is a single-file mod and its folder is not the game's.
+    ContentStore store = ContentStore::Open(store_path);
+    EXPECT_EQ(store.SnapshotLabel(store.ImportVpk(pak)), "mina");
+    EXPECT_EQ(store.SnapshotLabel(store.ImportVpk(other)), "haze");
 }
 
 TEST(Store, BusyLibraryIsReportedAndRetryUsesExistingBlobFile) {
@@ -1876,29 +1893,30 @@ TEST(Store, ImportFolderImportsEligibleVpksAndSkipsChunksAndGameArchive) {
 
     ContentStore store = ContentStore::Open(store_path);
     const FolderImportResult result = store.ImportFolder(folder);
-    EXPECT_EQ(result.Report(), "Skipped 2 files.");
-    EXPECT_EQ(result.SkippedFiles, 2);
+    EXPECT_EQ(result.Report(), "Skipped 1 files.");
+    EXPECT_EQ(result.SkippedFiles, 1);
     EXPECT_TRUE(result.Failures.empty());
-    ASSERT_EQ(result.Snapshots.size(), 2u);
+    // Without pak01_000.vpk beside it, pak01_dir.vpk is a mod, not the game archive.
+    ASSERT_EQ(result.Snapshots.size(), 3u);
     EXPECT_NE(result.Snapshots[0].Value, result.Snapshots[1].Value);
 
     const std::vector<PackRow> packs = store.ListPacks();
-    ASSERT_EQ(packs.size(), 2u);
+    ASSERT_EQ(packs.size(), 3u);
     std::vector<std::string> labels;
     labels.reserve(packs.size());
     for (const PackRow& pack : packs) {
         labels.push_back(pack.Label);
     }
     std::sort(labels.begin(), labels.end());
-    EXPECT_EQ(labels, (std::vector<std::string>{"a", "b"}));
+    EXPECT_EQ(labels, (std::vector<std::string>{"a", "b", "game"}));
     EXPECT_EQ(store.ReadBlob(IdOf(payload_a)), payload_a);
     EXPECT_EQ(store.ReadBlob(IdOf(payload_b)), payload_b);
     ExpectMessage([&] { store.ReadBlob(IdOf(payload_chunk)); }, "The model library has no blob with that id.");
-    ExpectMessage([&] { store.ReadBlob(IdOf(payload_game)); }, "The model library has no blob with that id.");
+    EXPECT_EQ(store.ReadBlob(IdOf(payload_game)), payload_game);
     ExpectMessage([&] { store.ReadBlob(IdOf(payload_nested)); }, "The model library has no blob with that id.");
 
     Catalog catalog(store_path);
-    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 3);
 }
 
 TEST(Store, ImportFolderKeepsCommittedArchivesWhenOneArchiveFails) {

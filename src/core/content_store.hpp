@@ -127,7 +127,7 @@ struct FolderImportFailure {
     std::string Message;
 };
 
-// One folder import. SkippedFiles counts chunk VPKs and pak01_dir.vpk only.
+// One folder import. SkippedFiles counts chunk VPKs and the game archive only.
 struct FolderImportResult {
     std::vector<SnapshotId> Snapshots;
     int SkippedFiles = 0;
@@ -136,8 +136,8 @@ struct FolderImportResult {
     std::string Report() const { return "Skipped " + std::to_string(SkippedFiles) + " files."; }
 };
 
-// The VPKs ImportFolder imports from a folder, ordered by name: not recursive, without chunk files and pak01_dir.vpk.
-// `skipped` receives the number of chunk files and pak01_dir.vpk.
+// The VPKs ImportFolder imports from a folder, ordered by name: not recursive, without chunk files and the game archive
+// (a pak01_dir.vpk with pak01_000.vpk beside it). `skipped` receives the number of files left out.
 std::vector<std::filesystem::path> FolderImportCandidates(const std::filesystem::path& directory, int* skipped = nullptr);
 
 // Content-addressed library. M1 imports blobs. M2 lists them. M3 records repair edges. M4 queries history.
@@ -153,7 +153,7 @@ public:
     ~ContentStore();
 
     SnapshotId ImportVpk(const std::filesystem::path& path, CancellationToken cancellation = {});
-    // Imports every eligible VPK in the folder, non-recursive. Skips chunk files and pak01_dir.vpk.
+    // Imports every eligible VPK in the folder, non-recursive. Skips chunk files and the game archive.
     // A failed archive is listed and does not roll back archives already committed.
     FolderImportResult ImportFolder(const std::filesystem::path& directory, CancellationToken cancellation = {});
     std::vector<uint8_t> ReadBlob(const BlobId& id) const;
@@ -191,8 +191,8 @@ public:
 private:
     struct State;
     explicit ContentStore(std::unique_ptr<State> state);
-    // reject_game_folder refuses a VPK whose parent contains pak01_dir.vpk.
-    // The file named pak01_dir.vpk is always refused.
+    // The game archive, a pak01_dir.vpk with pak01_000.vpk beside it, is always refused.
+    // reject_game_folder also refuses any VPK beside the game archive.
     SnapshotId ImportVpkFile(const std::filesystem::path& path, CancellationToken cancellation, bool reject_game_folder);
 
     std::unique_ptr<State> state_;

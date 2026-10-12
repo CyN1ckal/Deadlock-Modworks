@@ -349,25 +349,32 @@ bool IsChunkName(std::string_view filename) {
         && std::isdigit(static_cast<unsigned char>(lower[underscore + 3])) != 0;
 }
 
-void RejectGameArchive(const std::filesystem::path& absolute, bool reject_game_folder) {
-    if (EqualsIgnoreCase(PathText(absolute.filename()), "pak01_dir.vpk")) {
-        throw InvalidOperation(kGameArchiveMessage);
-    }
-    if (!reject_game_folder) {
-        return;
-    }
-    const std::filesystem::path parent = absolute.parent_path();
-    if (!parent.empty() && std::filesystem::exists(parent / "pak01_dir.vpk")) {
-        throw InvalidOperation(kGameFolderMessage);
-    }
-}
-
 bool IsVpkFileName(const std::filesystem::path& path) {
     return EqualsIgnoreCase(PathText(path.extension()), ".vpk");
 }
 
 bool IsGameArchiveName(const std::filesystem::path& path) {
     return EqualsIgnoreCase(PathText(path.filename()), "pak01_dir.vpk");
+}
+
+// The game archive is pak01_dir.vpk with its chunk files beside it. Downloaded mods are often named
+// pak01_dir.vpk too, but they are a single file.
+bool IsGameArchive(const std::filesystem::path& path) {
+    std::error_code error;
+    return IsGameArchiveName(path) && std::filesystem::exists(path.parent_path() / "pak01_000.vpk", error);
+}
+
+void RejectGameArchive(const std::filesystem::path& absolute, bool reject_game_folder) {
+    if (IsGameArchive(absolute)) {
+        throw InvalidOperation(kGameArchiveMessage);
+    }
+    if (!reject_game_folder) {
+        return;
+    }
+    const std::filesystem::path parent = absolute.parent_path();
+    if (!parent.empty() && IsGameArchive(parent / "pak01_dir.vpk")) {
+        throw InvalidOperation(kGameFolderMessage);
+    }
 }
 
 std::string KindFor(std::string_view path_key) {
@@ -1849,7 +1856,7 @@ std::vector<std::filesystem::path> FolderImportCandidates(const std::filesystem:
         if (!IsVpkFileName(file)) {
             continue;
         }
-        if (IsChunkName(PathText(file.filename())) || IsGameArchiveName(file)) {
+        if (IsChunkName(PathText(file.filename())) || IsGameArchive(file)) {
             ++skipped_files;
             continue;
         }
@@ -1867,7 +1874,7 @@ FolderImportResult ContentStore::ImportFolder(const std::filesystem::path& direc
     for (const std::filesystem::path& file : FolderImportCandidates(directory, &result.SkippedFiles)) {
         cancellation.ThrowIfCancelled();
         try {
-            // The folder scan already skipped pak01_dir.vpk. Eligible siblings in that folder are mods.
+            // The folder scan already skipped the game archive. Eligible siblings in that folder are mods.
             result.Snapshots.push_back(ImportVpkFile(file, cancellation, false));
         } catch (const OperationCancelled&) {
             throw;
