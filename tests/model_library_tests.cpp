@@ -102,6 +102,13 @@ TEST_F(LibraryTest, MissingDependenciesAndUnavailableSelectionsBlockExport) {
     EXPECT_THROW(ExportModelLibrary({{source, "models/missing.vmdl_c"}}, {}, output), InvalidData);
     EXPECT_FALSE(fs::exists(output));
 }
+TEST_F(LibraryTest, ConnectedGameSkipsStaleReferencesFoundNowhere) {
+    const auto source = dir / "source.vpk", game = dir / "game.vpk", output = dir / "output.vpk";
+    Archive(source, {{"models/a.vmdl_c", Resource({"models/a.vanmgrph", "materials/a.vmat"})}, {"materials/a.vmat_c", Resource({"textures/stale.vtex"})}});
+    Archive(game, {{"unrelated.txt", std::vector<uint8_t>{1}}});
+    EXPECT_EQ(ExportModelLibrary({{source, "models/a.vmdl_c"}}, game, output), 2u);
+    EXPECT_THROW(ExportModelLibrary({{source, "models/missing.vmdl_c"}}, game, dir / "missing.vpk"), InvalidData);
+}
 TEST_F(LibraryTest, RefusesOverwritesAndCancellationDoesNotPublish) {
     const auto source = dir / "source.vpk", output = dir / "output.vpk";
     Archive(source, {{"models/a.vmdl_c", Resource()}});
