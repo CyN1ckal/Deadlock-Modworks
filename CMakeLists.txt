@@ -67,6 +67,7 @@ add_library(skeleton_repair_core STATIC
     src/core/kv3.cpp
     src/core/resource.cpp
     src/core/animation.cpp
+    src/core/model.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
 target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static)
@@ -77,6 +78,7 @@ add_executable(skeleton_repair_tests
     tests/kv3_tests.cpp
     tests/resource_tests.cpp
     tests/animation_tests.cpp
+    tests/model_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
