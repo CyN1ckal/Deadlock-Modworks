@@ -6,6 +6,10 @@
 #include "library_panel.hpp"
 
 #include "library_model.hpp"
+#include "model_geometry.hpp"
+#include "model_versions.hpp"
+#include "preview_panel.hpp"
+#include "store_reader.hpp"
 #include "strings.hpp"
 
 #include <imgui.h>
@@ -101,6 +105,8 @@ void LibraryPanel::Refresh() {
     if (!found) {
         selected_.reset();
         selected_copy_.reset();
+        selected_version_.reset();
+        history_ = {};
         history_lines_.clear();
         memberships_.clear();
         unproven_.clear();
@@ -115,7 +121,13 @@ void LibraryPanel::LoadSelection() {
         return;
     }
     try {
-        history_lines_ = FormatHistory(store_->HistoryOf(*selected_));
+        history_ = store_->HistoryOf(*selected_);
+        history_lines_ = FormatHistory(history_);
+        if (history_.Versions.empty()) {
+            selected_version_.reset();
+        } else if (!selected_version_ || *selected_version_ >= history_.Versions.size()) {
+            selected_version_ = history_.Versions.size() - 1;
+        }
         memberships_ = store_->Memberships(*selected_);
         unproven_ = store_->UnprovenSamePath(*selected_);
         unproven_text_ = unproven_.empty() ? std::string() : FormatUnproven(unproven_);
@@ -188,7 +200,60 @@ void LibraryPanel::HideObservation(const std::string& observation_id) {
     }
 }
 
-void LibraryPanel::Draw(void* owner_window) {
+void LibraryPanel::ViewSelected(PreviewPanel& preview,
+    const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& read_game,
+    const std::vector<std::string>& game_clip_paths) {
+    if (!store_ || !selected_version_ || *selected_version_ >= history_.Versions.size() || running_) {
+        return;
+    }
+    const HistoryVersion& version = history_.Versions[*selected_version_];
+    std::string title = version.Blob.Hex().substr(0, 12);
+    try {
+        const std::vector<uint8_t> bytes = store_->ReadBlob(version.Blob);
+        const ModelGeometry geometry = DecodeModelGeometry(bytes);
+        const SnapshotId* preferred = nullptr;
+        SnapshotId preferred_id;
+        if (selected_copy_ && *selected_copy_ < memberships_.size()) {
+            preferred_id = memberships_[*selected_copy_].Snapshot;
+            preferred = &preferred_id;
+        }
+        const std::vector<MembershipRow> version_rows = store_->Memberships(version.Blob);
+        const MembershipRow* membership = VersionMembership(version_rows, preferred);
+        const SnapshotId* snapshot = membership == nullptr ? nullptr : &membership->Snapshot;
+        if (membership != nullptr && !membership->Path.empty()) {
+            title = membership->Path;
+        } else if (!version.Paths.empty()) {
+            title = version.Paths.front();
+        }
+        std::vector<std::string> clip_candidates;
+        if (snapshot != nullptr) {
+            clip_candidates = store_->SnapshotPaths(*snapshot, "vnmclip_c");
+        }
+        clip_candidates.insert(clip_candidates.end(), game_clip_paths.begin(), game_clip_paths.end());
+        const std::vector<std::string> clips = ClipsUnderModel(title, clip_candidates);
+        const SnapshotId snapshot_copy = snapshot != nullptr ? *snapshot : SnapshotId{};
+        const bool has_snapshot = snapshot != nullptr;
+        const ResourceReader read = [this, snapshot_copy, has_snapshot, read_game](const std::string& path) {
+            return ReadSnapshotThenGame(*store_, has_snapshot ? &snapshot_copy : nullptr, path, read_game);
+        };
+        std::optional<std::vector<GeometryBone>> animation;
+        if (const std::optional<std::string> skeleton = AnimationSkeletonPath(geometry)) {
+            if (const std::optional<std::vector<uint8_t>> skeleton_bytes = read(*skeleton)) {
+                try {
+                    animation = DecodeAnimationSkeleton(*skeleton_bytes);
+                } catch (const std::exception&) {
+                }
+            }
+        }
+        preview.Load(geometry, title, &read, animation ? &*animation : nullptr, clips);
+    } catch (const std::exception& error) {
+        preview.ShowError(title, error.what());
+    }
+}
+
+void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
+    const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& read_game,
+    const std::vector<std::string>& game_clip_paths) {
     JoinFinishedImport();
     const HWND owner = static_cast<HWND>(owner_window);
 
@@ -275,8 +340,22 @@ void LibraryPanel::Draw(void* owner_window) {
     if (!selected_) {
         ImGui::TextDisabled("Select a model.");
     } else {
-        for (const std::string& line : history_lines_) {
-            ImGui::TextWrapped("%s", line.c_str());
+        for (size_t i = 0; i < history_lines_.size() && i < history_.Versions.size(); ++i) {
+            std::string label = history_lines_[i] + "##version" + std::to_string(i);
+            const bool chosen = selected_version_ && *selected_version_ == i;
+            if (ImGui::Selectable(label.c_str(), chosen) && !running_) {
+                selected_version_ = i;
+            }
+        }
+        const bool view_disabled = running_ || preview == nullptr || !selected_version_;
+        if (view_disabled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("View") && preview != nullptr) {
+            ViewSelected(*preview, read_game, game_clip_paths);
+        }
+        if (view_disabled) {
+            ImGui::EndDisabled();
         }
         ImGui::SeparatorText("Copies");
         for (size_t i = 0; i < memberships_.size(); ++i) {

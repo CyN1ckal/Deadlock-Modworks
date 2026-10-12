@@ -127,6 +127,10 @@ public:
 
     SnapshotId ImportVpk(const std::filesystem::path& path, CancellationToken cancellation = {});
     std::vector<uint8_t> ReadBlob(const BlobId& id) const;
+    // Membership bytes for a normalized path. Empty when the snapshot has no such path. Does not open a VPK.
+    std::optional<std::vector<uint8_t>> ReadSnapshotPath(const SnapshotId& snapshot, std::string_view path) const;
+    // Membership paths of one kind, ordered by path. Used to find clips in a snapshot.
+    std::vector<std::string> SnapshotPaths(const SnapshotId& snapshot, std::string_view kind) const;
     std::vector<ModelRow> ListModels() const;
     std::vector<PackRow> ListPacks() const;
     std::vector<MembershipRow> Memberships(const BlobId& blob) const;

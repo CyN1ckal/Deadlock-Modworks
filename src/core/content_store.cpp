@@ -1690,6 +1690,36 @@ std::vector<uint8_t> ContentStore::ReadBlob(const BlobId& id) const {
     return bytes;
 }
 
+std::optional<std::vector<uint8_t>> ContentStore::ReadSnapshotPath(const SnapshotId& snapshot,
+    std::string_view path) const {
+    const std::string normalized = VpkArchive::Normalize(std::string(path));
+    if (snapshot.Value.empty() || normalized.empty()) {
+        return std::nullopt;
+    }
+    BlobId blob;
+    {
+        Statement stmt(state_->db, "SELECT blob_sha256 FROM memberships WHERE snapshot_id = ? AND path_key = ?");
+        stmt.BindText(1, snapshot.Value);
+        stmt.BindText(2, AsciiLower(normalized));
+        if (!stmt.Step()) {
+            return std::nullopt;
+        }
+        blob = stmt.ColumnBlobId(0);
+    }
+    return ReadBlob(blob);
+}
+
+std::vector<std::string> ContentStore::SnapshotPaths(const SnapshotId& snapshot, std::string_view kind) const {
+    Statement stmt(state_->db, "SELECT path FROM memberships WHERE snapshot_id = ? AND kind = ? ORDER BY path");
+    stmt.BindText(1, snapshot.Value);
+    stmt.BindText(2, kind);
+    std::vector<std::string> paths;
+    while (stmt.Step()) {
+        paths.push_back(stmt.ColumnText(0));
+    }
+    return paths;
+}
+
 std::vector<ModelRow> ContentStore::ListModels() const { return LoadModelRows(state_->db); }
 
 std::vector<PackRow> ContentStore::ListPacks() const {

@@ -294,6 +294,7 @@ struct App {
     std::optional<VpkArchive> Game;
     std::string GameName;
     std::string GameError;
+    std::vector<std::string> GameClips;
     bool FocusCompare = false;
 
     explicit App(const VulkanDevice& device) : Panel(device), Compare(device) {}
@@ -301,10 +302,16 @@ struct App {
     void OpenGame(const std::filesystem::path& chosen) {
         Game.reset();
         GameError.clear();
+        GameClips.clear();
         const std::filesystem::path pak = GamePak(chosen);
         try {
             Game.emplace(VpkArchive::Open(pak));
             GameName = Narrow(pak.wstring());
+            for (const VpkEntry& entry : Game->Entries()) {
+                if (EndsWith(entry.FullPath, ".vnmclip_c")) {
+                    GameClips.push_back(entry.FullPath);
+                }
+            }
         } catch (const std::exception& error) {
             GameError = Narrow(pak.wstring()) + ": " + error.what();
         }
@@ -643,7 +650,8 @@ int Run(const std::vector<std::filesystem::path>& args) {
             }
 
             app.DrawBrowser(hwnd);
-            app.Library.Draw(hwnd);
+            app.Library.Draw(hwnd, &app.Panel,
+                [&app](const std::string& path) { return app.ReadFrom(app.Game, path); }, app.GameClips);
             ImGui::Begin("Preview", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
             app.Panel.Draw();
             ImGui::End();

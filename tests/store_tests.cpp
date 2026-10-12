@@ -1,5 +1,6 @@
 #include "content_hash.hpp"
 #include "content_store.hpp"
+#include "store_reader.hpp"
 #include "error.hpp"
 #include "kv3.hpp"
 #include "resource.hpp"
@@ -1180,6 +1181,55 @@ TEST(Store, ImportedObservationIdIsWhatDropObservationRemoves) {
     EXPECT_NE(packs_after[0].ObservationId, dropped);
     EXPECT_EQ(copies_after[0].ObservationId, packs_after[0].ObservationId);
     EXPECT_TRUE(store.ExactDuplicateModels().empty());
+}
+
+TEST(Store, ReadSnapshotPathReturnsPayloadsAfterTheSourceFileIsGone) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model{1, 2, 3, 4};
+    const std::vector<uint8_t> texture{5, 6, 7, 8, 9};
+    const std::vector<uint8_t> clip{10, 11};
+    const fs::path vpk = dir.Path() / "mod.vpk";
+    ArchiveWith(vpk, {
+        VpkChange{"models/heroes/hero.vmdl_c", model},
+        VpkChange{"materials/hero.vtex_c", texture},
+        VpkChange{"models/heroes/clips/idle.vnmclip_c", clip},
+    });
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId snapshot = store.ImportVpk(vpk);
+    ASSERT_TRUE(fs::remove(vpk));
+    EXPECT_FALSE(fs::exists(vpk));
+
+    const std::optional<std::vector<uint8_t>> model_bytes = store.ReadSnapshotPath(snapshot, "models/heroes/hero.vmdl_c");
+    const std::optional<std::vector<uint8_t>> texture_bytes = store.ReadSnapshotPath(snapshot, "materials\\hero.vtex_c");
+    ASSERT_TRUE(model_bytes);
+    ASSERT_TRUE(texture_bytes);
+    EXPECT_EQ(*model_bytes, model);
+    EXPECT_EQ(*texture_bytes, texture);
+    EXPECT_FALSE(store.ReadSnapshotPath(snapshot, "materials/missing.vtex_c"));
+    EXPECT_EQ(store.ListModels().size(), 1u);
+    ASSERT_EQ(store.ListPacks().size(), 1u);
+    EXPECT_EQ(store.ListPacks()[0].ModelCount, 1);
+
+    const std::vector<std::string> clips = store.SnapshotPaths(snapshot, "vnmclip_c");
+    ASSERT_EQ(clips.size(), 1u);
+    EXPECT_EQ(clips[0], "models/heroes/clips/idle.vnmclip_c");
+    const std::optional<std::vector<uint8_t>> clip_bytes = store.ReadSnapshotPath(snapshot, clips[0]);
+    ASSERT_TRUE(clip_bytes);
+    EXPECT_EQ(*clip_bytes, clip);
+
+    bool game_called = false;
+    const auto game = [&game_called](const std::string&) {
+        game_called = true;
+        return std::optional<std::vector<uint8_t>>{};
+    };
+    const std::optional<std::vector<uint8_t>> from_snapshot = ReadSnapshotThenGame(store, &snapshot, "models/heroes/hero.vmdl_c", game);
+    ASSERT_TRUE(from_snapshot);
+    EXPECT_EQ(*from_snapshot, model);
+    EXPECT_FALSE(game_called);
+    EXPECT_FALSE(ReadSnapshotThenGame(store, &snapshot, "materials/missing.vtex_c", game));
+    EXPECT_TRUE(game_called);
 }
 
 TEST(Store, RepairRewritesOneModelAndReusesTheOther) {

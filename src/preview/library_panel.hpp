@@ -4,12 +4,15 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace skeleton_repair {
+
+class PreviewPanel;
 
 // Library and history columns. Import runs on a worker thread; drawing stays on the UI thread.
 class LibraryPanel {
@@ -20,7 +23,9 @@ public:
     LibraryPanel(const LibraryPanel&) = delete;
     LibraryPanel& operator=(const LibraryPanel&) = delete;
 
-    void Draw(void* owner_window);
+    void Draw(void* owner_window, PreviewPanel* preview,
+        const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& read_game,
+        const std::vector<std::string>& game_clip_paths);
 
 private:
     void Refresh();
@@ -28,6 +33,9 @@ private:
     void StartImport(const std::filesystem::path& path);
     void JoinFinishedImport();
     void HideObservation(const std::string& observation_id);
+    void ViewSelected(PreviewPanel& preview,
+        const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& read_game,
+        const std::vector<std::string>& game_clip_paths);
 
     std::optional<ContentStore> store_;
     std::string open_error_;
@@ -35,7 +43,9 @@ private:
     std::vector<ModelRow> models_;
     std::vector<PackRow> packs_;
     std::optional<BlobId> selected_;
+    History history_;
     std::vector<std::string> history_lines_;
+    std::optional<size_t> selected_version_;
     std::vector<MembershipRow> memberships_;
     std::vector<SlotObservation> unproven_;
     std::string unproven_text_;
