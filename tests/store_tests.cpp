@@ -973,6 +973,7 @@ TEST(Store, LibraryListsOneRowPerModelPayload) {
     EXPECT_EQ(first_packs[0].ModelCount, 2);
     EXPECT_EQ(first_packs[0].ObservationCount, 1);
     EXPECT_FALSE(first_packs[0].ObservedUtc.empty());
+    EXPECT_TRUE(IsLowerHex(first_packs[0].ObservationId, 32));
     EXPECT_TRUE(store.ExactDuplicateModels().empty());
 
     store.ImportVpk(beta);
@@ -1008,6 +1009,18 @@ TEST(Store, LibraryListsOneRowPerModelPayload) {
     EXPECT_EQ(memberships[1].PackLabel, "beta.vpk");
     EXPECT_FALSE(memberships[0].ObservedUtc.empty());
     EXPECT_FALSE(memberships[1].ObservedUtc.empty());
+    EXPECT_TRUE(IsLowerHex(memberships[0].ObservationId, 32));
+    EXPECT_TRUE(IsLowerHex(memberships[1].ObservationId, 32));
+    EXPECT_NE(memberships[0].ObservationId, memberships[1].ObservationId);
+    Catalog catalog(store_path);
+    const std::string alpha_observation = catalog.Text(
+        "SELECT id FROM observations WHERE replace(absolute_path, '\\', '/') LIKE '%/alpha.vpk' "
+        "ORDER BY observed_utc DESC, absolute_path DESC LIMIT 1");
+    const std::string beta_observation = catalog.Text(
+        "SELECT id FROM observations WHERE replace(absolute_path, '\\', '/') LIKE '%/beta.vpk' "
+        "ORDER BY observed_utc DESC, absolute_path DESC LIMIT 1");
+    EXPECT_EQ(memberships[0].ObservationId, alpha_observation);
+    EXPECT_EQ(memberships[1].ObservationId, beta_observation);
 
     const std::vector<MembershipRow> texture_rows = store.Memberships(IdOf(texture));
     ASSERT_EQ(texture_rows.size(), 2u);
@@ -1082,9 +1095,19 @@ TEST(Store, TwoObservationsAreOnePack) {
     EXPECT_EQ(packs[0].Label, "repack.vpk");
     EXPECT_GT(packs[0].ObservedUtc, first_seen);
     EXPECT_EQ(store.ListModels().size(), 1u);
-    ASSERT_EQ(store.Memberships(IdOf(model)).size(), 1u);
-    EXPECT_EQ(store.Memberships(IdOf(model))[0].PackLabel, "repack.vpk");
-    EXPECT_EQ(store.Memberships(IdOf(model))[0].ObservedUtc, packs[0].ObservedUtc);
+    const std::vector<MembershipRow> copies = store.Memberships(IdOf(model));
+    ASSERT_EQ(copies.size(), 1u);
+    EXPECT_EQ(copies[0].PackLabel, "repack.vpk");
+    EXPECT_EQ(copies[0].ObservedUtc, packs[0].ObservedUtc);
+    Catalog catalog(store_path);
+    const std::string latest = catalog.Text(
+        "SELECT id FROM observations ORDER BY observed_utc DESC, absolute_path DESC LIMIT 1");
+    const std::string earliest = catalog.Text(
+        "SELECT id FROM observations ORDER BY observed_utc ASC, absolute_path ASC LIMIT 1");
+    EXPECT_TRUE(IsLowerHex(latest, 32));
+    EXPECT_NE(latest, earliest);
+    EXPECT_EQ(packs[0].ObservationId, latest);
+    EXPECT_EQ(copies[0].ObservationId, latest);
 }
 
 TEST(Store, RepairRewritesOneModelAndReusesTheOther) {

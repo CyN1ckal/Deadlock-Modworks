@@ -37,8 +37,6 @@ private:
     std::optional<BlobId> selected_;
     std::vector<std::string> history_lines_;
     std::vector<MembershipRow> memberships_;
-    // Parallel to memberships_. Empty until a list row carries an observation id.
-    std::vector<std::string> observation_ids_;
     std::vector<SlotObservation> unproven_;
     std::string unproven_text_;
     std::optional<size_t> selected_copy_;

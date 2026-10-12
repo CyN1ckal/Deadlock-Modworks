@@ -37,6 +37,7 @@ struct PackRow {
     int ModelCount = 0;  // memberships whose kind is vmdl_c
     int ObservationCount = 0;
     std::string ObservedUtc;
+    std::string ObservationId;  // id of that latest observation, empty when the snapshot has none
 };
 
 struct MembershipRow {
@@ -44,6 +45,7 @@ struct MembershipRow {
     std::string Path;
     std::string PackLabel;
     std::string ObservedUtc;
+    std::string ObservationId;  // same latest observation as PackLabel and ObservedUtc
 };
 
 // One changed output entry. An empty output path and no bytes removes InputPath.

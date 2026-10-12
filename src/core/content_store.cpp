@@ -1693,27 +1693,24 @@ std::vector<uint8_t> ContentStore::ReadBlob(const BlobId& id) const {
 std::vector<ModelRow> ContentStore::ListModels() const { return LoadModelRows(state_->db); }
 
 std::vector<PackRow> ContentStore::ListPacks() const {
+    // One join row, so Label, ObservedUtc, and ObservationId come from the same observation.
     Statement stmt(state_->db, R"sql(
 SELECT
   s.id,
   (SELECT COUNT(*) FROM memberships m WHERE m.snapshot_id = s.id AND m.kind = 'vmdl_c'),
   (SELECT COUNT(*) FROM observations o WHERE o.snapshot_id = s.id),
-  (
-    SELECT o.absolute_path
-    FROM observations o
-    WHERE o.snapshot_id = s.id
-    ORDER BY o.observed_utc DESC, o.absolute_path DESC
-    LIMIT 1
-  ),
-  (
-    SELECT o.observed_utc
-    FROM observations o
-    WHERE o.snapshot_id = s.id
-    ORDER BY o.observed_utc DESC, o.absolute_path DESC
-    LIMIT 1
-  )
+  latest.id,
+  latest.absolute_path,
+  latest.observed_utc
 FROM snapshots s
-ORDER BY 5 DESC, s.id
+LEFT JOIN observations latest ON latest.id = (
+  SELECT o.id
+  FROM observations o
+  WHERE o.snapshot_id = s.id
+  ORDER BY o.observed_utc DESC, o.absolute_path DESC
+  LIMIT 1
+)
+ORDER BY latest.observed_utc DESC, s.id
 )sql");
     std::vector<PackRow> rows;
     while (stmt.Step()) {
@@ -1721,7 +1718,10 @@ ORDER BY 5 DESC, s.id
         row.Snapshot.Value = stmt.ColumnText(0);
         row.ModelCount = static_cast<int>(stmt.ColumnInt64(1));
         row.ObservationCount = static_cast<int>(stmt.ColumnInt64(2));
-        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(3), stmt.ColumnText(3), stmt.ColumnText(4), row.Label,
+        if (!stmt.ColumnNull(3)) {
+            row.ObservationId = stmt.ColumnText(3);
+        }
+        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(4), stmt.ColumnText(4), stmt.ColumnText(5), row.Label,
             row.ObservedUtc);
         rows.push_back(std::move(row));
     }
@@ -1733,21 +1733,17 @@ std::vector<MembershipRow> ContentStore::Memberships(const BlobId& blob) const {
 SELECT
   m.snapshot_id,
   m.path,
-  (
-    SELECT o.absolute_path
-    FROM observations o
-    WHERE o.snapshot_id = m.snapshot_id
-    ORDER BY o.observed_utc DESC, o.absolute_path DESC
-    LIMIT 1
-  ),
-  (
-    SELECT o.observed_utc
-    FROM observations o
-    WHERE o.snapshot_id = m.snapshot_id
-    ORDER BY o.observed_utc DESC, o.absolute_path DESC
-    LIMIT 1
-  )
+  latest.id,
+  latest.absolute_path,
+  latest.observed_utc
 FROM memberships m
+LEFT JOIN observations latest ON latest.id = (
+  SELECT o.id
+  FROM observations o
+  WHERE o.snapshot_id = m.snapshot_id
+  ORDER BY o.observed_utc DESC, o.absolute_path DESC
+  LIMIT 1
+)
 WHERE m.blob_sha256 = ?
 ORDER BY m.path, m.snapshot_id
 )sql");
@@ -1757,7 +1753,10 @@ ORDER BY m.path, m.snapshot_id
         MembershipRow row;
         row.Snapshot.Value = stmt.ColumnText(0);
         row.Path = stmt.ColumnText(1);
-        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(2), stmt.ColumnText(2), stmt.ColumnText(3), row.PackLabel,
+        if (!stmt.ColumnNull(2)) {
+            row.ObservationId = stmt.ColumnText(2);
+        }
+        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(3), stmt.ColumnText(3), stmt.ColumnText(4), row.PackLabel,
             row.ObservedUtc);
         rows.push_back(std::move(row));
     }

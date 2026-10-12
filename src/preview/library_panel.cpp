@@ -91,7 +91,6 @@ void LibraryPanel::Refresh() {
         selected_copy_.reset();
         history_lines_.clear();
         memberships_.clear();
-        observation_ids_.clear();
         unproven_.clear();
         unproven_text_.clear();
         return;
@@ -108,7 +107,6 @@ void LibraryPanel::LoadSelection() {
         memberships_ = store_->Memberships(*selected_);
         unproven_ = store_->UnprovenSamePath(*selected_);
         unproven_text_ = unproven_.empty() ? std::string() : FormatUnproven(unproven_);
-        observation_ids_.assign(memberships_.size(), std::string());
         if (selected_copy_ && *selected_copy_ >= memberships_.size()) {
             selected_copy_.reset();
         }
@@ -166,15 +164,10 @@ void LibraryPanel::JoinFinishedImport() {
 }
 
 void LibraryPanel::HideSelectedCopy() {
-    if (!store_ || !selected_copy_ || *selected_copy_ >= observation_ids_.size()) {
+    if (!store_ || !selected_copy_ || *selected_copy_ >= memberships_.size()) {
         return;
     }
-    const std::string& observation_id = observation_ids_[*selected_copy_];
-    // List rows do not carry the observation id DropObservation requires.
-    if (observation_id.empty()) {
-        status_ = "This copy has no observation id.";
-        return;
-    }
+    const std::string observation_id = memberships_[*selected_copy_].ObservationId;
     try {
         store_->DropObservation(observation_id);
         status_.clear();
