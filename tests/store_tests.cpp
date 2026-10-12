@@ -505,7 +505,7 @@ TEST(Store, Sha256MatchesKnownAnswers) {
     EXPECT_EQ(Sha256File(file), Sha256(payload));
 }
 
-TEST(Store, SchemaVersionIsOne) {
+TEST(Store, SchemaVersionIsTwo) {
     TempDir dir;
     const fs::path store_path = dir.Path() / "store";
     {
@@ -514,7 +514,9 @@ TEST(Store, SchemaVersionIsOne) {
     ContentStore::Open(store_path);
 
     Catalog catalog(store_path);
-    EXPECT_EQ(catalog.Text("SELECT value FROM meta WHERE key = 'schema_version'"), "1");
+    EXPECT_EQ(catalog.Text("SELECT value FROM meta WHERE key = 'schema_version'"), "2");
+    EXPECT_EQ(catalog.Column("PRAGMA table_info(snapshots)", 1),
+        (std::vector<std::string>{"id", "manifest_sha256", "created_utc", "tool_version", "display_name"}));
     EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM meta"), 1);
     EXPECT_EQ(catalog.Text("PRAGMA journal_mode"), "wal");
     EXPECT_EQ(catalog.Texts("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"),
@@ -560,9 +562,97 @@ TEST(Store, UnsupportedSchemaIsRejected) {
     }
     {
         Catalog catalog(store_path);
-        catalog.Exec("UPDATE meta SET value = '2' WHERE key = 'schema_version'");
+        catalog.Exec("UPDATE meta SET value = '3' WHERE key = 'schema_version'");
     }
     ExpectMessage([&] { ContentStore::Open(store_path); }, "Unsupported model library schema.");
+}
+
+TEST(Store, VersionOneLibraryGainsSnapshotNames) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path vpk = dir.Path() / "pak02_dir.vpk";
+    ArchiveWith(vpk, {VpkChange{"models/a.vmdl_c", std::vector<uint8_t>{1, 2, 3}}});
+    SnapshotId snapshot;
+    {
+        ContentStore store = ContentStore::Open(store_path);
+        snapshot = store.ImportVpk(vpk);
+    }
+    {
+        Catalog catalog(store_path);
+        catalog.Exec("ALTER TABLE snapshots DROP COLUMN display_name");
+        catalog.Exec("UPDATE meta SET value = '1' WHERE key = 'schema_version'");
+    }
+    ContentStore store = ContentStore::Open(store_path);
+    EXPECT_EQ(store.SnapshotLabel(snapshot), "a");
+    store.RenameSnapshot(snapshot, "Kept");
+    EXPECT_EQ(store.SnapshotLabel(snapshot), "Kept");
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Text("SELECT value FROM meta WHERE key = 'schema_version'"), "2");
+}
+
+TEST(Store, GenericFileNamesAreNotLabels) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path hero = dir.Path() / "pak02_dir.vpk";
+    const fs::path many = dir.Path() / "PAK17_DIR.vpk";
+    const fs::path named = dir.Path() / "haze_maid.vpk";
+    ArchiveWith(hero, {
+        VpkChange{"models/heroes_staging/haze/haze.vmdl_c", std::vector<uint8_t>{1}},
+        VpkChange{"models/heroes_staging/haze/haze_gun.vmdl_c", std::vector<uint8_t>{2}},
+        VpkChange{"materials/haze.vtex_c", std::vector<uint8_t>{3}},
+    });
+    ArchiveWith(many, {
+        VpkChange{"models/heroes/inferno/inferno.vmdl_c", std::vector<uint8_t>{4}},
+        VpkChange{"models/heroes_wip/hornet/hornet.vmdl_c", std::vector<uint8_t>{5}},
+        VpkChange{"models/props/crate.vmdl_c", std::vector<uint8_t>{6}},
+        VpkChange{"models/props/barrel.vmdl_c", std::vector<uint8_t>{7}},
+    });
+    ArchiveWith(named, {VpkChange{"models/heroes_staging/haze/haze.vmdl_c", std::vector<uint8_t>{8}}});
+
+    ContentStore store = ContentStore::Open(store_path);
+    EXPECT_EQ(store.SnapshotLabel(store.ImportVpk(hero)), "haze");
+    EXPECT_EQ(store.SnapshotLabel(store.ImportVpk(many)), "barrel, crate, hornet +1 more");
+    const SnapshotId named_snapshot = store.ImportVpk(named);
+    EXPECT_EQ(store.SnapshotLabel(named_snapshot), "haze_maid");
+
+    // A later generic copy of the same content keeps the descriptive name.
+    const fs::path addons = dir.Path() / "addons";
+    fs::create_directories(addons);
+    fs::copy_file(named, addons / "pak05_dir.vpk");
+    EXPECT_EQ(store.ImportVpk(addons / "pak05_dir.vpk").Value, named_snapshot.Value);
+    EXPECT_EQ(store.SnapshotLabel(named_snapshot), "haze_maid");
+    EXPECT_EQ(store.SnapshotLabel(SnapshotId{"0123456789abcdef0123456789abcdef"}), "");
+}
+
+TEST(Store, GivenNamesReplaceDerivedLabels) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path vpk = dir.Path() / "pak02_dir.vpk";
+    const std::vector<uint8_t> model{1, 2, 3};
+    ArchiveWith(vpk, {VpkChange{"models/heroes/haze/haze.vmdl_c", model}});
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId snapshot = store.ImportVpk(vpk);
+    EXPECT_FALSE(store.SnapshotName(snapshot).has_value());
+
+    store.RenameSnapshot(snapshot, "  Haze maid outfit \t");
+    EXPECT_EQ(store.SnapshotName(snapshot), std::optional<std::string>("Haze maid outfit"));
+    EXPECT_EQ(store.SnapshotLabel(snapshot), "Haze maid outfit");
+    ASSERT_EQ(store.ListPacks().size(), 1u);
+    EXPECT_EQ(store.ListPacks()[0].Label, "Haze maid outfit");
+    ASSERT_EQ(store.Memberships(IdOf(model)).size(), 1u);
+    EXPECT_EQ(store.Memberships(IdOf(model))[0].PackLabel, "Haze maid outfit");
+
+    ExpectMessage([&] { store.RenameSnapshot(snapshot, "two\nlines"); },
+        "A mod name cannot contain line breaks or control characters.");
+    ExpectMessage([&] { store.RenameSnapshot(snapshot, std::string(201, 'x')); }, "A mod name can be at most 200 characters.");
+    ExpectMessage([&] { store.RenameSnapshot(SnapshotId{"0123456789abcdef0123456789abcdef"}, "x"); },
+        "The model library has no snapshot with that id.");
+    EXPECT_EQ(store.SnapshotLabel(snapshot), "Haze maid outfit");
+
+    store.RenameSnapshot(snapshot, " ");
+    EXPECT_FALSE(store.SnapshotName(snapshot).has_value());
+    EXPECT_EQ(store.SnapshotLabel(snapshot), "haze");
 }
 
 TEST(Store, TwoModelsAreDistinctBlobs) {
@@ -971,7 +1061,7 @@ TEST(Store, LibraryListsOneRowPerModelPayload) {
     EXPECT_EQ(first_models[1].Blob.Bytes, IdOf(model_b).Bytes);
     EXPECT_FALSE(HasBlob(first_models, IdOf(texture)));
     ASSERT_EQ(first_packs.size(), 1u);
-    EXPECT_EQ(first_packs[0].Label, "alpha.vpk");
+    EXPECT_EQ(first_packs[0].Label, "alpha");
     EXPECT_EQ(first_packs[0].ModelCount, 2);
     EXPECT_EQ(first_packs[0].ObservationCount, 1);
     EXPECT_FALSE(first_packs[0].ObservedUtc.empty());
@@ -1006,9 +1096,9 @@ TEST(Store, LibraryListsOneRowPerModelPayload) {
     const std::vector<MembershipRow> memberships = store.Memberships(IdOf(model_a));
     ASSERT_EQ(memberships.size(), 2u);
     EXPECT_EQ(memberships[0].Path, "models/a.vmdl_c");
-    EXPECT_EQ(memberships[0].PackLabel, "alpha.vpk");
+    EXPECT_EQ(memberships[0].PackLabel, "alpha");
     EXPECT_EQ(memberships[1].Path, "models/heroes/shared/a.vmdl_c");
-    EXPECT_EQ(memberships[1].PackLabel, "beta.vpk");
+    EXPECT_EQ(memberships[1].PackLabel, "beta");
     EXPECT_FALSE(memberships[0].ObservedUtc.empty());
     EXPECT_FALSE(memberships[1].ObservedUtc.empty());
     EXPECT_TRUE(IsLowerHex(memberships[0].ObservationId, 32));
@@ -1065,7 +1155,7 @@ TEST(Store, TwoPathsOfOnePayloadAreOneDuplicateRow) {
     const std::vector<PackRow> packs = store.ListPacks();
     ASSERT_EQ(packs.size(), 1u);
     EXPECT_EQ(packs[0].ModelCount, 3);
-    EXPECT_EQ(packs[0].Label, "paths.vpk");
+    EXPECT_EQ(packs[0].Label, "paths");
 }
 
 TEST(Store, TwoObservationsAreOnePack) {
@@ -1094,12 +1184,12 @@ TEST(Store, TwoObservationsAreOnePack) {
     ASSERT_EQ(packs.size(), 1u);
     EXPECT_EQ(packs[0].ObservationCount, 2);
     EXPECT_EQ(packs[0].ModelCount, 1);
-    EXPECT_EQ(packs[0].Label, "repack.vpk");
+    EXPECT_EQ(packs[0].Label, "repack");
     EXPECT_GT(packs[0].ObservedUtc, first_seen);
     EXPECT_EQ(store.ListModels().size(), 1u);
     const std::vector<MembershipRow> copies = store.Memberships(IdOf(model));
     ASSERT_EQ(copies.size(), 1u);
-    EXPECT_EQ(copies[0].PackLabel, "repack.vpk");
+    EXPECT_EQ(copies[0].PackLabel, "repack");
     EXPECT_EQ(copies[0].ObservedUtc, packs[0].ObservedUtc);
     Catalog catalog(store_path);
     const std::string latest = catalog.Text(
@@ -1383,6 +1473,8 @@ TEST(Store, RepairEdgesCoverRenameRemovalAndMutation) {
     EXPECT_EQ(CountBlobFiles(store_path), 0);
 
     const SnapshotId input = store.ImportVpk(vpk);
+    EXPECT_EQ(store.SnapshotLabel(input), "a, b, c +1 more");
+    store.RenameSnapshot(input, "Original");
     const int blobs_before = CountBlobFiles(store_path);
     RepairRequest repair;
     repair.Input = input;
@@ -1398,6 +1490,8 @@ TEST(Store, RepairEdgesCoverRenameRemovalAndMutation) {
 
     const SnapshotId output = store.RecordRepair(repair);
     EXPECT_NE(output.Value, input.Value);
+    // The repaired version has no observation of its own, so it inherits the input's name.
+    EXPECT_EQ(store.SnapshotName(output), std::optional<std::string>("Original"));
     EXPECT_EQ(CountBlobFiles(store_path), blobs_before + 2);
     EXPECT_EQ(store.ReadBlob(IdOf(model_a2)), model_a2);
     EXPECT_EQ(store.ReadBlob(IdOf(model_b)), model_b);
@@ -1505,7 +1599,7 @@ TEST(Store, HistoryOfMutatedBlobKeepsUntouchedAndUnprovenApart) {
     EXPECT_EQ(from_original[0].Blob.Bytes, id_other.Bytes);
     EXPECT_EQ(from_mutated[0].Blob.Bytes, id_other.Bytes);
     EXPECT_EQ(from_original[0].Path, "models/a.vmdl_c");
-    EXPECT_EQ(from_original[0].PackLabel, "other.vpk");
+    EXPECT_EQ(from_original[0].PackLabel, "other");
     EXPECT_FALSE(from_original[0].ObservedUtc.empty());
     EXPECT_NE(from_original[0].LineageId, mutated.LineageId);
     EXPECT_FALSE(ContainsSlot(from_original, id_a));
@@ -1796,7 +1890,7 @@ TEST(Store, ImportFolderImportsEligibleVpksAndSkipsChunksAndGameArchive) {
         labels.push_back(pack.Label);
     }
     std::sort(labels.begin(), labels.end());
-    EXPECT_EQ(labels, (std::vector<std::string>{"a.vpk", "b.vpk"}));
+    EXPECT_EQ(labels, (std::vector<std::string>{"a", "b"}));
     EXPECT_EQ(store.ReadBlob(IdOf(payload_a)), payload_a);
     EXPECT_EQ(store.ReadBlob(IdOf(payload_b)), payload_b);
     ExpectMessage([&] { store.ReadBlob(IdOf(payload_chunk)); }, "The model library has no blob with that id.");

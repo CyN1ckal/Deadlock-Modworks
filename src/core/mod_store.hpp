@@ -27,6 +27,11 @@ public:
     // earlier versions, which are left in place. `notice` receives problems that did not stop the load.
     ModelLibrary Load(CancellationToken cancellation = {}, const StoreProgress& progress = {}, std::string* notice = nullptr) const;
     void Save(const ModelLibrary& library) const;
+    // The name of the mod behind an archive this store rebuilt, or nothing for any other path.
+    std::optional<std::string> Name(const std::filesystem::path& archive) const;
+    // Names the mod behind an archive this store rebuilt. An empty name goes back to the derived one.
+    // The next Load returns its copy under the new file name.
+    void Rename(const std::filesystem::path& archive, const std::string& name) const;
     // Adds a shared library file's mods, collection and thumbnails. Nothing already stored is replaced or removed.
     void Merge(const std::filesystem::path& other, CancellationToken cancellation = {}) const;
     // Writes every stored mod, the collection and thumbnails to one standalone .db file, for sharing the whole library.

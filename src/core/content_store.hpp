@@ -33,7 +33,7 @@ struct ModelRow {
 
 struct PackRow {
     SnapshotId Snapshot;
-    std::string Label;  // filename of the latest observation, or the snapshot id hex if none
+    std::string Label;  // see ContentStore::SnapshotLabel
     int ModelCount = 0;  // memberships whose kind is vmdl_c
     int ObservationCount = 0;
     std::string ObservedUtc;
@@ -166,6 +166,14 @@ public:
     // Lowercase hex of the snapshot's manifest SHA-256. The same files give the same id in every library.
     std::optional<std::string> SnapshotContentId(const SnapshotId& snapshot) const;
     std::optional<SnapshotId> FindSnapshot(std::string_view content_id) const;
+    // The name a snapshot is shown under: the name it was given, else the latest file name it was imported under
+    // without its extension, skipping generic pakNN_dir.vpk names, else the models it contains, else its id.
+    // Empty when the snapshot does not exist.
+    std::string SnapshotLabel(const SnapshotId& snapshot) const;
+    // Only the name given with RenameSnapshot, or inherited by a repaired version.
+    std::optional<std::string> SnapshotName(const SnapshotId& snapshot) const;
+    // Names the snapshot, trimmed. An empty name removes it, so the label is derived again.
+    void RenameSnapshot(const SnapshotId& snapshot, std::string_view name);
     std::vector<ModelRow> ListModels() const;
     std::vector<PackRow> ListPacks() const;
     std::vector<MembershipRow> Memberships(const BlobId& blob) const;

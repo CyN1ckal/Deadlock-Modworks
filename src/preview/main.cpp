@@ -527,7 +527,15 @@ struct App {
         std::vector<std::pair<std::filesystem::path, std::filesystem::path>> Imported;
         // The library was read back from the database, which now matches it.
         bool Restored = false;
+        // Shown when the work finished without errors, instead of the import message.
+        std::string Done;
     };
+    // The source being renamed, and the name being typed.
+    std::filesystem::path RenameTarget;
+    char RenameText[201] = {};
+    bool OpenRename = false;
+    // A confirmed rename, started before the next frame draws, because it frees thumbnails this frame already drew.
+    std::optional<std::pair<std::filesystem::path, std::string>> PendingRename;
     std::future<ImportResult> ImportWorker;
     CancellationSource ImportCancellation;
     std::atomic<size_t> ImportedCount = 0;
@@ -596,6 +604,53 @@ struct App {
         });
     }
 
+    // Names a source's mod, then reopens the library so its copy carries the new name.
+    void StartRename(const std::filesystem::path& archive, const std::string& name) {
+        if (FilesBusy() || !Store) return;
+        if (!CanPersist) { StoreStatus = "Your library has not been opened, so nothing can be renamed yet. " + SaveError; return; }
+        // The reopened library replaces what is on screen, so it must be saved first.
+        Persist(true);
+        if (!SaveError.empty()) { StoreStatus = "Could not save your library before renaming: " + SaveError; return; }
+        ReleaseArchives();
+        ImportCancellation = CancellationSource{};
+        ImportedCount = 0; ImportTotal = 0;
+        StoreStatus = "Renaming...";
+        ImportWorker = std::async(std::launch::async, [root = Store->Root(), archive, name, token = ImportCancellation.Token(),
+            completed = &ImportedCount, total = &ImportTotal] {
+            ImportResult result;
+            const LocalModStore store(root);
+            store.Rename(archive, name);
+            result.Library = store.Load(token, [=](size_t done, size_t all) { *completed = done; *total = all; }, &result.Errors);
+            result.Restored = true;
+            result.Done = name.empty() ? "The mod's name is derived again." : "Renamed to " + name + ".";
+            return result;
+        });
+    }
+
+    // Call before anything is drawn in the frame.
+    void StartPendingRename() {
+        if (const auto rename = std::exchange(PendingRename, std::nullopt)) StartRename(rename->first, rename->second);
+    }
+
+    void DrawRenamePopup() {
+        if (std::exchange(OpenRename, false)) ImGui::OpenPopup("Rename mod");
+        ImGui::SetNextWindowSize({ImGui::GetFontSize() * 26, 0}, ImGuiCond_Appearing);
+        if (!ImGui::BeginPopupModal("Rename mod", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+        ImGui::TextWrapped("The name is shown wherever this mod appears. Leave it empty to use the name derived from the file it was imported from or the models it contains.");
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(-1);
+        const bool entered = ImGui::InputText("##name", RenameText, sizeof(RenameText), ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::BeginDisabled(FilesBusy());
+        if (ImGui::Button("Rename") || (entered && !FilesBusy())) {
+            PendingRename.emplace(RenameTarget, RenameText);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
     void StartImport(const ModelLibrary& incoming, bool replace) {
         if (Restoring) {
             // Started after the restore, so these are added to the restored collection.
@@ -653,6 +708,7 @@ struct App {
             ApplyLibrary(result.Library);
             if (result.Restored) { SavedState = result.Library; CanPersist = true; }
             StoreStatus = !result.Errors.empty() ? result.Errors
+                : !result.Done.empty() ? result.Done
                 : Restoring ? "" : "Saved in your library. Your collection will reopen automatically.";
             Persist(true);
             if (InspectAfterImport && !Restoring) {
@@ -1105,6 +1161,13 @@ struct App {
                 if (ImGui::MenuItem("Include every skin in the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, true);
                 if (ImGui::MenuItem("Remove every skin from the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, false);
                 ImGui::Separator();
+                if (ImGui::MenuItem("Rename...", nullptr, false, !FilesBusy() && Store.has_value())) {
+                    RenameTarget = path;
+                    std::string current = Narrow(path.stem().wstring());
+                    try { if (const auto stored = Store->Name(path)) current = *stored; } catch (const std::exception&) {}
+                    std::snprintf(RenameText, sizeof(RenameText), "%s", current.c_str());
+                    OpenRename = true;
+                }
                 ui::PathMenuItems(path);
                 ImGui::Separator();
                 if (ImGui::MenuItem("Remove from library", nullptr, false, !FilesBusy())) remove = path;
@@ -1275,6 +1338,8 @@ struct App {
         if (std::exchange(OpenShortcuts, false)) ImGui::OpenPopup("Keyboard shortcuts");
         if (std::exchange(OpenAbout, false)) ImGui::OpenPopup("About");
         const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
+        DrawRenamePopup();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
         if (ImGui::BeginPopupModal("Keyboard shortcuts", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             static const char* const kShortcuts[][2] = {
@@ -1539,6 +1604,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
             app.PollImport();
             app.PollGame();
             app.PollInspect();
+            app.StartPendingRename();
 
             // A repair from the version history may replace one of the gallery's stored copies too.
             const bool repaired = app.Repair.Poll() | app.History.TakeRepaired();

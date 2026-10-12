@@ -223,6 +223,34 @@ TEST_F(LibraryTest, LocalStoreDeduplicatesIdenticalContentByChecksum) {
     // a.txt, b.txt, and one shared.bin for both mods.
     EXPECT_EQ(Count(store, "blobs"), 3);
 }
+TEST_F(LibraryTest, LocalStoreNamesCopiesAfterTheModAndRenamesThemOnLoad) {
+    fs::create_directories(dir / "addons");
+    const auto source = dir / "addons" / "pak02_dir.vpk";
+    Archive(source, {{"models/heroes_staging/haze/haze.vmdl_c", Resource()}});
+    const LocalModStore store(dir / "store");
+    const auto cached = store.Import(source);
+    EXPECT_EQ(cached.filename(), fs::path("haze.vpk"));
+    EXPECT_EQ(store.Name(cached), std::optional<std::string>("haze"));
+    EXPECT_EQ(store.Name(source), std::nullopt);
+    store.Save({{cached}, {{cached, "models/heroes_staging/haze/haze.vmdl_c"}}});
+
+    // A rename keeps paths already handed out until the library is loaded again.
+    store.Rename(cached, "Haze: maid outfit");
+    EXPECT_EQ(store.Import(cached), cached);
+    const auto loaded = store.Load();
+    ASSERT_EQ(loaded.Sources.size(), 1u);
+    const auto renamed = loaded.Sources.front();
+    EXPECT_EQ(renamed.filename(), fs::path("Haze_ maid outfit.vpk"));
+    EXPECT_EQ(renamed.parent_path(), cached.parent_path());
+    EXPECT_FALSE(fs::exists(cached));
+    ASSERT_EQ(loaded.Selected.size(), 1u);
+    EXPECT_EQ(loaded.Selected.front().Archive, renamed);
+    VpkArchive::Open(renamed).Validate();
+    EXPECT_EQ(store.Name(renamed), std::optional<std::string>("Haze: maid outfit"));
+
+    store.Rename(renamed, "");
+    EXPECT_EQ(store.Load().Sources.front().filename(), fs::path("haze.vpk"));
+}
 TEST_F(LibraryTest, LocalStoreChangedOriginalCreatesAnotherVersion) {
     const auto source = dir / "source.vpk";
     Archive(source, {{"a.txt", std::vector<uint8_t>{1}}});

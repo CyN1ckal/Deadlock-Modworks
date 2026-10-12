@@ -65,7 +65,8 @@ CREATE TABLE snapshots (
   id TEXT PRIMARY KEY,
   manifest_sha256 BLOB NOT NULL UNIQUE,
   created_utc TEXT NOT NULL,
-  tool_version TEXT
+  tool_version TEXT,
+  display_name TEXT
 );
 CREATE TABLE memberships (
   snapshot_id TEXT NOT NULL,
@@ -290,32 +291,42 @@ bool TableExists(sqlite3* db, const char* name) {
     return stmt.Step();
 }
 
-bool SchemaIsVersion1(sqlite3* db) {
+std::string SchemaVersion(sqlite3* db) {
     Statement stmt(db, "SELECT value FROM meta WHERE key = 'schema_version'");
     if (!stmt.Step() || stmt.ColumnNull(0)) {
-        return false;
+        return {};
     }
-    return stmt.ColumnText(0) == "1";
+    return stmt.ColumnText(0);
 }
 
 void InitializeDatabase(sqlite3* db) {
     Exec(db, "PRAGMA journal_mode = WAL;");
     Exec(db, "PRAGMA foreign_keys = ON;");
     sqlite3_busy_timeout(db, 1000);
-    // An existing library is only read here, so opening it does not wait for another connection's write.
+    // A current library is only read here, so opening it does not wait for another connection's write.
     if (TableExists(db, "meta")) {
-        if (!SchemaIsVersion1(db)) {
+        const std::string version = SchemaVersion(db);
+        if (version == "2") {
+            return;
+        }
+        if (version != "1") {
             throw InvalidData(kSchemaMessage);
         }
-        return;
     }
     Exec(db, "BEGIN IMMEDIATE;");
     try {
         if (!TableExists(db, "meta")) {
             Exec(db, kCreateSchema);
-            Exec(db, "INSERT INTO meta (key, value) VALUES ('schema_version', '1');");
-        } else if (!SchemaIsVersion1(db)) {
-            throw InvalidData(kSchemaMessage);
+            Exec(db, "INSERT INTO meta (key, value) VALUES ('schema_version', '2');");
+        } else {
+            const std::string version = SchemaVersion(db);
+            // Version 2 adds the names people give snapshots.
+            if (version == "1") {
+                Exec(db, "ALTER TABLE snapshots ADD COLUMN display_name TEXT;");
+                Exec(db, "UPDATE meta SET value = '2' WHERE key = 'schema_version';");
+            } else if (version != "2") {
+                throw InvalidData(kSchemaMessage);
+            }
         }
         Exec(db, "COMMIT;");
     } catch (...) {
@@ -794,17 +805,139 @@ std::string CommitImport(sqlite3* db, const std::vector<PreparedEntry>& entries,
     }
 }
 
-void ApplyPackLabel(const std::string& snapshot_id, bool path_missing, std::string absolute_path, std::string observed_utc,
-    std::string& label, std::string& utc_out) {
-    const auto slash = absolute_path.find_last_of("/\\");
-    std::string file = slash == std::string::npos ? absolute_path : absolute_path.substr(slash + 1);
-    if (path_missing || file.empty()) {
-        label = snapshot_id;
-        utc_out.clear();
-        return;
+// Mods in the addons folder are named pakNN_dir.vpk, so those file names say nothing about the mod.
+bool IsGenericVpkName(std::string_view filename) {
+    const std::string lower = AsciiLower(filename);
+    if (lower == "mod.vpk") {
+        return true;
     }
-    label = std::move(file);
-    utc_out = std::move(observed_utc);
+    constexpr std::string_view prefix = "pak";
+    constexpr std::string_view suffix = "_dir.vpk";
+    if (lower.size() <= prefix.size() + suffix.size() || !lower.starts_with(prefix) || !lower.ends_with(suffix)) {
+        return false;
+    }
+    const std::string_view digits = std::string_view(lower).substr(prefix.size(), lower.size() - prefix.size() - suffix.size());
+    return std::all_of(digits.begin(), digits.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
+}
+
+// The file name of the latest observation that is not a generic pakNN_dir.vpk, without its extension.
+std::string ObservedName(sqlite3* db, const std::string& snapshot_id) {
+    Statement stmt(db, "SELECT absolute_path FROM observations WHERE snapshot_id = ? ORDER BY observed_utc DESC, absolute_path DESC");
+    stmt.BindText(1, snapshot_id);
+    while (stmt.Step()) {
+        const std::string path = stmt.ColumnText(0);
+        const auto slash = path.find_last_of("/\\");
+        std::string file = slash == std::string::npos ? path : path.substr(slash + 1);
+        if (file.empty() || IsGenericVpkName(file)) {
+            continue;
+        }
+        if (AsciiLower(file).ends_with(".vpk")) {
+            file.resize(file.size() - 4);
+        }
+        if (!file.empty()) {
+            return file;
+        }
+    }
+    return {};
+}
+
+// Names the models a snapshot contains: the hero folder for models/heroes*/<hero>/..., otherwise the model's file name.
+std::string ContentName(sqlite3* db, const std::string& snapshot_id) {
+    Statement stmt(db, "SELECT path_key FROM memberships WHERE snapshot_id = ? AND kind = 'vmdl_c' ORDER BY path_key");
+    stmt.BindText(1, snapshot_id);
+    std::vector<std::string> names;
+    while (stmt.Step()) {
+        const std::string path = stmt.ColumnText(0);
+        std::vector<std::string_view> parts;
+        for (size_t start = 0; start <= path.size();) {
+            const size_t slash = std::min(path.find('/', start), path.size());
+            parts.emplace_back(std::string_view(path).substr(start, slash - start));
+            start = slash + 1;
+        }
+        std::string name;
+        if (parts.size() >= 4 && parts[0] == "models" && parts[1].starts_with("heroes")) {
+            name = parts[2];
+        } else {
+            name = parts.back();
+            if (name.ends_with(".vmdl_c")) {
+                name.resize(name.size() - 7);
+            }
+        }
+        if (!name.empty() && std::find(names.begin(), names.end(), name) == names.end()) {
+            names.push_back(std::move(name));
+        }
+    }
+    std::sort(names.begin(), names.end());
+    constexpr size_t kShown = 3;
+    std::string joined;
+    for (size_t i = 0; i < names.size() && i < kShown; ++i) {
+        if (i != 0) {
+            joined += ", ";
+        }
+        joined += names[i];
+    }
+    if (names.size() > kShown) {
+        joined += " +" + std::to_string(names.size() - kShown) + " more";
+    }
+    return joined;
+}
+
+std::optional<std::string> GivenName(sqlite3* db, const std::string& snapshot_id) {
+    Statement stmt(db, "SELECT display_name FROM snapshots WHERE id = ?");
+    stmt.BindText(1, snapshot_id);
+    if (!stmt.Step() || stmt.ColumnNull(0)) {
+        return std::nullopt;
+    }
+    return stmt.ColumnText(0);
+}
+
+// The name given to the snapshot, else a file name it was imported under, else the models it contains, else its id.
+std::string PackLabel(sqlite3* db, const std::string& snapshot_id) {
+    if (std::optional<std::string> given = GivenName(db, snapshot_id)) {
+        return std::move(*given);
+    }
+    if (std::string observed = ObservedName(db, snapshot_id); !observed.empty()) {
+        return observed;
+    }
+    if (std::string content = ContentName(db, snapshot_id); !content.empty()) {
+        return content;
+    }
+    return snapshot_id;
+}
+
+void ApplyPackLabel(sqlite3* db, const std::string& snapshot_id, bool observed, std::string observed_utc,
+    std::string& label, std::string& utc_out) {
+    label = PackLabel(db, snapshot_id);
+    utc_out = observed ? std::move(observed_utc) : std::string();
+}
+
+// Trims the name and checks it can be shown on one line. Empty clears the name.
+std::string CheckedName(std::string_view name) {
+    const auto space = [](char c) { return c == ' ' || c == '\t'; };
+    while (!name.empty() && space(name.front())) {
+        name.remove_prefix(1);
+    }
+    while (!name.empty() && space(name.back())) {
+        name.remove_suffix(1);
+    }
+    if (std::any_of(name.begin(), name.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7F; })) {
+        throw InvalidData("A mod name cannot contain line breaks or control characters.");
+    }
+    if (name.size() > 200) {
+        throw InvalidData("A mod name can be at most 200 characters.");
+    }
+    return std::string(name);
+}
+
+void SetGivenName(sqlite3* db, const std::string& snapshot_id, const std::string& name) {
+    Statement stmt(db, "UPDATE snapshots SET display_name = ? WHERE id = ?");
+    if (name.empty()) {
+        stmt.BindNull(1);
+    } else {
+        stmt.BindText(1, name);
+    }
+    stmt.BindText(2, snapshot_id);
+    stmt.Execute();
 }
 
 std::vector<ModelRow> LoadModelRows(sqlite3* db) {
@@ -1126,6 +1259,10 @@ std::string CommitRepair(sqlite3* db, const RepairPlan& plan, CancellationToken 
             stmt.BindBlob(2, plan.manifest_sha);
             stmt.BindText(3, now);
             stmt.Execute();
+            // The repaired version keeps the name the input is shown under, unless it only has its id.
+            if (const std::string label = PackLabel(db, plan.input_snapshot_id); label != plan.input_snapshot_id) {
+                SetGivenName(db, snapshot_id, label);
+            }
 
             for (const OutputSlot& slot : plan.slots) {
                 std::string lineage = slot.lineage_id;
@@ -1453,10 +1590,7 @@ ORDER BY m.path, hex(m.blob_sha256), m.snapshot_id
         row.LineageId = stmt.ColumnText(1);
         row.Path = stmt.ColumnText(2);
         const std::string snapshot_id = stmt.ColumnText(3);
-        const bool path_missing = stmt.ColumnNull(4);
-        const std::string absolute_path = stmt.ColumnText(4);
-        const std::string observed_utc = stmt.ColumnText(5);
-        ApplyPackLabel(snapshot_id, path_missing, absolute_path, observed_utc, row.PackLabel, row.ObservedUtc);
+        ApplyPackLabel(db, snapshot_id, !stmt.ColumnNull(4), stmt.ColumnText(5), row.PackLabel, row.ObservedUtc);
         rows.push_back(std::move(row));
     }
     return rows;
@@ -1885,8 +2019,7 @@ ORDER BY 5 DESC, s.id
         row.Snapshot.Value = stmt.ColumnText(0);
         row.ModelCount = static_cast<int>(stmt.ColumnInt64(1));
         row.ObservationCount = static_cast<int>(stmt.ColumnInt64(2));
-        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(3), stmt.ColumnText(3), stmt.ColumnText(4), row.Label,
-            row.ObservedUtc);
+        ApplyPackLabel(state_->db, row.Snapshot.Value, !stmt.ColumnNull(3), stmt.ColumnText(4), row.Label, row.ObservedUtc);
         if (!stmt.ColumnNull(3)) {
             row.ObservationPath = stmt.ColumnText(3);
         }
@@ -1896,6 +2029,32 @@ ORDER BY 5 DESC, s.id
         rows.push_back(std::move(row));
     }
     return rows;
+}
+
+std::string ContentStore::SnapshotLabel(const SnapshotId& snapshot) const {
+    if (!SnapshotExists(state_->db, snapshot.Value)) {
+        return {};
+    }
+    return PackLabel(state_->db, snapshot.Value);
+}
+
+std::optional<std::string> ContentStore::SnapshotName(const SnapshotId& snapshot) const {
+    return GivenName(state_->db, snapshot.Value);
+}
+
+void ContentStore::RenameSnapshot(const SnapshotId& snapshot, std::string_view name) {
+    const std::string checked = CheckedName(name);
+    Exec(state_->db, "BEGIN IMMEDIATE;");
+    try {
+        if (!SnapshotExists(state_->db, snapshot.Value)) {
+            throw InvalidData("The model library has no snapshot with that id.");
+        }
+        SetGivenName(state_->db, snapshot.Value, checked);
+        Exec(state_->db, "COMMIT;");
+    } catch (...) {
+        Rollback(state_->db);
+        throw;
+    }
 }
 
 std::vector<MembershipRow> ContentStore::Memberships(const BlobId& blob) const {
@@ -1934,8 +2093,7 @@ ORDER BY m.path, m.snapshot_id
         MembershipRow row;
         row.Snapshot.Value = stmt.ColumnText(0);
         row.Path = stmt.ColumnText(1);
-        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(2), stmt.ColumnText(2), stmt.ColumnText(3), row.PackLabel,
-            row.ObservedUtc);
+        ApplyPackLabel(state_->db, row.Snapshot.Value, !stmt.ColumnNull(2), stmt.ColumnText(3), row.PackLabel, row.ObservedUtc);
         if (!stmt.ColumnNull(4)) {
             row.ObservationId = stmt.ColumnText(4);
         }

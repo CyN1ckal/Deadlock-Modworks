@@ -163,7 +163,7 @@ public:
         Transaction transaction(*this);
         Exec(R"sql(
 CREATE TABLE IF NOT EXISTS gallery_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
--- The file name each mod was first added under, used for its rebuilt copy.
+-- The file name of each mod's rebuilt copy, from the mod's name when the library was last loaded.
 CREATE TABLE IF NOT EXISTS gallery_names(snapshot_id TEXT PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS gallery_sources(position INTEGER PRIMARY KEY, snapshot_id TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS gallery_selected(
@@ -279,6 +279,27 @@ std::wstring SafeName(const std::string& name) {
     return valid ? wide : L"mod.vpk";
 }
 
+// The rebuilt copy's file name: the mod's name made safe for Windows, and never a name the library refuses to import.
+std::wstring FileName(const std::string& label) {
+    std::wstring name = Widen(label);
+    for (auto& c : name) if (c < 32 || std::wstring_view(L"<>:\"/\\|?*").find(c) != std::wstring_view::npos) c = L'_';
+    constexpr size_t kLimit = 100;
+    if (name.size() > kLimit) name.resize(IS_HIGH_SURROGATE(name[kLimit - 1]) ? kLimit - 1 : kLimit);
+    const auto trim = name.find_last_not_of(L" .");
+    name.erase(trim == std::wstring::npos ? 0 : trim + 1);
+    name.erase(0, std::min(name.find_first_not_of(L' '), name.size()));
+    if (name.empty()) name = L"mod";
+    std::wstring upper = name;
+    CharUpperBuffW(upper.data(), static_cast<DWORD>(upper.size()));
+    const bool device = upper == L"CON" || upper == L"PRN" || upper == L"AUX" || upper == L"NUL"
+        || (upper.size() == 4 && (upper.starts_with(L"COM") || upper.starts_with(L"LPT")) && upper[3] >= L'1' && upper[3] <= L'9');
+    // The library refuses the game archive and chunk files such as name_000.vpk.
+    const bool chunk = name.size() >= 4 && name[name.size() - 4] == L'_'
+        && std::all_of(name.end() - 3, name.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; });
+    if (device || chunk || upper == L"PAK01_DIR") name += L'_';
+    return name + L".vpk";
+}
+
 // Removes a temporary folder when it goes out of scope.
 struct TemporaryFolder {
     fs::path Path;
@@ -291,15 +312,25 @@ struct Context {
     GalleryDb& Db;
     fs::path Cache() const { return Root / L"cache"; }
     std::string Name(const SnapshotId& snapshot) const {
-        Statement select(Db.Get(), "SELECT name FROM gallery_names WHERE snapshot_id = ?");
-        select.Bind(1, snapshot.Value);
-        return select.Step() ? select.Text(0) : "mod.vpk";
+        const auto label = Content.SnapshotLabel(snapshot);
+        return label.empty() ? "mod" : label;
     }
-    void Remember(const SnapshotId& snapshot, const std::string& name) const {
-        Statement(Db.Get(), "INSERT OR IGNORE INTO gallery_names(snapshot_id, name) VALUES(?, ?)").Bind(1, snapshot.Value).Bind(2, name).Run();
-    }
-    fs::path CachePath(const std::string& content_id, const SnapshotId& snapshot) const {
-        return Cache() / Widen(content_id) / SafeName(Name(snapshot));
+    // Named after the mod, so the gallery shows its name. The name only changes when `refresh` is set, which Load does,
+    // so a path handed out stays valid until the library is loaded again, even if a later import changes the mod's name.
+    fs::path CachePath(const std::string& content_id, const SnapshotId& snapshot, bool refresh = false) const {
+        std::string stored;
+        {
+            Statement select(Db.Get(), "SELECT name FROM gallery_names WHERE snapshot_id = ?");
+            select.Bind(1, snapshot.Value);
+            if (select.Step()) stored = select.Text(0);
+        }
+        auto name = Widen(stored);
+        if (stored.empty() || refresh) {
+            name = FileName(Name(snapshot));
+            if (Narrow(name) != stored)
+                Statement(Db.Get(), "INSERT OR REPLACE INTO gallery_names(snapshot_id, name) VALUES(?, ?)").Bind(1, snapshot.Value).Bind(2, Narrow(name)).Run();
+        }
+        return Cache() / Widen(content_id) / name;
     }
     static std::string StampText(const fs::path& path) {
         return std::to_string(fs::file_size(path)) + " " + std::to_string(Stamp(path));
@@ -328,10 +359,18 @@ struct Context {
         return *id;
     }
     // Writes the snapshot's archive from the library, unless an unchanged copy is already there.
-    fs::path Materialize(const SnapshotId& snapshot, CancellationToken cancellation) const {
-        const auto destination = CachePath(ContentIdOf(snapshot), snapshot);
+    fs::path Materialize(const SnapshotId& snapshot, CancellationToken cancellation, bool refresh = false) const {
+        const auto destination = CachePath(ContentIdOf(snapshot), snapshot, refresh);
         if (Fresh(destination)) return destination;
         fs::create_directories(destination.parent_path());
+        // A copy written under an earlier name of the mod is renamed rather than rebuilt. Renaming keeps its stamp.
+        std::error_code listing;
+        for (const auto& entry : fs::directory_iterator(destination.parent_path(), listing)) {
+            const auto& old = entry.path();
+            if (!EqualsIgnoreCase(Narrow(old.extension().wstring()), ".vpk") || SamePath(old, destination) || !Fresh(old)) continue;
+            if (MoveFileExW(old.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING) && Fresh(destination)) return destination;
+            break;
+        }
         const auto temp = destination.parent_path() / Widen("build-" + RandomId() + ".tmp");
         try {
             std::vector<VpkNewFile> files;
@@ -361,8 +400,13 @@ struct Context {
         if (!EqualsIgnoreCase(Narrow(full.extension().wstring()), ".vpk")) throw InvalidData("Import requires a .vpk archive.");
         if (Fresh(full)) if (const auto snapshot = SnapshotFor(full)) return *snapshot;
         // A rebuilt copy changed outside the store, for example by a repair, is imported as a new version.
+        const auto previous = SnapshotFor(full);
         const auto snapshot = Content.ImportVpk(full, cancellation);
-        Remember(snapshot, Narrow(full.filename().wstring()));
+        // The new version keeps the name of the one it was changed from.
+        if (previous && previous->Value != snapshot.Value && !Content.SnapshotName(snapshot)) {
+            const auto label = Content.SnapshotLabel(*previous);
+            if (!label.empty() && label != previous->Value) Content.RenameSnapshot(snapshot, label);
+        }
         return snapshot;
     }
     std::vector<SnapshotId> Sources() const {
@@ -438,7 +482,6 @@ struct Context {
                 known.Reset();
                 if (!id || !Content.SnapshotContentId(*id)) {
                     id = Content.ImportVpk(path, cancellation);
-                    Remember(*id, Narrow(path.filename().wstring()));
                     Statement(Db.Get(), "INSERT OR REPLACE INTO gallery_legacy_paths(path, snapshot_id, size, stamp) VALUES(?, ?, ?, ?)")
                         .Bind(1, Key(path)).Bind(2, id->Value).Bind(3, size).Bind(4, stamp).Run();
                 }
@@ -563,9 +606,8 @@ void Context::MergeShared(const fs::path& other, CancellationToken cancellation)
         }
         entries.Reset();
         VpkArchive::Create(vpk, files, cancellation);
-        const auto snapshot = Content.ImportVpk(vpk, cancellation);
-        Remember(snapshot, archive.Name);
-        snapshots.emplace(archive.Id, snapshot);
+        // Imported under the shared name, which the mod's label is derived from.
+        snapshots.emplace(archive.Id, Content.ImportVpk(vpk, cancellation));
         std::error_code error;
         fs::remove_all(folder, error);
     }
@@ -619,6 +661,22 @@ fs::path LocalModStore::Import(const fs::path& source, CancellationToken cancell
     return context.Materialize(context.SourceSnapshot(source, cancellation), cancellation);
 }
 
+std::optional<std::string> LocalModStore::Name(const fs::path& archive) const {
+    Opened opened(*this);
+    const Context context{root_, opened.Content, opened.Db};
+    const auto snapshot = context.SnapshotFor(archive);
+    if (!snapshot) return std::nullopt;
+    return context.Name(*snapshot);
+}
+
+void LocalModStore::Rename(const fs::path& archive, const std::string& name) const {
+    Opened opened(*this);
+    const Context context{root_, opened.Content, opened.Db};
+    const auto snapshot = context.SnapshotFor(archive);
+    if (!snapshot) throw InvalidData(Narrow(archive.wstring()) + " is not stored in the library.");
+    opened.Content.RenameSnapshot(*snapshot, name);
+}
+
 ModelLibrary LocalModStore::Load(CancellationToken cancellation, const StoreProgress& progress, std::string* notice) const {
     Opened opened(*this, cancellation);
     const Context context{root_, opened.Content, opened.Db};
@@ -637,7 +695,8 @@ ModelLibrary LocalModStore::Load(CancellationToken cancellation, const StoreProg
             problems += context.Name(sources[i]) + " is no longer in the model library, so it was left out.\n";
             continue;
         }
-        try { paths[sources[i].Value] = context.Materialize(sources[i], cancellation); }
+        // Every path is handed out again here, so each copy takes the mod's current name.
+        try { paths[sources[i].Value] = context.Materialize(sources[i], cancellation, true); }
         catch (const OperationCancelled&) { throw; }
         catch (const std::exception& error) {
             // Keep the source in the collection; the gallery reports that it cannot be opened.
@@ -727,8 +786,7 @@ void LocalModStore::Export(const fs::path& destination, CancellationToken cancel
                         .Bind(4, compressed ? 1 : 0).Bind(5, compressed ? packed : bytes).Run();
                 }
                 const auto content = SharedContentHash(files);
-                const auto stored_name = context.Name(pack.Snapshot);
-                archive.Bind(1, content).Bind(2, stored_name == "mod.vpk" ? Narrow(SafeName(pack.Label)) : stored_name).Bind(3, Now()).Run();
+                archive.Bind(1, content).Bind(2, Narrow(FileName(pack.Label))).Bind(3, Now()).Run();
                 find.Bind(1, content);
                 find.Step();
                 const auto id = find.Int(0);
