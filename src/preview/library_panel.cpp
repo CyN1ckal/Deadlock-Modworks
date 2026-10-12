@@ -126,7 +126,14 @@ void LibraryPanel::LoadSelection() {
         if (history_.Versions.empty()) {
             selected_version_.reset();
         } else if (!selected_version_ || *selected_version_ >= history_.Versions.size()) {
-            selected_version_ = history_.Versions.size() - 1;
+            size_t index = history_.Versions.size() - 1;
+            for (size_t i = 0; i < history_.Versions.size(); ++i) {
+                if (SameBlob(history_.Versions[i].Blob, *selected_)) {
+                    index = i;
+                    break;
+                }
+            }
+            selected_version_ = index;
         }
         memberships_ = store_->Memberships(*selected_);
         unproven_ = store_->UnprovenSamePath(*selected_);
@@ -248,6 +255,8 @@ void LibraryPanel::ViewSelected(PreviewPanel& preview,
         preview.Load(geometry, title, &read, animation ? &*animation : nullptr, clips);
     } catch (const std::exception& error) {
         preview.ShowError(title, error.what());
+    } catch (...) {
+        preview.ShowError(title, "The model could not be read.");
     }
 }
 
@@ -287,6 +296,9 @@ void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
                     label += row.Blob.Hex();
                     const bool chosen = selected_ && SameBlob(*selected_, row.Blob);
                     if (ImGui::Selectable(label.c_str(), chosen) && !running_) {
+                        if (!selected_ || !SameBlob(*selected_, row.Blob)) {
+                            selected_version_.reset();
+                        }
                         selected_ = row.Blob;
                         selected_copy_.reset();
                         LoadSelection();

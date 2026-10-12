@@ -1198,8 +1198,11 @@ TEST(Store, ReadSnapshotPathReturnsPayloadsAfterTheSourceFileIsGone) {
 
     ContentStore store = ContentStore::Open(store_path);
     const SnapshotId snapshot = store.ImportVpk(vpk);
-    ASSERT_TRUE(fs::remove(vpk));
+    const fs::path renamed = dir.Path() / "renamed.vpk";
+    fs::rename(vpk, renamed);
     EXPECT_FALSE(fs::exists(vpk));
+    ASSERT_TRUE(fs::remove(renamed));
+    EXPECT_FALSE(fs::exists(renamed));
 
     const std::optional<std::vector<uint8_t>> model_bytes = store.ReadSnapshotPath(snapshot, "models/heroes/hero.vmdl_c");
     const std::optional<std::vector<uint8_t>> texture_bytes = store.ReadSnapshotPath(snapshot, "materials\\hero.vtex_c");

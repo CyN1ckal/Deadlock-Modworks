@@ -50,11 +50,15 @@ std::optional<std::vector<uint8_t>> ReadSnapshotThenGame(const ContentStore& sto
                 return bytes;
             }
         } catch (const std::exception&) {
-            return std::nullopt;
+            // The snapshot names this path, but its blob is unreadable. Try the game archive.
         }
     }
     if (game) {
-        return game(path);
+        try {
+            return game(path);
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
     }
     return std::nullopt;
 }
