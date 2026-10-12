@@ -133,8 +133,10 @@ add_executable(skeleton_repair_tests
     tests/store_tests.cpp
     tests/library_model_tests.cpp
     tests/store_reader_tests.cpp
+    tests/history_compare_tests.cpp
     src/preview/library_model.cpp
     src/preview/store_reader.cpp
+    src/preview/history_compare.cpp
 )
 target_include_directories(skeleton_repair_tests PRIVATE src/preview)
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)

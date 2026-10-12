@@ -5,15 +5,19 @@
 
 #include "library_panel.hpp"
 
+#include "comparison_view.hpp"
+#include "history_compare.hpp"
 #include "library_model.hpp"
 #include "model_geometry.hpp"
 #include "model_versions.hpp"
 #include "preview_panel.hpp"
 #include "store_reader.hpp"
 #include "strings.hpp"
+#include "updater.hpp"
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <exception>
 #include <utility>
 
@@ -50,15 +54,167 @@ std::filesystem::path DefaultLibraryDirectory() {
 
 bool SameBlob(const BlobId& left, const BlobId& right) { return left.Bytes == right.Bytes; }
 
+using GameReader = std::function<std::optional<std::vector<uint8_t>>(const std::string&)>;
+
+struct PreparedVersion {
+    std::string Label;
+    std::string Title;
+    std::optional<ModelGeometry> Geometry;
+    std::optional<std::vector<GeometryBone>> Animation;
+    SnapshotId Snapshot;
+    bool HasSnapshot = false;
+    std::string Error;
+};
+
+const SnapshotId* PreferredSnapshot(const std::optional<size_t>& selected_copy, const std::vector<MembershipRow>& memberships,
+    SnapshotId& storage) {
+    if (!selected_copy || *selected_copy >= memberships.size()) {
+        return nullptr;
+    }
+    storage = memberships[*selected_copy].Snapshot;
+    return &storage;
+}
+
+PreparedVersion PrepareVersion(ContentStore& store, const HistoryVersion& version, const SnapshotId* preferred, const GameReader& read_game) {
+    PreparedVersion prepared;
+    const std::string hex = version.Blob.Hex();
+    prepared.Label = hex.substr(0, hex.size() < 12 ? hex.size() : 12);
+    prepared.Title = prepared.Label;
+    try {
+        const std::vector<uint8_t> bytes = store.ReadBlob(version.Blob);
+        prepared.Geometry = DecodeModelGeometry(bytes);
+        const std::vector<MembershipRow> rows = store.Memberships(version.Blob);
+        if (const MembershipRow* membership = VersionMembership(rows, preferred)) {
+            prepared.Snapshot = membership->Snapshot;
+            prepared.HasSnapshot = true;
+            if (!membership->Path.empty()) {
+                prepared.Title = membership->Path;
+            }
+        } else if (!version.Paths.empty()) {
+            prepared.Title = version.Paths.front();
+        }
+        const SnapshotId* snapshot = prepared.HasSnapshot ? &prepared.Snapshot : nullptr;
+        if (prepared.Geometry) {
+            if (const std::optional<std::string> skeleton = AnimationSkeletonPath(*prepared.Geometry)) {
+                if (const std::optional<std::vector<uint8_t>> skeleton_bytes = ReadSnapshotThenGame(store, snapshot, *skeleton, read_game)) {
+                    try {
+                        prepared.Animation = DecodeAnimationSkeleton(*skeleton_bytes);
+                    } catch (const std::exception& error) {
+                        prepared.Error = error.what();
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& error) {
+        prepared.Geometry.reset();
+        prepared.Error = error.what();
+    } catch (...) {
+        prepared.Geometry.reset();
+        prepared.Error = "The model could not be read.";
+    }
+    return prepared;
+}
+
+VersionData SideData(const PreparedVersion& prepared) {
+    VersionData data;
+    data.Available = prepared.Geometry.has_value();
+    data.Model = prepared.Geometry;
+    data.AnimationSkeleton = prepared.Animation;
+    data.Error = prepared.Error;
+    data.Notes.push_back(prepared.Label);
+    return data;
+}
+
+VersionData GameSide(const std::string& model_path, const std::optional<std::string>& skeleton_path, const GameReader& read_game) {
+    VersionData data;
+    std::optional<std::vector<uint8_t>> bytes;
+    try {
+        if (read_game) {
+            bytes = read_game(model_path);
+        }
+    } catch (const std::exception& error) {
+        data.Error = error.what();
+        return data;
+    }
+    if (!bytes) {
+        data.Notes.push_back("The game has no model at this path.");
+        return data;
+    }
+    data.Available = true;
+    data.Notes.push_back("From the game archive.");
+    try {
+        data.Model = DecodeModelGeometry(*bytes);
+    } catch (const std::exception& error) {
+        data.Error = error.what();
+    }
+    if (!skeleton_path || !read_game) {
+        return data;
+    }
+    try {
+        if (const std::optional<std::vector<uint8_t>> skeleton_bytes = read_game(*skeleton_path)) {
+            data.AnimationSkeleton = DecodeAnimationSkeleton(*skeleton_bytes);
+        }
+    } catch (const std::exception& error) {
+        if (!data.Error.empty()) {
+            data.Error += " ";
+        }
+        data.Error += error.what();
+    }
+    return data;
+}
+
+std::vector<std::string> ClipsForPrepared(ContentStore& store, const PreparedVersion& prepared, const std::vector<std::string>& game_clips) {
+    std::vector<std::string> candidates;
+    if (prepared.HasSnapshot) {
+        try {
+            candidates = store.SnapshotPaths(prepared.Snapshot, "vnmclip_c");
+        } catch (const std::exception&) {
+            candidates.clear();
+        }
+    }
+    candidates.insert(candidates.end(), game_clips.begin(), game_clips.end());
+    return ClipsUnderModel(prepared.Title, candidates);
+}
+
+void AppendClips(std::vector<std::string>& clips, const std::vector<std::string>& more) {
+    for (const std::string& path : more) {
+        if (std::find(clips.begin(), clips.end(), path) == clips.end()) {
+            clips.push_back(path);
+        }
+    }
+}
+
+void Focus(bool* focus_compare) {
+    if (focus_compare != nullptr) {
+        *focus_compare = true;
+    }
+}
+
 }  // namespace
 
-LibraryPanel::LibraryPanel() {
+LibraryPanel::LibraryPanel() : store_directory_(DefaultLibraryDirectory()) {
     try {
-        store_.emplace(ContentStore::Open(DefaultLibraryDirectory()));
+        saved_game_directory_ = LoadLibrarySettings(store_directory_).GameDirectory;
+    } catch (const std::exception&) {
+        saved_game_directory_.clear();
+    }
+    try {
+        store_.emplace(ContentStore::Open(store_directory_));
         Refresh();
     } catch (const std::exception& error) {
         open_error_ = error.what();
         store_.reset();
+    }
+}
+
+void LibraryPanel::SaveGameDirectory(const std::string& game_directory) {
+    saved_game_directory_ = game_directory;
+    try {
+        LibrarySettings settings;
+        settings.GameDirectory = game_directory;
+        SaveLibrarySettings(store_directory_, settings);
+    } catch (const std::exception& error) {
+        status_ = error.what();
     }
 }
 
@@ -106,6 +262,7 @@ void LibraryPanel::Refresh() {
         selected_.reset();
         selected_copy_.reset();
         selected_version_.reset();
+        compare_version_.reset();
         history_ = {};
         history_lines_.clear();
         memberships_.clear();
@@ -135,6 +292,12 @@ void LibraryPanel::LoadSelection() {
             }
             selected_version_ = index;
         }
+        if (compare_version_ && *compare_version_ >= history_.Versions.size()) {
+            compare_version_.reset();
+        }
+        if (compare_version_ && selected_version_ && *compare_version_ == *selected_version_) {
+            compare_version_.reset();
+        }
         memberships_ = store_->Memberships(*selected_);
         unproven_ = store_->UnprovenSamePath(*selected_);
         unproven_text_ = unproven_.empty() ? std::string() : FormatUnproven(unproven_);
@@ -147,11 +310,12 @@ void LibraryPanel::LoadSelection() {
 }
 
 void LibraryPanel::StartImport(const std::filesystem::path& path) {
-    JoinFinishedImport();
+    JoinFinishedWork();
     if (running_ || !store_) {
         return;
     }
     cancel_ = CancellationSource();
+    job_ = Job::Import;
     importing_name_ = Narrow(path.filename().wstring());
     import_error_.clear();
     import_ok_ = false;
@@ -179,7 +343,7 @@ void LibraryPanel::StartImport(const std::filesystem::path& path) {
     }
 }
 
-void LibraryPanel::JoinFinishedImport() {
+void LibraryPanel::JoinFinishedWork() {
     if (!import_done_.load(std::memory_order_acquire)) {
         return;
     }
@@ -190,7 +354,58 @@ void LibraryPanel::JoinFinishedImport() {
     running_ = false;
     if (import_ok_) {
         import_error_.clear();
+        status_.clear();
         Refresh();
+        return;
+    }
+    if (job_ == Job::Repair) {
+        status_ = import_error_;
+    }
+}
+
+void LibraryPanel::StartRepair(const std::string& vpk_path, const std::string& game_directory) {
+    JoinFinishedWork();
+    if (running_ || !store_ || vpk_path.empty() || game_directory.empty()) {
+        return;
+    }
+    try {
+        importing_name_ = Narrow(std::filesystem::path(Widen(vpk_path)).filename().wstring());
+    } catch (const std::exception& error) {
+        status_ = error.what();
+        return;
+    }
+    cancel_ = CancellationSource();
+    import_error_.clear();
+    import_ok_ = false;
+    import_done_.store(false, std::memory_order_relaxed);
+    job_ = Job::Repair;
+    const CancellationToken token = cancel_.Token();
+    running_ = true;
+    try {
+        worker_ = std::thread([this, vpk_path, game_directory, token] {
+            try {
+                const UpdateReport report = HeroModelUpdater::Update(game_directory, vpk_path, std::nullopt, true, true, {}, token,
+                    false, &*store_);
+                if (report.WroteFile) {
+                    import_ok_ = true;
+                    import_error_.clear();
+                } else {
+                    import_ok_ = false;
+                    import_error_ = RepairFailureText(report);
+                }
+            } catch (const std::exception& error) {
+                import_ok_ = false;
+                import_error_ = error.what();
+            } catch (...) {
+                import_ok_ = false;
+                import_error_ = "Could not repair the VPK.";
+            }
+            import_done_.store(true, std::memory_order_release);
+        });
+    } catch (const std::exception& error) {
+        running_ = false;
+        import_error_ = error.what();
+        status_ = import_error_;
     }
 }
 
@@ -260,17 +475,172 @@ void LibraryPanel::ViewSelected(PreviewPanel& preview,
     }
 }
 
+std::optional<std::string> LibraryPanel::SelectedPackPath() const {
+    const auto find_pack = [this](const std::string& snapshot) -> const PackRow* {
+        for (const PackRow& pack : packs_) {
+            if (pack.Snapshot.Value == snapshot) {
+                return &pack;
+            }
+        }
+        return nullptr;
+    };
+    const PackRow* pack = nullptr;
+    if (selected_pack_) {
+        pack = find_pack(*selected_pack_);
+    }
+    if (pack == nullptr && selected_copy_ && *selected_copy_ < memberships_.size()) {
+        pack = find_pack(memberships_[*selected_copy_].Snapshot.Value);
+    }
+    if (pack == nullptr && !memberships_.empty()) {
+        const std::string& snapshot = memberships_.front().Snapshot.Value;
+        bool shared = true;
+        for (const MembershipRow& row : memberships_) {
+            if (row.Snapshot.Value != snapshot) {
+                shared = false;
+                break;
+            }
+        }
+        if (shared) {
+            pack = find_pack(snapshot);
+        }
+    }
+    if (pack == nullptr) {
+        return std::nullopt;
+    }
+    return pack->ObservationPath;
+}
+
+void LibraryPanel::CompareSelected(ComparisonView& compare, bool* focus_compare, const GameReader& read_game,
+    const std::vector<std::string>& game_clip_paths) {
+    if (!store_ || !selected_version_ || !compare_version_ || *selected_version_ == *compare_version_
+        || *selected_version_ >= history_.Versions.size() || *compare_version_ >= history_.Versions.size()) {
+        return;
+    }
+    const HistoryVersion& primary = history_.Versions[*selected_version_];
+    const HistoryVersion& secondary = history_.Versions[*compare_version_];
+    const std::string caption = HistoryCompareCaption(history_, primary.Blob, secondary.Blob);
+    try {
+        SnapshotId preferred_id;
+        const SnapshotId* preferred = PreferredSnapshot(selected_copy_, memberships_, preferred_id);
+        const HistoryVersion* left_version = &primary;
+        const HistoryVersion* right_version = &secondary;
+        if (const HistoryLink* link = DirectHistoryLink(history_, primary.Blob, secondary.Blob)) {
+            const HistoryVersion* from = nullptr;
+            const HistoryVersion* to = nullptr;
+            for (const HistoryVersion& version : history_.Versions) {
+                if (SameBlob(version.Blob, link->From)) {
+                    from = &version;
+                }
+                if (SameBlob(version.Blob, link->To)) {
+                    to = &version;
+                }
+            }
+            if (from != nullptr && to != nullptr) {
+                left_version = from;
+                right_version = to;
+            }
+        }
+        const PreparedVersion left = PrepareVersion(*store_, *left_version, preferred, read_game);
+        const PreparedVersion right = PrepareVersion(*store_, *right_version, preferred, read_game);
+        if (!left.Geometry || !right.Geometry) {
+            const std::string& message = !left.Geometry ? left.Error : right.Error;
+            compare.ShowError(caption, message.empty() ? "The model could not be read." : message);
+            Focus(focus_compare);
+            return;
+        }
+        ModelVersions versions;
+        versions.ModelPath = caption;
+        versions.Versions[static_cast<size_t>(ModelVersion::Mod)] = SideData(left);
+        versions.Versions[static_cast<size_t>(ModelVersion::Repaired)] = SideData(right);
+        // Game stays unavailable so the existing view keeps the right viewport on the second stored payload.
+        std::vector<std::string> clips = ClipsForPrepared(*store_, left, game_clip_paths);
+        AppendClips(clips, ClipsForPrepared(*store_, right, game_clip_paths));
+        const SnapshotId left_snapshot = left.Snapshot;
+        const bool left_has = left.HasSnapshot;
+        const SnapshotId right_snapshot = right.Snapshot;
+        const bool right_has = right.HasSnapshot;
+        compare.Load(std::move(versions),
+            [this, left_snapshot, left_has, right_snapshot, right_has, read_game](ModelVersion version, const std::string& path) {
+                if (!store_) {
+                    return std::optional<std::vector<uint8_t>>{};
+                }
+                if (version == ModelVersion::Game) {
+                    return read_game ? read_game(path) : std::optional<std::vector<uint8_t>>{};
+                }
+                const bool repaired = version == ModelVersion::Repaired;
+                const SnapshotId& snapshot = repaired ? right_snapshot : left_snapshot;
+                const bool has = repaired ? right_has : left_has;
+                return ReadSnapshotThenGame(*store_, has ? &snapshot : nullptr, path, read_game);
+            },
+            std::move(clips));
+        Focus(focus_compare);
+    } catch (const std::exception& error) {
+        compare.ShowError(caption, error.what());
+        Focus(focus_compare);
+    } catch (...) {
+        compare.ShowError(caption, "The model could not be read.");
+        Focus(focus_compare);
+    }
+}
+
+void LibraryPanel::CompareWithGame(ComparisonView& compare, bool* focus_compare, const GameReader& read_game,
+    const std::vector<std::string>& game_clip_paths) {
+    if (!store_ || !selected_version_ || *selected_version_ >= history_.Versions.size()) {
+        return;
+    }
+    const HistoryVersion& version = history_.Versions[*selected_version_];
+    std::string title = version.Blob.Hex().substr(0, 12);
+    try {
+        SnapshotId preferred_id;
+        const SnapshotId* preferred = PreferredSnapshot(selected_copy_, memberships_, preferred_id);
+        const PreparedVersion stored = PrepareVersion(*store_, version, preferred, read_game);
+        title = stored.Title.empty() ? stored.Label : stored.Title;
+        if (!stored.Geometry) {
+            compare.ShowError(title, stored.Error.empty() ? "The model could not be read." : stored.Error);
+            Focus(focus_compare);
+            return;
+        }
+        const std::optional<std::string> skeleton = AnimationSkeletonPath(*stored.Geometry);
+        ModelVersions versions;
+        versions.ModelPath = title;
+        versions.SkeletonPath = skeleton;
+        versions.Versions[static_cast<size_t>(ModelVersion::Mod)] = SideData(stored);
+        versions.Versions[static_cast<size_t>(ModelVersion::Game)] = GameSide(title, skeleton, read_game);
+        const SnapshotId snapshot = stored.Snapshot;
+        const bool has_snapshot = stored.HasSnapshot;
+        compare.Load(std::move(versions),
+            [this, snapshot, has_snapshot, read_game](ModelVersion side, const std::string& path) {
+                if (side == ModelVersion::Game) {
+                    return read_game ? read_game(path) : std::optional<std::vector<uint8_t>>{};
+                }
+                if (!store_) {
+                    return std::optional<std::vector<uint8_t>>{};
+                }
+                return ReadSnapshotThenGame(*store_, has_snapshot ? &snapshot : nullptr, path, read_game);
+            },
+            ClipsForPrepared(*store_, stored, game_clip_paths));
+        Focus(focus_compare);
+    } catch (const std::exception& error) {
+        compare.ShowError(title, error.what());
+        Focus(focus_compare);
+    } catch (...) {
+        compare.ShowError(title, "The model could not be read.");
+        Focus(focus_compare);
+    }
+}
+
 void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
     const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& read_game,
-    const std::vector<std::string>& game_clip_paths) {
-    JoinFinishedImport();
+    const std::vector<std::string>& game_clip_paths, ComparisonView* compare, bool* focus_compare,
+    const std::string& game_directory) {
+    JoinFinishedWork();
     const HWND owner = static_cast<HWND>(owner_window);
 
     ImGui::Begin("Library");
     if (!store_) {
         ImGui::TextWrapped("%s", open_error_.empty() ? "The model library is unavailable." : open_error_.c_str());
     } else if (running_) {
-        ImGui::TextWrapped("Importing %s", importing_name_.c_str());
+        ImGui::TextWrapped("%s %s", job_ == Job::Repair ? "Repairing" : "Importing", importing_name_.c_str());
         if (ImGui::Button("Cancel")) {
             cancel_.Cancel();
         }
@@ -298,6 +668,7 @@ void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
                     if (ImGui::Selectable(label.c_str(), chosen) && !running_) {
                         if (!selected_ || !SameBlob(*selected_, row.Blob)) {
                             selected_version_.reset();
+                            compare_version_.reset();
                         }
                         selected_ = row.Blob;
                         selected_copy_.reset();
@@ -354,11 +725,19 @@ void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
     } else {
         for (size_t i = 0; i < history_lines_.size() && i < history_.Versions.size(); ++i) {
             std::string label = history_lines_[i] + "##version" + std::to_string(i);
-            const bool chosen = selected_version_ && *selected_version_ == i;
+            const bool chosen = (selected_version_ && *selected_version_ == i) || (compare_version_ && *compare_version_ == i);
             if (ImGui::Selectable(label.c_str(), chosen) && !running_) {
+                if (selected_version_ && *selected_version_ != i) {
+                    compare_version_ = selected_version_;
+                }
                 selected_version_ = i;
+                if (compare_version_ && *compare_version_ == *selected_version_) {
+                    compare_version_.reset();
+                }
             }
         }
+        const bool two_versions = selected_version_ && compare_version_ && *selected_version_ != *compare_version_
+            && *selected_version_ < history_.Versions.size() && *compare_version_ < history_.Versions.size();
         const bool view_disabled = running_ || preview == nullptr || !selected_version_;
         if (view_disabled) {
             ImGui::BeginDisabled();
@@ -368,6 +747,48 @@ void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
         }
         if (view_disabled) {
             ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        const bool compare_disabled = running_ || compare == nullptr || !two_versions;
+        if (compare_disabled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Compare") && compare != nullptr) {
+            CompareSelected(*compare, focus_compare, read_game, game_clip_paths);
+        }
+        if (compare_disabled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        const std::optional<std::string> pack_path = SelectedPackPath();
+        const bool pack_file = pack_path && ObservationFileExists(*pack_path);
+        const RepairGate repair_gate = pack_path ? RepairGateFor(pack_file, !game_directory.empty()) : RepairGate{};
+        const bool repair_disabled = running_ || !repair_gate.Enabled;
+        if (repair_disabled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Repair") && pack_path && pack_file) {
+            StartRepair(*pack_path, game_directory);
+        }
+        if (repair_disabled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        const bool compare_game_disabled = running_ || compare == nullptr || !selected_version_ || game_directory.empty();
+        if (compare_game_disabled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Compare with game") && compare != nullptr) {
+            CompareWithGame(*compare, focus_compare, read_game, game_clip_paths);
+        }
+        if (compare_game_disabled) {
+            ImGui::EndDisabled();
+        }
+        if (repair_gate.Message != nullptr) {
+            ImGui::TextDisabled("%s", repair_gate.Message);
+        }
+        if (game_directory.empty()) {
+            ImGui::TextDisabled("%s", kCompareNeedsGameFolder);
         }
         ImGui::SeparatorText("Copies");
         for (size_t i = 0; i < memberships_.size(); ++i) {

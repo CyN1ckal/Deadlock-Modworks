@@ -38,6 +38,7 @@ struct PackRow {
     int ObservationCount = 0;
     std::string ObservedUtc;
     std::string ObservationId;  // id of that latest observation, empty when the snapshot has none
+    std::string ObservationPath;  // absolute path of that observation, empty when the snapshot has none
 };
 
 struct MembershipRow {

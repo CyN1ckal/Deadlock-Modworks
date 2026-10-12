@@ -62,6 +62,7 @@ add_executable(ModelPreview
     src/preview/library_panel.cpp
     src/preview/library_model.cpp
     src/preview/store_reader.cpp
+    src/preview/history_compare.cpp
 )
 target_link_libraries(ModelPreview PRIVATE sr_render sr_imgui shell32 comdlg32)
 

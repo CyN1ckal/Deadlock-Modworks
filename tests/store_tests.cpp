@@ -1303,6 +1303,16 @@ TEST(Store, RepairRewritesOneModelAndReusesTheOther) {
     EXPECT_EQ(store.ReadBlob(repaired_id), written);
     EXPECT_NE(written, old_hero);
     EXPECT_NE(written, game_hero);
+    const History repaired_history = store.HistoryOf(repaired_id);
+    ASSERT_EQ(repaired_history.Versions.size(), 2u);
+    EXPECT_EQ(repaired_history.Versions[0].Blob.Bytes, IdOf(old_hero).Bytes);
+    EXPECT_EQ(repaired_history.Versions[1].Blob.Bytes, repaired_id.Bytes);
+    ASSERT_EQ(repaired_history.Links.size(), 1u);
+    EXPECT_EQ(repaired_history.Links[0].Relation, "mutated");
+    const History side_history = store.HistoryOf(IdOf(side));
+    ASSERT_EQ(side_history.Versions.size(), 1u);
+    EXPECT_EQ(side_history.Versions[0].Blob.Bytes, IdOf(side).Bytes);
+    EXPECT_TRUE(side_history.Links.empty());
     EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs"), 3);
     EXPECT_EQ(CountBlobFiles(store_path), 3);
 

@@ -1760,6 +1760,9 @@ ORDER BY 5 DESC, s.id
         row.ObservationCount = static_cast<int>(stmt.ColumnInt64(2));
         ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(3), stmt.ColumnText(3), stmt.ColumnText(4), row.Label,
             row.ObservedUtc);
+        if (!stmt.ColumnNull(3)) {
+            row.ObservationPath = stmt.ColumnText(3);
+        }
         if (!stmt.ColumnNull(5)) {
             row.ObservationId = stmt.ColumnText(5);
         }

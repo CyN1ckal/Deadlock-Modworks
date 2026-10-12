@@ -14,6 +14,7 @@
 #include "model_geometry.hpp"
 #include "model_renderer.hpp"
 #include "comparison_view.hpp"
+#include "history_compare.hpp"
 #include "library_panel.hpp"
 #include "model_versions.hpp"
 #include "preview_panel.hpp"
@@ -292,6 +293,7 @@ struct App {
     std::string Selected;
     char Filter[128] = {};
     std::optional<VpkArchive> Game;
+    std::filesystem::path GameFolder;
     std::string GameName;
     std::string GameError;
     std::vector<std::string> GameClips;
@@ -301,12 +303,15 @@ struct App {
 
     void OpenGame(const std::filesystem::path& chosen) {
         Game.reset();
+        GameFolder.clear();
         GameError.clear();
         GameClips.clear();
         const std::filesystem::path pak = GamePak(chosen);
         try {
             Game.emplace(VpkArchive::Open(pak));
             GameName = Narrow(pak.wstring());
+            const std::string chosen_name = Narrow(chosen.wstring());
+            GameFolder = EndsWith(chosen_name, ".vpk") ? chosen.parent_path() : chosen;
             for (const VpkEntry& entry : Game->Entries()) {
                 if (EndsWith(entry.FullPath, ".vnmclip_c")) {
                     GameClips.push_back(entry.FullPath);
@@ -418,7 +423,7 @@ struct App {
             Panel.ShowError(path, error.what());
         }
         if (!Game) {
-            Compare.ShowError(path, "Set the game folder to compare this model with the installed game.");
+            Compare.ShowError(path, kCompareNeedsGameFolder);
             return;
         }
         try {
@@ -479,6 +484,9 @@ struct App {
         if (ImGui::Button("Set game folder...")) {
             if (auto path = AskForFile(hwnd, L"Game archive (pak01_dir.vpk)\0pak01_dir.vpk\0VPK archives (*.vpk)\0*.vpk\0",
                     L"Select game\\citadel\\pak01_dir.vpk")) {
+                const std::string chosen_name = Narrow(path->wstring());
+                const std::filesystem::path folder = EndsWith(chosen_name, ".vpk") ? path->parent_path() : *path;
+                Library.SaveGameDirectory(Narrow(folder.wstring()));
                 OpenGame(*path);
             }
         }
@@ -577,8 +585,17 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 positional.push_back(args[i]);
             }
         }
-        if (!game_folder && std::filesystem::exists(GamePak(kDefaultGameFolder))) {
-            game_folder = kDefaultGameFolder;
+        if (!game_folder) {
+            const std::string saved_game = app.Library.SavedGameDirectory();
+            if (!saved_game.empty()) {
+                try {
+                    game_folder = std::filesystem::path(Widen(saved_game));
+                } catch (const std::exception&) {
+                    // A corrupt directory string leaves the game field empty.
+                }
+            } else if (std::filesystem::exists(GamePak(kDefaultGameFolder))) {
+                game_folder = kDefaultGameFolder;
+            }
         }
         if (game_folder) {
             app.OpenGame(*game_folder);
@@ -650,8 +667,10 @@ int Run(const std::vector<std::filesystem::path>& args) {
             }
 
             app.DrawBrowser(hwnd);
+            const std::string game_directory = app.Game && !app.GameFolder.empty() ? Narrow(app.GameFolder.wstring()) : std::string();
             app.Library.Draw(hwnd, &app.Panel,
-                [&app](const std::string& path) { return app.ReadFrom(app.Game, path); }, app.GameClips);
+                [&app](const std::string& path) { return app.ReadFrom(app.Game, path); }, app.GameClips, &app.Compare, &app.FocusCompare,
+                game_directory);
             ImGui::Begin("Preview", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
             app.Panel.Draw();
             ImGui::End();
