@@ -76,6 +76,18 @@ void LibraryPanel::Refresh() {
         status_ = error.what();
         return;
     }
+    if (selected_pack_) {
+        bool pack_found = false;
+        for (const PackRow& pack : packs_) {
+            if (pack.Snapshot.Value == *selected_pack_) {
+                pack_found = true;
+                break;
+            }
+        }
+        if (!pack_found) {
+            selected_pack_.reset();
+        }
+    }
     if (!selected_) {
         return;
     }
@@ -163,15 +175,13 @@ void LibraryPanel::JoinFinishedImport() {
     }
 }
 
-void LibraryPanel::HideSelectedCopy() {
-    if (!store_ || !selected_copy_ || *selected_copy_ >= memberships_.size()) {
+void LibraryPanel::HideObservation(const std::string& observation_id) {
+    if (!store_ || observation_id.empty() || running_) {
         return;
     }
-    const std::string observation_id = memberships_[*selected_copy_].ObservationId;
     try {
         store_->DropObservation(observation_id);
         status_.clear();
-        selected_copy_.reset();
         Refresh();
     } catch (const std::exception& error) {
         status_ = error.what();
@@ -222,11 +232,33 @@ void LibraryPanel::Draw(void* owner_window) {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Packs")) {
+            std::string pack_observation_id;
+            if (selected_pack_) {
+                for (const PackRow& pack : packs_) {
+                    if (pack.Snapshot.Value == *selected_pack_) {
+                        pack_observation_id = pack.ObservationId;
+                        break;
+                    }
+                }
+            }
+            const bool hide_pack_disabled = running_ || pack_observation_id.empty();
+            if (hide_pack_disabled) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button("Hide this copy##pack")) {
+                HideObservation(pack_observation_id);
+            }
+            if (hide_pack_disabled) {
+                ImGui::EndDisabled();
+            }
             if (ImGui::BeginChild("pack-list")) {
                 for (const PackRow& pack : packs_) {
-                    const std::string line = pack.Label + "  " + std::to_string(pack.ModelCount) + " models  "
-                        + std::to_string(pack.ObservationCount) + " observations";
-                    ImGui::TextUnformatted(line.c_str());
+                    std::string line = pack.Label + "  " + std::to_string(pack.ModelCount) + " models  "
+                        + std::to_string(pack.ObservationCount) + " observations##" + pack.Snapshot.Value;
+                    const bool chosen = selected_pack_ && *selected_pack_ == pack.Snapshot.Value;
+                    if (ImGui::Selectable(line.c_str(), chosen) && !running_) {
+                        selected_pack_ = pack.Snapshot.Value;
+                    }
                 }
             }
             ImGui::EndChild();
@@ -261,12 +293,15 @@ void LibraryPanel::Draw(void* owner_window) {
                 selected_copy_ = i;
             }
         }
-        const bool hide_disabled = running_ || !selected_copy_;
+        const std::string membership_observation_id = selected_copy_ && *selected_copy_ < memberships_.size()
+            ? memberships_[*selected_copy_].ObservationId
+            : std::string();
+        const bool hide_disabled = running_ || membership_observation_id.empty();
         if (hide_disabled) {
             ImGui::BeginDisabled();
         }
         if (ImGui::Button("Hide this copy")) {
-            HideSelectedCopy();
+            HideObservation(membership_observation_id);
         }
         if (hide_disabled) {
             ImGui::EndDisabled();

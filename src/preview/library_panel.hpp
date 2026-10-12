@@ -27,7 +27,7 @@ private:
     void LoadSelection();
     void StartImport(const std::filesystem::path& path);
     void JoinFinishedImport();
-    void HideSelectedCopy();
+    void HideObservation(const std::string& observation_id);
 
     std::optional<ContentStore> store_;
     std::string open_error_;
@@ -40,6 +40,7 @@ private:
     std::vector<SlotObservation> unproven_;
     std::string unproven_text_;
     std::optional<size_t> selected_copy_;
+    std::optional<std::string> selected_pack_;
     char filter_[128] = {};
 
     std::thread worker_;

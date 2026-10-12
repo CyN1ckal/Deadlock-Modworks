@@ -1108,6 +1108,20 @@ TEST(Store, TwoObservationsAreOnePack) {
     EXPECT_NE(latest, earliest);
     EXPECT_EQ(packs[0].ObservationId, latest);
     EXPECT_EQ(copies[0].ObservationId, latest);
+
+    store.DropObservation(packs[0].ObservationId);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 1);
+    EXPECT_EQ(catalog.Text("SELECT id FROM observations"), earliest);
+    packs = store.ListPacks();
+    ASSERT_EQ(packs.size(), 1u);
+    EXPECT_EQ(packs[0].ObservationCount, 1);
+    EXPECT_EQ(packs[0].ModelCount, 1);
+    EXPECT_EQ(packs[0].ObservationId, earliest);
+    EXPECT_EQ(store.ListModels().size(), 1u);
+    const std::vector<MembershipRow> remaining = store.Memberships(IdOf(model));
+    ASSERT_EQ(remaining.size(), 1u);
+    EXPECT_EQ(remaining[0].ObservationId, earliest);
+    EXPECT_EQ(remaining[0].ObservedUtc, packs[0].ObservedUtc);
 }
 
 TEST(Store, RepairRewritesOneModelAndReusesTheOther) {
