@@ -141,6 +141,10 @@ public:
     std::vector<SlotObservation> UnprovenSamePath(const BlobId& blob) const;
     void DropObservation(std::string_view observation_id);
     GcStats CollectGarbage();
+    // Writes one embedded VPK of the selected model blobs and their resolved snapshot refs.
+    // Unresolved refs are omitted. The written file is not imported.
+    void Assemble(const SnapshotId& snapshot, const std::vector<BlobId>& models,
+        const std::filesystem::path& destination, CancellationToken cancellation = {});
 
 private:
     struct State;

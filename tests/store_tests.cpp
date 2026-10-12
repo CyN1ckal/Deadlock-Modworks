@@ -1706,3 +1706,58 @@ TEST(Store, DroppingTheLastObservationKeepsEdgeBlobsThroughGarbageCollection) {
     EXPECT_EQ(again.BlobRowsRemoved, 0);
     EXPECT_EQ(store.ReadBlob(id_a), model_a);
 }
+
+TEST(Store, AssembleWritesOneModelAndItsResolvedTexture) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    KvDocument document;
+    document.Root.Set("m_vecNmSkeletonRefs", KvValue::Array({
+        KvValue::String("models/missing.vnmskel"),
+    }));
+    const std::vector<uint8_t> selected = ResourceWithRerl(WriteKv3(document), RerlBlock({"materials/shared.vtex"}));
+    const std::vector<uint8_t> sibling{2, 2, 2, 2};
+    const std::vector<uint8_t> texture{9, 9, 9};
+    const fs::path source = dir.Path() / "mod.vpk";
+    ArchiveWith(source, {
+        VpkChange{"models/heroes/hero.vmdl_c", selected},
+        VpkChange{"models/heroes/other.vmdl_c", sibling},
+        VpkChange{"materials/shared.vtex_c", texture},
+    });
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId snapshot = store.ImportVpk(source);
+    fs::remove(source);
+
+    const fs::path packed = dir.Path() / "packed.vpk";
+    store.Assemble(snapshot, {IdOf(selected)}, packed);
+    const VpkArchive archive = VpkArchive::Open(packed);
+    archive.Validate();
+    ASSERT_EQ(archive.Entries().size(), 2u);
+    const auto model_entry = std::find_if(archive.Entries().begin(), archive.Entries().end(), [](const skeleton_repair::VpkEntry& entry) {
+        return entry.FullPath == "models/heroes/hero.vmdl_c";
+    });
+    const auto texture_entry = std::find_if(archive.Entries().begin(), archive.Entries().end(), [](const skeleton_repair::VpkEntry& entry) {
+        return entry.FullPath == "materials/shared.vtex_c";
+    });
+    ASSERT_NE(model_entry, archive.Entries().end());
+    ASSERT_NE(texture_entry, archive.Entries().end());
+    EXPECT_EQ(archive.Read(*model_entry), selected);
+    EXPECT_EQ(archive.Read(*texture_entry), texture);
+    EXPECT_EQ(model_entry->ArchiveIndex, VpkArchive::EmbeddedArchive);
+
+    const fs::path listed = dir.Path() / "listed";
+    ContentStore check = ContentStore::Open(listed);
+    check.ImportVpk(packed);
+    const std::vector<ModelRow> models = check.ListModels();
+    ASSERT_EQ(models.size(), 1u);
+    EXPECT_EQ(models[0].Blob.Bytes, IdOf(selected).Bytes);
+    EXPECT_EQ(check.ReadBlob(models[0].Blob), selected);
+    const std::vector<PackRow> packs = check.ListPacks();
+    ASSERT_EQ(packs.size(), 1u);
+    EXPECT_EQ(packs[0].ModelCount, 1);
+    EXPECT_EQ(check.SnapshotPaths(packs[0].Snapshot, "vmdl_c"), std::vector<std::string>{"models/heroes/hero.vmdl_c"});
+    EXPECT_EQ(check.ReadSnapshotPath(packs[0].Snapshot, "materials/shared.vtex_c"), texture);
+    EXPECT_FALSE(check.ReadSnapshotPath(packs[0].Snapshot, "models/heroes/other.vmdl_c"));
+    EXPECT_EQ(check.ReadBlob(IdOf(selected)), selected);
+    EXPECT_EQ(store.ReadBlob(IdOf(selected)), selected);
+}

@@ -24,6 +24,22 @@
 namespace skeleton_repair {
 namespace {
 
+std::optional<std::filesystem::path> AskForSaveVpk(HWND owner) {
+    wchar_t buffer[MAX_PATH] = {};
+    OPENFILENAMEW dialog{sizeof(dialog)};
+    dialog.hwndOwner = owner;
+    dialog.lpstrFilter = L"VPK archives (*.vpk)\0*.vpk\0All files\0*.*\0";
+    dialog.lpstrTitle = L"Assemble a pack";
+    dialog.lpstrFile = buffer;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrDefExt = L"vpk";
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    if (!GetSaveFileNameW(&dialog)) {
+        return std::nullopt;
+    }
+    return std::filesystem::path(buffer);
+}
+
 std::optional<std::filesystem::path> AskForVpk(HWND owner) {
     wchar_t buffer[MAX_PATH] = {};
     OPENFILENAMEW dialog{sizeof(dialog)};
@@ -358,7 +374,73 @@ void LibraryPanel::JoinFinishedWork() {
         Refresh();
         return;
     }
-    if (job_ == Job::Repair) {
+    if (job_ == Job::Repair || job_ == Job::Assemble) {
+        status_ = import_error_;
+    }
+}
+
+std::optional<SnapshotId> LibraryPanel::AssemblySnapshot() const {
+    if (!selected_ || memberships_.empty()) {
+        return std::nullopt;
+    }
+    if (selected_pack_) {
+        for (const MembershipRow& membership : memberships_) {
+            if (membership.Snapshot.Value == *selected_pack_) {
+                return membership.Snapshot;
+            }
+        }
+    }
+    if (selected_copy_ && *selected_copy_ < memberships_.size()) {
+        return memberships_[*selected_copy_].Snapshot;
+    }
+    const std::string& first = memberships_.front().Snapshot.Value;
+    for (const MembershipRow& membership : memberships_) {
+        if (membership.Snapshot.Value != first) {
+            return std::nullopt;
+        }
+    }
+    return memberships_.front().Snapshot;
+}
+
+void LibraryPanel::StartAssemble(const SnapshotId& snapshot, const std::filesystem::path& destination) {
+    JoinFinishedWork();
+    if (running_ || !store_ || !selected_ || snapshot.Value.empty()) {
+        return;
+    }
+    try {
+        importing_name_ = Narrow(destination.filename().wstring());
+    } catch (const std::exception& error) {
+        status_ = error.what();
+        return;
+    }
+    const BlobId model = *selected_;
+    const SnapshotId source = snapshot;
+    cancel_ = CancellationSource();
+    import_error_.clear();
+    import_ok_ = false;
+    import_done_.store(false, std::memory_order_relaxed);
+    job_ = Job::Assemble;
+    const CancellationToken token = cancel_.Token();
+    running_ = true;
+    try {
+        worker_ = std::thread([this, source, model, destination, token] {
+            try {
+                store_->Assemble(source, {model}, destination, token);
+                store_->ImportVpk(destination, token);
+                import_ok_ = true;
+                import_error_.clear();
+            } catch (const std::exception& error) {
+                import_ok_ = false;
+                import_error_ = error.what();
+            } catch (...) {
+                import_ok_ = false;
+                import_error_ = "Could not assemble the pack.";
+            }
+            import_done_.store(true, std::memory_order_release);
+        });
+    } catch (const std::exception& error) {
+        running_ = false;
+        import_error_ = error.what();
         status_ = import_error_;
     }
 }
@@ -640,7 +722,13 @@ void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
     if (!store_) {
         ImGui::TextWrapped("%s", open_error_.empty() ? "The model library is unavailable." : open_error_.c_str());
     } else if (running_) {
-        ImGui::TextWrapped("%s %s", job_ == Job::Repair ? "Repairing" : "Importing", importing_name_.c_str());
+        const char* activity = "Importing";
+        if (job_ == Job::Repair) {
+            activity = "Repairing";
+        } else if (job_ == Job::Assemble) {
+            activity = "Assembling";
+        }
+        ImGui::TextWrapped("%s %s", activity, importing_name_.c_str());
         if (ImGui::Button("Cancel")) {
             cancel_.Cancel();
         }
@@ -771,6 +859,20 @@ void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
             StartRepair(*pack_path, game_directory);
         }
         if (repair_disabled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        const std::optional<SnapshotId> assembly = AssemblySnapshot();
+        const bool assemble_disabled = running_ || !assembly;
+        if (assemble_disabled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Assemble") && assembly) {
+            if (const std::optional<std::filesystem::path> path = AskForSaveVpk(owner)) {
+                StartAssemble(*assembly, *path);
+            }
+        }
+        if (assemble_disabled) {
             ImGui::EndDisabled();
         }
         ImGui::SameLine();

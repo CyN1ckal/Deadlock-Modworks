@@ -33,12 +33,14 @@ public:
         const std::string& game_directory);
 
 private:
-    enum class Job { Import, Repair };
+    enum class Job { Import, Repair, Assemble };
 
     void Refresh();
     void LoadSelection();
     void StartImport(const std::filesystem::path& path);
     void StartRepair(const std::string& vpk_path, const std::string& game_directory);
+    void StartAssemble(const SnapshotId& snapshot, const std::filesystem::path& destination);
+    std::optional<SnapshotId> AssemblySnapshot() const;
     void JoinFinishedWork();
     void HideObservation(const std::string& observation_id);
     void ViewSelected(PreviewPanel& preview,

@@ -1,5 +1,6 @@
 #include "content_store.hpp"
 
+#include "archive_transaction.hpp"
 #include "content_hash.hpp"
 #include "error.hpp"
 #include "kv3.hpp"
@@ -1926,6 +1927,139 @@ WHERE NOT EXISTS (SELECT 1 FROM memberships m WHERE m.blob_sha256 = blobs.sha256
     }
     stats.IncomingFilesRemoved = RemoveIncomingFiles(state_->directory);
     return stats;
+}
+
+namespace {
+
+void WriteEmptyDirectoryVpk(const std::filesystem::path& path) {
+    uint8_t bytes[29] = {};
+    bytes[0] = 0x34;
+    bytes[1] = 0x12;
+    bytes[2] = 0xAA;
+    bytes[3] = 0x55;
+    bytes[4] = 2;
+    bytes[8] = 1;
+    FileHandle file(CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!file) {
+        throw IoError("Could not write the assembled VPK. " + Win32Message(GetLastError()));
+    }
+    WriteExact(file.get(), bytes, sizeof(bytes));
+}
+
+}  // namespace
+
+void ContentStore::Assemble(const SnapshotId& snapshot, const std::vector<BlobId>& models,
+    const std::filesystem::path& destination, CancellationToken cancellation) {
+    cancellation.ThrowIfCancelled();
+    if (snapshot.Value.empty()) {
+        throw InvalidData("The model library has no snapshot with that id.");
+    }
+    if (models.empty()) {
+        throw InvalidData("Select a model to assemble.");
+    }
+    if (destination.empty()) {
+        throw IoError("Could not write the assembled VPK.");
+    }
+    {
+        Statement exists(state_->db, "SELECT 1 FROM snapshots WHERE id = ?");
+        exists.BindText(1, snapshot.Value);
+        if (!exists.Step()) {
+            throw InvalidData("The model library has no snapshot with that id.");
+        }
+    }
+
+    struct Member {
+        std::string Path;
+        std::string PathKey;
+        std::string Kind;
+        BlobId Blob;
+    };
+    std::vector<Member> members;
+    {
+        Statement stmt(state_->db, "SELECT path, path_key, kind, blob_sha256 FROM memberships WHERE snapshot_id = ?");
+        stmt.BindText(1, snapshot.Value);
+        while (stmt.Step()) {
+            Member member;
+            member.Path = stmt.ColumnText(0);
+            member.PathKey = stmt.ColumnText(1);
+            member.Kind = stmt.ColumnText(2);
+            member.Blob = stmt.ColumnBlobId(3);
+            members.push_back(std::move(member));
+        }
+    }
+
+    std::unordered_map<std::string, const Member*> by_key;
+    for (const Member& member : members) {
+        by_key.emplace(member.PathKey, &member);
+    }
+
+    std::unordered_set<std::string> included;
+    std::vector<std::string> expand;
+    for (const BlobId& model : models) {
+        cancellation.ThrowIfCancelled();
+        bool found = false;
+        for (const Member& member : members) {
+            if (member.Kind != "vmdl_c" || member.Blob.Bytes != model.Bytes) {
+                continue;
+            }
+            found = true;
+            if (included.insert(member.PathKey).second) {
+                expand.push_back(member.PathKey);
+            }
+        }
+        if (!found) {
+            throw InvalidData("The selected model is not in this pack.");
+        }
+    }
+
+    std::vector<std::pair<std::string, std::string>> refs;
+    {
+        Statement stmt(state_->db,
+            "SELECT from_path_key, resolved_path_key FROM refs "
+            "WHERE snapshot_id = ? AND resolved_path_key IS NOT NULL");
+        stmt.BindText(1, snapshot.Value);
+        while (stmt.Step()) {
+            refs.emplace_back(stmt.ColumnText(0), stmt.ColumnText(1));
+        }
+    }
+    for (size_t index = 0; index < expand.size(); ++index) {
+        cancellation.ThrowIfCancelled();
+        for (const auto& [from, resolved] : refs) {
+            if (from != expand[index] || !included.insert(resolved).second) {
+                continue;
+            }
+            const auto found = by_key.find(resolved);
+            if (found == by_key.end() || found->second->Kind == "vmdl_c") {
+                included.erase(resolved);
+                continue;
+            }
+            if (found->second->Kind == "vnmskel_c") {
+                expand.push_back(resolved);
+            }
+        }
+    }
+
+    std::vector<VpkChange> changes;
+    changes.reserve(included.size());
+    for (const Member& member : members) {
+        if (!included.contains(member.PathKey)) {
+            continue;
+        }
+        cancellation.ThrowIfCancelled();
+        changes.push_back(VpkChange{member.Path, ReadBlob(member.Blob)});
+    }
+
+    const std::filesystem::path seed = state_->directory / "incoming" / (NewUuid() + ".vpk");
+    struct SeedFile {
+        std::filesystem::path Path;
+        ~SeedFile() {
+            std::error_code error;
+            std::filesystem::remove(Path, error);
+        }
+    } seed_file{seed};
+    WriteEmptyDirectoryVpk(seed);
+    const VpkArchive empty = VpkArchive::Open(seed);
+    ArchiveTransaction::Write(empty, seed, destination, changes, false, cancellation);
 }
 
 }  // namespace skeleton_repair
