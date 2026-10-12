@@ -4,6 +4,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
+#include <objbase.h>
 #include <imgui.h>
 #include <algorithm>
 #include <chrono>
@@ -30,7 +31,7 @@ std::filesystem::path Dialog(void* owner, bool save, bool vpk) {
 }
 }
 LibraryPanel::LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives)
-    : device_(device), archives_(std::move(archives)) {
+    : device_(device), archives_(std::move(archives)), cache_folder_(ThumbnailCacheFolder()) {
     const unsigned count = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
     for (unsigned i = 0; i < count; ++i) workers_.emplace_back([this] { RunThumbnailWorker(); });
 }
@@ -40,7 +41,8 @@ LibraryPanel::~LibraryPanel() {
     {
         std::lock_guard lock(queue_mutex_);
         stopping_ = true;
-        jobs_.clear();
+        // Pending saves still finish, so thumbnails rendered this session are not rendered again next time.
+        std::erase_if(jobs_, [](const ThumbnailJob& job) { return !job.Save; });
         thumbnail_cancellation_.Cancel();
     }
     queue_changed_.notify_all();
@@ -48,25 +50,39 @@ LibraryPanel::~LibraryPanel() {
     InvalidateThumbnails();
 }
 void LibraryPanel::RunThumbnailWorker() {
+    // Thumbnail files are read and written with WIC.
+    const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
     std::unique_lock lock(queue_mutex_);
     while (true) {
         queue_changed_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
-        if (stopping_) return;
+        if (jobs_.empty()) break;
         const ThumbnailJob job = std::move(jobs_.front());
         jobs_.pop_front();
         ++active_jobs_;
         lock.unlock();
-        ThumbnailResult result = LoadThumbnail(job);
+        std::optional<ThumbnailResult> result;
+        if (job.Save) {
+            // A failed save only means the thumbnail is rendered again next time.
+            try { SaveThumbnailImage(job.SavePath, *job.Save); } catch (const std::exception&) {}
+        } else {
+            result = LoadThumbnail(job);
+        }
         lock.lock();
         --active_jobs_;
-        results_.push_back(std::move(result));
+        if (result) results_.push_back(std::move(*result));
         queue_idle_.notify_all();
     }
+    lock.unlock();
+    if (com) CoUninitialize();
 }
 LibraryPanel::ThumbnailResult LibraryPanel::LoadThumbnail(const ThumbnailJob& job) {
-    ThumbnailResult result{job.Generation, job.Index, std::nullopt, {}};
+    ThumbnailResult result{job.Generation, job.Index};
     try {
         job.Cancellation.ThrowIfCancelled();
+        if (!cache_folder_.empty()) {
+            result.CachePath = ThumbnailCachePath(cache_folder_, job.Model, job.Game);
+            if ((result.Pixels = LoadThumbnailImage(result.CachePath))) return result;
+        }
         const auto archive = archives_->Get(job.Model.Archive);
         const auto lease = archive->Archive().LockSources();
         const auto base = job.Game.empty() ? nullptr : archives_->Get(job.Game);
@@ -92,7 +108,7 @@ LibraryPanel::ThumbnailResult LibraryPanel::LoadThumbnail(const ThumbnailJob& jo
 }
 void LibraryPanel::StopLoading() {
     std::unique_lock lock(queue_mutex_);
-    jobs_.clear();
+    std::erase_if(jobs_, [](const ThumbnailJob& job) { return !job.Save; });
     thumbnail_cancellation_.Cancel();
     thumbnail_cancellation_ = CancellationSource{};
     queue_idle_.wait(lock, [this] { return active_jobs_ == 0; });
@@ -106,30 +122,39 @@ void LibraryPanel::InvalidateThumbnails() {
     ++generation_;
     {
         std::lock_guard lock(queue_mutex_);
-        jobs_.clear();
+        std::erase_if(jobs_, [](const ThumbnailJob& job) { return !job.Save; });
         results_.clear();
     }
     ready_.clear();
-    if (!thumbnails_.empty() || !retired_.empty()) {
+    if (!thumbnails_.empty() || !retired_.empty() || renderer_) {
         vkDeviceWaitIdle(device_.Device);
         thumbnails_.clear();
         retired_.clear();
-    }
-}
-void LibraryPanel::Record(VkCommandBuffer command_buffer) {
-    const ViewSettings settings{0, false, false, ColorMode::Textured};
-    for (auto& [index, thumbnail] : thumbnails_) if (thumbnail.Viewport && !thumbnail.Rendered) {
-        thumbnail.Viewport->Record(command_buffer, thumbnail.Camera, settings);
-        thumbnail.Rendered = true;
+        renderer_.reset();
     }
 }
 void LibraryPanel::Evict(std::map<size_t, Thumbnail>::iterator thumbnail) {
-    if (thumbnail->second.Viewport) retired_.push_back(std::move(thumbnail->second.Viewport));
+    if (thumbnail->second.Image) retired_.push_back(std::move(thumbnail->second.Image));
     if (thumbnail->second.Pending) {
         std::lock_guard lock(queue_mutex_);
-        std::erase_if(jobs_, [&](const ThumbnailJob& job) { return job.Index == thumbnail->first; });
+        std::erase_if(jobs_, [&](const ThumbnailJob& job) { return !job.Save && job.Index == thumbnail->first; });
     }
     thumbnails_.erase(thumbnail);
+}
+ThumbnailPixels LibraryPanel::RenderThumbnail(const PreparedModel& model) {
+    if (!renderer_) renderer_ = std::make_unique<ModelRenderer>(device_);
+    renderer_->SetScene(model.Scene);
+    if (model.Materials) renderer_->SetMaterials(*model.Materials);
+    renderer_->Resize(kThumbnailSize, kThumbnailSize);
+    const auto visible = DefaultVisibility(model.Scene, 0);
+    RenderOptions options;
+    options.VisibleMeshes = visible;
+    options.ShowSkeleton = false;
+    options.ShowGrid = false;
+    options.Coloring = ColorMode::Textured;
+    // Framing puts the camera in front of the model.
+    const auto camera = OrbitCamera::Framing(model.Scene.Min, model.Scene.Max);
+    return {kThumbnailSize, kThumbnailSize, renderer_->Capture(camera, options)};
 }
 void LibraryPanel::UploadThumbnails() {
     {
@@ -137,7 +162,7 @@ void LibraryPanel::UploadThumbnails() {
         for (auto& result : results_) ready_.push_back(std::move(result));
         results_.clear();
     }
-    // Creating a viewport and uploading its buffers must stay on this thread, so spread that work over frames.
+    // Rendering and uploading images must stay on this thread, so spread that work over frames.
     const auto start = std::chrono::steady_clock::now();
     while (!ready_.empty() && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(6)) {
         ThumbnailResult result = std::move(ready_.front());
@@ -147,12 +172,25 @@ void LibraryPanel::UploadThumbnails() {
         Thumbnail& thumbnail = found->second;
         thumbnail.Pending = false;
         try {
-            if (!result.Model) throw InvalidData(result.Error);
-            thumbnail.Viewport = std::make_unique<ModelViewport>(device_);
-            thumbnail.Viewport->SetModel(&*result.Model, 0);
-            thumbnail.Camera = OrbitCamera::Framing(thumbnail.Viewport->Scene().Min, thumbnail.Viewport->Scene().Max);
+            if (!result.Pixels) {
+                if (!result.Model) throw InvalidData(result.Error);
+                // Render once; later loads read the saved image instead of the model.
+                result.Pixels = RenderThumbnail(*result.Model);
+                result.Model.reset();
+                if (!result.CachePath.empty()) {
+                    {
+                        std::lock_guard lock(queue_mutex_);
+                        ThumbnailJob save{generation_, SIZE_MAX};
+                        save.Save = *result.Pixels;
+                        save.SavePath = result.CachePath;
+                        jobs_.push_back(std::move(save));
+                    }
+                    queue_changed_.notify_one();
+                }
+            }
+            thumbnail.Image = std::make_unique<ThumbnailImage>(device_, *result.Pixels);
         } catch (const std::exception& error) {
-            thumbnail.Viewport.reset();
+            thumbnail.Image.reset();
             thumbnail.Error = error.what();
         }
     }
@@ -179,13 +217,11 @@ void LibraryPanel::DrawThumbnail(size_t index, const std::filesystem::path& game
     }
     if (found != thumbnails_.end()) {
         found->second.LastFrame = ImGui::GetFrameCount();
-        if (found->second.Viewport) {
-            if (found->second.RenderSize != size) {
-                found->second.RenderSize = size;
-                found->second.Rendered = false;
-            }
-            found->second.Viewport->Draw("thumbnail", {size, size}, found->second.Camera, false);
-            if (!found->second.Viewport->MaterialNotes().empty()) ImGui::SetItemTooltip("Some materials are unavailable. Open the full preview for details.");
+        if (found->second.Image) {
+            const auto origin = ImGui::GetCursorScreenPos();
+            ImGui::Dummy({size, size});
+            ImGui::GetWindowDrawList()->AddImageRounded(found->second.Image->Texture(), origin, {origin.x + size, origin.y + size},
+                {0, 0}, {1, 1}, IM_COL32_WHITE, 4);
             return;
         }
     }

@@ -2,6 +2,7 @@
 #include "background.hpp"
 #include "model_library.hpp"
 #include "model_viewport.hpp"
+#include "thumbnail_cache.hpp"
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -24,7 +25,6 @@ public:
     void InvalidateThumbnails();
     // Cancels background reads and waits until no worker holds an archive open, for example before a repair replaces files.
     void StopLoading();
-    void Record(VkCommandBuffer command_buffer);
     size_t SelectedCount() const { return selected_.size(); }
     size_t ModelCount() const { return models_.size(); }
     void Restore(const ModelLibrary& library);
@@ -37,12 +37,9 @@ public:
         const std::function<void(const LibraryModel&)>& preview);
 private:
     struct Thumbnail {
-        std::unique_ptr<ModelViewport> Viewport;
-        OrbitCamera Camera;
+        std::unique_ptr<ThumbnailImage> Image;
         std::string Error;
         int LastFrame = 0;
-        float RenderSize = 0;
-        bool Rendered = false;
         bool Pending = true;
     };
     struct ThumbnailJob {
@@ -51,11 +48,17 @@ private:
         LibraryModel Model;
         std::filesystem::path Game;
         CancellationToken Cancellation;
+        // Set for jobs that only write a rendered thumbnail to `SavePath`.
+        std::optional<ThumbnailPixels> Save;
+        std::filesystem::path SavePath;
     };
     struct ThumbnailResult {
         uint64_t Generation = 0;
         size_t Index = 0;
+        // The cached image, when one exists. Otherwise `Model` is rendered once and saved to `CachePath`.
+        std::optional<ThumbnailPixels> Pixels;
         std::optional<PreparedModel> Model;
+        std::filesystem::path CachePath;
         std::string Error;
     };
     struct ScanResult {
@@ -67,11 +70,15 @@ private:
     void UploadThumbnails();
     void RunThumbnailWorker();
     ThumbnailResult LoadThumbnail(const ThumbnailJob& job);
+    ThumbnailPixels RenderThumbnail(const PreparedModel& model);
     VulkanDevice device_;
     std::shared_ptr<ArchiveCache> archives_;
     std::map<size_t, Thumbnail> thumbnails_;
     // Evicted thumbnails whose images an in-flight frame may still sample; destroyed after the next device wait.
-    std::vector<std::unique_ptr<ModelViewport>> retired_;
+    std::vector<std::unique_ptr<ThumbnailImage>> retired_;
+    // Renders thumbnails that are not cached yet. Created on first use.
+    std::unique_ptr<ModelRenderer> renderer_;
+    std::filesystem::path cache_folder_;
     std::deque<ThumbnailResult> ready_;
     uint64_t generation_ = 0;
     std::filesystem::path thumbnail_game_;

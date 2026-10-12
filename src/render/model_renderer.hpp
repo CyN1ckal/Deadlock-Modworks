@@ -95,6 +95,8 @@ public:
 
     // Copies the last rendered image to RGBA8 rows, waiting for the device.
     std::vector<uint8_t> ReadPixels();
+    // Renders one frame on its own submit and returns it as RGBA8 rows, waiting for the device.
+    std::vector<uint8_t> Capture(const OrbitCamera& camera, const RenderOptions& options);
 
 private:
     struct Buffer {

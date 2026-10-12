@@ -62,9 +62,10 @@ add_library(sr_model_tools STATIC
     src/preview/repair_panel.cpp
     src/preview/library_panel.cpp
     src/preview/background.cpp
+    src/preview/thumbnail_cache.cpp
 )
 target_include_directories(sr_model_tools PUBLIC src/preview)
-target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32)
+target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32 ole32 windowscodecs)
 target_link_libraries(DeadlockSkeletonRepair PRIVATE sr_model_tools)
 target_compile_definitions(DeadlockSkeletonRepair PRIVATE SR_MODEL_TOOLS)
 add_executable(ModelPreview src/preview/standalone.cpp)
@@ -75,8 +76,9 @@ add_executable(render_tests
     tests/render_tests.cpp
     tests/comparison_tests.cpp
     tests/skeleton_pose_tests.cpp
+    tests/thumbnail_cache_tests.cpp
 )
-target_link_libraries(render_tests PRIVATE sr_render GTest::gtest_main)
+target_link_libraries(render_tests PRIVATE sr_render sr_model_tools GTest::gtest_main)
 
 if(MSVC)
     foreach(target sr_render sr_model_tools ModelPreview render_tests)

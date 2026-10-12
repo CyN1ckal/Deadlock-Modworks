@@ -1,0 +1,265 @@
+#include "thumbnail_cache.hpp"
+#include "error.hpp"
+#include "mod_store.hpp"
+#include "strings.hpp"
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+#include <imgui_impl_vulkan.h>
+#include <cstring>
+#include <string>
+#include <system_error>
+
+namespace skeleton_repair {
+namespace {
+namespace fs = std::filesystem;
+using Microsoft::WRL::ComPtr;
+// Bump to discard every cached thumbnail, for example after the renderer's look changes.
+constexpr char kCacheVersion[] = "thumbnail-v1";
+
+void Hash(uint64_t& hash, std::string_view text) {
+    for (const unsigned char c : text) { hash ^= c; hash *= 0x100000001b3ull; }
+    hash ^= 0xff; hash *= 0x100000001b3ull;
+}
+// Identifies one version of a file by its normalized path, size and write time.
+void HashFile(uint64_t& hash, const fs::path& path) {
+    std::wstring name = fs::absolute(path).lexically_normal().wstring();
+    CharLowerBuffW(name.data(), static_cast<DWORD>(name.size()));
+    Hash(hash, Narrow(name));
+    std::error_code error;
+    const auto size = fs::file_size(path, error);
+    Hash(hash, error ? "?" : std::to_string(size));
+    const auto stamp = fs::last_write_time(path, error);
+    Hash(hash, error ? "?" : std::to_string(stamp.time_since_epoch().count()));
+}
+void Check(HRESULT result, const char* call) {
+    if (FAILED(result)) throw IoError(std::string(call) + " failed with HRESULT " + std::to_string(static_cast<unsigned long>(result)));
+}
+void Check(VkResult result, const char* call) {
+    if (result != VK_SUCCESS) throw VulkanError(call, result);
+}
+ComPtr<IWICImagingFactory> Factory() {
+    ComPtr<IWICImagingFactory> factory;
+    Check(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)), "CoCreateInstance(WICImagingFactory)");
+    return factory;
+}
+uint32_t MemoryType(VkPhysicalDevice physical, uint32_t type_bits, VkMemoryPropertyFlags properties) {
+    VkPhysicalDeviceMemoryProperties memory{};
+    vkGetPhysicalDeviceMemoryProperties(physical, &memory);
+    for (uint32_t i = 0; i < memory.memoryTypeCount; ++i)
+        if ((type_bits & (1u << i)) && (memory.memoryTypes[i].propertyFlags & properties) == properties) return i;
+    throw VulkanError("vkAllocateMemory (no suitable memory type)", VK_ERROR_OUT_OF_DEVICE_MEMORY);
+}
+}
+
+fs::path ThumbnailCacheFolder() {
+    try { return LocalModStore::DefaultRoot() / L"thumbnails"; }
+    catch (const std::exception&) { return {}; }
+}
+
+fs::path ThumbnailCachePath(const fs::path& folder, const LibraryModel& model, const fs::path& game) {
+    uint64_t hash = 0xcbf29ce484222325ull;
+    Hash(hash, kCacheVersion);
+    Hash(hash, std::to_string(kThumbnailSize));
+    HashFile(hash, model.Archive);
+    std::string name = model.Model;
+    for (auto& c : name) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    Hash(hash, name);
+    // Base game materials show through in the render, so a game update renders the thumbnail again.
+    if (game.empty()) Hash(hash, "");
+    else HashFile(hash, game);
+    constexpr char digits[] = "0123456789abcdef";
+    std::string file(16, '0');
+    for (int i = 15; i >= 0; --i, hash >>= 4) file[static_cast<size_t>(i)] = digits[hash & 15];
+    return folder / (file + ".png");
+}
+
+std::optional<ThumbnailPixels> LoadThumbnailImage(const fs::path& path) {
+    std::error_code error;
+    if (!fs::is_regular_file(path, error)) return std::nullopt;
+    try {
+        const auto factory = Factory();
+        ComPtr<IWICBitmapDecoder> decoder;
+        Check(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder), "CreateDecoderFromFilename");
+        ComPtr<IWICBitmapFrameDecode> frame;
+        Check(decoder->GetFrame(0, &frame), "GetFrame");
+        ComPtr<IWICFormatConverter> converter;
+        Check(factory->CreateFormatConverter(&converter), "CreateFormatConverter");
+        Check(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom), "IWICFormatConverter::Initialize");
+        ThumbnailPixels pixels;
+        Check(converter->GetSize(&pixels.Width, &pixels.Height), "GetSize");
+        if (pixels.Width == 0 || pixels.Height == 0 || pixels.Width > 4096 || pixels.Height > 4096) return std::nullopt;
+        pixels.Rgba.resize(static_cast<size_t>(pixels.Width) * pixels.Height * 4);
+        Check(converter->CopyPixels(nullptr, pixels.Width * 4, static_cast<UINT>(pixels.Rgba.size()), pixels.Rgba.data()), "CopyPixels");
+        return pixels;
+    } catch (const std::exception&) {
+        // A damaged cache file is rendered again.
+        fs::remove(path, error);
+        return std::nullopt;
+    }
+}
+
+void SaveThumbnailImage(const fs::path& path, const ThumbnailPixels& pixels) {
+    fs::create_directories(path.parent_path());
+    const fs::path temp = fs::path(path).concat(L".tmp" + std::to_wstring(GetCurrentThreadId()));
+    {
+        const auto factory = Factory();
+        ComPtr<IWICBitmap> bitmap;
+        Check(factory->CreateBitmapFromMemory(pixels.Width, pixels.Height, GUID_WICPixelFormat32bppRGBA, pixels.Width * 4,
+            static_cast<UINT>(pixels.Rgba.size()), const_cast<BYTE*>(pixels.Rgba.data()), &bitmap), "CreateBitmapFromMemory");
+        ComPtr<IWICStream> stream;
+        Check(factory->CreateStream(&stream), "CreateStream");
+        Check(stream->InitializeFromFilename(temp.c_str(), GENERIC_WRITE), "InitializeFromFilename");
+        ComPtr<IWICBitmapEncoder> encoder;
+        Check(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder), "CreateEncoder");
+        Check(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache), "IWICBitmapEncoder::Initialize");
+        ComPtr<IWICBitmapFrameEncode> frame;
+        Check(encoder->CreateNewFrame(&frame, nullptr), "CreateNewFrame");
+        Check(frame->Initialize(nullptr), "IWICBitmapFrameEncode::Initialize");
+        Check(frame->SetSize(pixels.Width, pixels.Height), "SetSize");
+        // Renders are opaque, so the alpha channel is dropped to keep files small.
+        WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
+        Check(frame->SetPixelFormat(&format), "SetPixelFormat");
+        Check(frame->WriteSource(bitmap.Get(), nullptr), "WriteSource");
+        Check(frame->Commit(), "IWICBitmapFrameEncode::Commit");
+        Check(encoder->Commit(), "IWICBitmapEncoder::Commit");
+    }
+    if (!MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::error_code error;
+        fs::remove(temp, error);
+        throw IoError("Could not save a thumbnail. Windows error " + std::to_string(GetLastError()));
+    }
+}
+
+ThumbnailImage::ThumbnailImage(const VulkanDevice& device, const ThumbnailPixels& pixels) : device_(device) {
+    const VkDevice vk = device_.Device;
+    const VkDeviceSize size = pixels.Rgba.size();
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    const auto cleanup = [&] {
+        vkDestroyFence(vk, fence, nullptr);
+        vkDestroyCommandPool(vk, pool, nullptr);
+        vkDestroyBuffer(vk, staging, nullptr);
+        vkFreeMemory(vk, staging_memory, nullptr);
+    };
+    try {
+        VkImageCreateInfo image{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        image.imageType = VK_IMAGE_TYPE_2D;
+        image.format = VK_FORMAT_R8G8B8A8_UNORM;
+        image.extent = {pixels.Width, pixels.Height, 1};
+        image.mipLevels = 1;
+        image.arrayLayers = 1;
+        image.samples = VK_SAMPLE_COUNT_1_BIT;
+        image.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        Check(vkCreateImage(vk, &image, nullptr, &image_), "vkCreateImage");
+        VkMemoryRequirements requirements{};
+        vkGetImageMemoryRequirements(vk, image_, &requirements);
+        VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        allocate.allocationSize = requirements.size;
+        allocate.memoryTypeIndex = MemoryType(device_.Physical, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        Check(vkAllocateMemory(vk, &allocate, nullptr, &memory_), "vkAllocateMemory");
+        Check(vkBindImageMemory(vk, image_, memory_, 0), "vkBindImageMemory");
+
+        VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        view.image = image_;
+        view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view.format = image.format;
+        view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        Check(vkCreateImageView(vk, &view, nullptr, &view_), "vkCreateImageView");
+
+        VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sampler.magFilter = VK_FILTER_LINEAR;
+        sampler.minFilter = VK_FILTER_LINEAR;
+        sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler.addressModeU = sampler.addressModeV = sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler.maxLod = 0;
+        Check(vkCreateSampler(vk, &sampler, nullptr, &sampler_), "vkCreateSampler");
+
+        VkBufferCreateInfo buffer{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        buffer.size = size;
+        buffer.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        Check(vkCreateBuffer(vk, &buffer, nullptr, &staging), "vkCreateBuffer");
+        vkGetBufferMemoryRequirements(vk, staging, &requirements);
+        allocate.allocationSize = requirements.size;
+        allocate.memoryTypeIndex = MemoryType(device_.Physical, requirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        Check(vkAllocateMemory(vk, &allocate, nullptr, &staging_memory), "vkAllocateMemory");
+        Check(vkBindBufferMemory(vk, staging, staging_memory, 0), "vkBindBufferMemory");
+        void* mapped = nullptr;
+        Check(vkMapMemory(vk, staging_memory, 0, size, 0, &mapped), "vkMapMemory");
+        std::memcpy(mapped, pixels.Rgba.data(), pixels.Rgba.size());
+        vkUnmapMemory(vk, staging_memory);
+
+        VkCommandPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+        pool_info.queueFamilyIndex = device_.QueueFamily;
+        Check(vkCreateCommandPool(vk, &pool_info, nullptr, &pool), "vkCreateCommandPool");
+        VkCommandBufferAllocateInfo command_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        command_info.commandPool = pool;
+        command_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        command_info.commandBufferCount = 1;
+        VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+        Check(vkAllocateCommandBuffers(vk, &command_info, &command_buffer), "vkAllocateCommandBuffers");
+        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        Check(vkBeginCommandBuffer(command_buffer, &begin), "vkBeginCommandBuffer");
+        VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image_;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dependency.imageMemoryBarrierCount = 1;
+        dependency.pImageMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(command_buffer, &dependency);
+        VkBufferImageCopy region{};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent = {pixels.Width, pixels.Height, 1};
+        vkCmdCopyBufferToImage(command_buffer, staging, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        vkCmdPipelineBarrier2(command_buffer, &dependency);
+        Check(vkEndCommandBuffer(command_buffer), "vkEndCommandBuffer");
+
+        VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        Check(vkCreateFence(vk, &fence_info, nullptr, &fence), "vkCreateFence");
+        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &command_buffer;
+        Check(vkQueueSubmit(device_.Queue, 1, &submit, fence), "vkQueueSubmit");
+        Check(vkWaitForFences(vk, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+        cleanup();
+        set_ = ImGui_ImplVulkan_AddTexture(sampler_, view_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    } catch (...) {
+        cleanup();
+        Release();
+        throw;
+    }
+}
+
+ThumbnailImage::~ThumbnailImage() { Release(); }
+
+void ThumbnailImage::Release() {
+    if (set_ != VK_NULL_HANDLE) ImGui_ImplVulkan_RemoveTexture(set_);
+    vkDestroySampler(device_.Device, sampler_, nullptr);
+    vkDestroyImageView(device_.Device, view_, nullptr);
+    vkDestroyImage(device_.Device, image_, nullptr);
+    vkFreeMemory(device_.Device, memory_, nullptr);
+    set_ = VK_NULL_HANDLE; sampler_ = VK_NULL_HANDLE; view_ = VK_NULL_HANDLE; image_ = VK_NULL_HANDLE; memory_ = VK_NULL_HANDLE;
+}
+}

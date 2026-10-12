@@ -1013,7 +1013,6 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 FrameRender(draw_data, [&](VkCommandBuffer command_buffer) {
                     app.Panel.Record(command_buffer);
                     app.Compare.Record(command_buffer);
-                    app.Builder.Record(command_buffer);
                 });
                 FramePresent();
             }
