@@ -31,6 +31,7 @@ namespace fs = std::filesystem;
 using skeleton_repair::BlobId;
 using skeleton_repair::CancellationSource;
 using skeleton_repair::ContentStore;
+using skeleton_repair::FolderImportResult;
 using skeleton_repair::GcStats;
 using skeleton_repair::HeroModelUpdater;
 using skeleton_repair::History;
@@ -1760,4 +1761,87 @@ TEST(Store, AssembleWritesOneModelAndItsResolvedTexture) {
     EXPECT_FALSE(check.ReadSnapshotPath(packs[0].Snapshot, "models/heroes/other.vmdl_c"));
     EXPECT_EQ(check.ReadBlob(IdOf(selected)), selected);
     EXPECT_EQ(store.ReadBlob(IdOf(selected)), selected);
+}
+
+TEST(Store, ImportFolderImportsEligibleVpksAndSkipsChunksAndGameArchive) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path folder = dir.Path() / "mods";
+    fs::create_directories(folder / "nested");
+    const std::vector<uint8_t> payload_a{1, 2, 3};
+    const std::vector<uint8_t> payload_b{4, 5, 6};
+    const std::vector<uint8_t> payload_chunk{7, 7, 7};
+    const std::vector<uint8_t> payload_game{8, 8, 8};
+    const std::vector<uint8_t> payload_nested{9, 9, 9};
+    ArchiveWith(folder / "a.vpk", {VpkChange{"models/a.vmdl_c", payload_a}});
+    ArchiveWith(folder / "b.vpk", {VpkChange{"models/b.vmdl_c", payload_b}});
+    ArchiveWith(folder / "b_000.vpk", {VpkChange{"models/chunk.vmdl_c", payload_chunk}});
+    ArchiveWith(folder / "pak01_dir.vpk", {VpkChange{"models/game.vmdl_c", payload_game}});
+    ArchiveWith(folder / "nested" / "c.vpk", {VpkChange{"models/nested.vmdl_c", payload_nested}});
+    WriteBytes(folder / "notes.txt", {1, 2, 3, 4});
+
+    ContentStore store = ContentStore::Open(store_path);
+    const FolderImportResult result = store.ImportFolder(folder);
+    EXPECT_EQ(result.Report(), "Skipped 2 files.");
+    EXPECT_EQ(result.SkippedFiles, 2);
+    EXPECT_TRUE(result.Failures.empty());
+    ASSERT_EQ(result.Snapshots.size(), 2u);
+    EXPECT_NE(result.Snapshots[0].Value, result.Snapshots[1].Value);
+
+    const std::vector<PackRow> packs = store.ListPacks();
+    ASSERT_EQ(packs.size(), 2u);
+    std::vector<std::string> labels;
+    labels.reserve(packs.size());
+    for (const PackRow& pack : packs) {
+        labels.push_back(pack.Label);
+    }
+    std::sort(labels.begin(), labels.end());
+    EXPECT_EQ(labels, (std::vector<std::string>{"a.vpk", "b.vpk"}));
+    EXPECT_EQ(store.ReadBlob(IdOf(payload_a)), payload_a);
+    EXPECT_EQ(store.ReadBlob(IdOf(payload_b)), payload_b);
+    ExpectMessage([&] { store.ReadBlob(IdOf(payload_chunk)); }, "The model library has no blob with that id.");
+    ExpectMessage([&] { store.ReadBlob(IdOf(payload_game)); }, "The model library has no blob with that id.");
+    ExpectMessage([&] { store.ReadBlob(IdOf(payload_nested)); }, "The model library has no blob with that id.");
+
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
+}
+
+TEST(Store, ImportFolderKeepsCommittedArchivesWhenOneArchiveFails) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path folder = dir.Path() / "mods";
+    fs::create_directories(folder);
+    const std::vector<uint8_t> payload_a{1, 2, 3};
+    const std::vector<uint8_t> payload_z{4, 5, 6, 7};
+    const fs::path bad = folder / "bad.vpk";
+    ArchiveWith(folder / "a.vpk", {VpkChange{"models/a.vmdl_c", payload_a}});
+    ArchiveWith(bad, {VpkChange{"models/a.vmdl_c", std::vector<uint8_t>{9, 9, 9}}});
+    ArchiveWith(folder / "z.vpk", {VpkChange{"models/z.vmdl_c", payload_z}});
+    auto damaged = ReadBytes(bad);
+    damaged[28 + LoadU32(damaged, 8)] ^= 0xFF;
+    WriteBytes(bad, damaged);
+
+    std::string reader_error;
+    try {
+        VpkArchive::Open(bad).Validate();
+        ADD_FAILURE() << "damaged archive was accepted";
+    } catch (const std::exception& error) {
+        reader_error = error.what();
+    }
+    ASSERT_FALSE(reader_error.empty());
+
+    ContentStore store = ContentStore::Open(store_path);
+    const FolderImportResult result = store.ImportFolder(folder);
+    EXPECT_EQ(result.Report(), "Skipped 0 files.");
+    ASSERT_EQ(result.Snapshots.size(), 2u);
+    ASSERT_EQ(result.Failures.size(), 1u);
+    EXPECT_TRUE(fs::equivalent(result.Failures[0].Path, bad));
+    EXPECT_EQ(result.Failures[0].Message, reader_error);
+    EXPECT_EQ(store.ReadBlob(IdOf(payload_a)), payload_a);
+    EXPECT_EQ(store.ReadBlob(IdOf(payload_z)), payload_z);
+    EXPECT_EQ(store.ListPacks().size(), 2u);
+
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
 }

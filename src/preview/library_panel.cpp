@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
+#include <shlobj.h>
 
 #include "library_panel.hpp"
 
@@ -38,6 +39,37 @@ std::optional<std::filesystem::path> AskForSaveVpk(HWND owner) {
         return std::nullopt;
     }
     return std::filesystem::path(buffer);
+}
+
+std::optional<std::filesystem::path> AskForFolder(HWND owner) {
+    BROWSEINFOW browse{};
+    browse.hwndOwner = owner;
+    browse.lpszTitle = L"Import a folder of mods";
+    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NONEWFOLDERBUTTON;
+    PIDLIST_ABSOLUTE item = SHBrowseForFolderW(&browse);
+    if (item == nullptr) {
+        return std::nullopt;
+    }
+    wchar_t buffer[MAX_PATH] = {};
+    const BOOL found = SHGetPathFromIDListW(item, buffer);
+    ILFree(item);
+    if (found == FALSE || buffer[0] == L'\0') {
+        return std::nullopt;
+    }
+    return std::filesystem::path(buffer);
+}
+
+std::string FolderFailureText(const FolderImportResult& result) {
+    std::string text;
+    for (const FolderImportFailure& failure : result.Failures) {
+        if (!text.empty()) {
+            text.push_back('\n');
+        }
+        text += Narrow(failure.Path.wstring());
+        text += ": ";
+        text += failure.Message;
+    }
+    return text;
 }
 
 std::optional<std::filesystem::path> AskForVpk(HWND owner) {
@@ -325,6 +357,40 @@ void LibraryPanel::LoadSelection() {
     }
 }
 
+void LibraryPanel::StartImportFolder(const std::filesystem::path& path) {
+    JoinFinishedWork();
+    if (running_ || !store_) {
+        return;
+    }
+    cancel_ = CancellationSource();
+    job_ = Job::ImportFolder;
+    importing_name_ = Narrow(path.filename().wstring());
+    import_error_.clear();
+    import_ok_ = false;
+    import_done_.store(false, std::memory_order_relaxed);
+    const CancellationToken token = cancel_.Token();
+    running_ = true;
+    try {
+        worker_ = std::thread([this, path, token] {
+            try {
+                const FolderImportResult result = store_->ImportFolder(path, token);
+                import_ok_ = result.Failures.empty();
+                import_error_ = FolderFailureText(result);
+            } catch (const std::exception& error) {
+                import_ok_ = false;
+                import_error_ = error.what();
+            } catch (...) {
+                import_ok_ = false;
+                import_error_ = "Could not import the folder.";
+            }
+            import_done_.store(true, std::memory_order_release);
+        });
+    } catch (const std::exception& error) {
+        running_ = false;
+        import_error_ = error.what();
+    }
+}
+
 void LibraryPanel::StartImport(const std::filesystem::path& path) {
     JoinFinishedWork();
     if (running_ || !store_) {
@@ -368,6 +434,11 @@ void LibraryPanel::JoinFinishedWork() {
     }
     import_done_.store(false, std::memory_order_relaxed);
     running_ = false;
+    if (job_ == Job::ImportFolder) {
+        status_.clear();
+        Refresh();
+        return;
+    }
     if (import_ok_) {
         import_error_.clear();
         status_.clear();
@@ -732,9 +803,17 @@ void LibraryPanel::Draw(void* owner_window, PreviewPanel* preview,
         if (ImGui::Button("Cancel")) {
             cancel_.Cancel();
         }
-    } else if (ImGui::Button("Import VPK...")) {
-        if (const std::optional<std::filesystem::path> path = AskForVpk(owner)) {
-            StartImport(*path);
+    } else {
+        if (ImGui::Button("Import VPK...")) {
+            if (const std::optional<std::filesystem::path> path = AskForVpk(owner)) {
+                StartImport(*path);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Import folder...")) {
+            if (const std::optional<std::filesystem::path> path = AskForFolder(owner)) {
+                StartImportFolder(*path);
+            }
         }
     }
     // import_error_ is written on the worker. Read it only after that thread has been joined.

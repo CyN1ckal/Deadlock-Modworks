@@ -114,6 +114,20 @@ struct GcStats {
     int BlobRowsRemoved = 0;
 };
 
+struct FolderImportFailure {
+    std::filesystem::path Path;
+    std::string Message;
+};
+
+// One folder import. SkippedFiles counts chunk VPKs and pak01_dir.vpk only.
+struct FolderImportResult {
+    std::vector<SnapshotId> Snapshots;
+    int SkippedFiles = 0;
+    std::vector<FolderImportFailure> Failures;
+
+    std::string Report() const { return "Skipped " + std::to_string(SkippedFiles) + " files."; }
+};
+
 // Content-addressed library. M1 imports blobs. M2 lists them. M3 records repair edges. M4 queries history.
 // M6 drops observations and collects unreferenced files.
 class ContentStore {
@@ -127,6 +141,9 @@ public:
     ~ContentStore();
 
     SnapshotId ImportVpk(const std::filesystem::path& path, CancellationToken cancellation = {});
+    // Imports every eligible VPK in the folder, non-recursive. Skips chunk files and pak01_dir.vpk.
+    // A failed archive is listed and does not roll back archives already committed.
+    FolderImportResult ImportFolder(const std::filesystem::path& directory, CancellationToken cancellation = {});
     std::vector<uint8_t> ReadBlob(const BlobId& id) const;
     // Membership bytes for a normalized path. Empty when the snapshot has no such path. Does not open a VPK.
     std::optional<std::vector<uint8_t>> ReadSnapshotPath(const SnapshotId& snapshot, std::string_view path) const;
@@ -149,6 +166,9 @@ public:
 private:
     struct State;
     explicit ContentStore(std::unique_ptr<State> state);
+    // reject_game_folder refuses a VPK whose parent contains pak01_dir.vpk.
+    // The file named pak01_dir.vpk is always refused.
+    SnapshotId ImportVpkFile(const std::filesystem::path& path, CancellationToken cancellation, bool reject_game_folder);
 
     std::unique_ptr<State> state_;
 };

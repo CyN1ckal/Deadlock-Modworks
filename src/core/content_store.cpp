@@ -331,14 +331,25 @@ bool IsChunkName(std::string_view filename) {
         && std::isdigit(static_cast<unsigned char>(lower[underscore + 3])) != 0;
 }
 
-void RejectGameArchive(const std::filesystem::path& absolute) {
+void RejectGameArchive(const std::filesystem::path& absolute, bool reject_game_folder) {
     if (EqualsIgnoreCase(PathText(absolute.filename()), "pak01_dir.vpk")) {
         throw InvalidOperation(kGameArchiveMessage);
+    }
+    if (!reject_game_folder) {
+        return;
     }
     const std::filesystem::path parent = absolute.parent_path();
     if (!parent.empty() && std::filesystem::exists(parent / "pak01_dir.vpk")) {
         throw InvalidOperation(kGameFolderMessage);
     }
+}
+
+bool IsVpkFileName(const std::filesystem::path& path) {
+    return EqualsIgnoreCase(PathText(path.extension()), ".vpk");
+}
+
+bool IsGameArchiveName(const std::filesystem::path& path) {
+    return EqualsIgnoreCase(PathText(path.filename()), "pak01_dir.vpk");
 }
 
 std::string KindFor(std::string_view path_key) {
@@ -1590,6 +1601,10 @@ ContentStore ContentStore::Open(const std::filesystem::path& directory) {
 }
 
 SnapshotId ContentStore::ImportVpk(const std::filesystem::path& path, CancellationToken cancellation) {
+    return ImportVpkFile(path, std::move(cancellation), true);
+}
+
+SnapshotId ContentStore::ImportVpkFile(const std::filesystem::path& path, CancellationToken cancellation, bool reject_game_folder) {
     cancellation.ThrowIfCancelled();
     std::error_code exists_error;
     if (!std::filesystem::is_regular_file(path, exists_error)) {
@@ -1605,7 +1620,7 @@ SnapshotId ContentStore::ImportVpk(const std::filesystem::path& path, Cancellati
     } catch (const std::filesystem::filesystem_error& error) {
         throw IoError(std::string("Could not open the mod VPK. ") + error.what());
     }
-    RejectGameArchive(absolute);
+    RejectGameArchive(absolute, reject_game_folder);
 
     const VpkArchive archive = VpkArchive::Open(absolute);
     const auto file_size_raw = std::filesystem::file_size(absolute);
@@ -1662,6 +1677,55 @@ SnapshotId ContentStore::ImportVpk(const std::filesystem::path& path, Cancellati
     SnapshotId id;
     id.Value = CommitImport(state_->db, entries, refs, manifest_sha, absolute_utf8, container_sha, file_size, cancellation);
     return id;
+}
+
+FolderImportResult ContentStore::ImportFolder(const std::filesystem::path& directory, CancellationToken cancellation) {
+    cancellation.ThrowIfCancelled();
+    std::error_code directory_error;
+    if (!std::filesystem::is_directory(directory, directory_error) || directory_error) {
+        throw IoError("Could not find the mod folder.");
+    }
+
+    std::vector<std::filesystem::path> files;
+    try {
+        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(directory)) {
+            std::error_code error;
+            if (!entry.is_regular_file(error) || error) {
+                continue;
+            }
+            files.push_back(entry.path());
+        }
+    } catch (const std::filesystem::filesystem_error& error) {
+        throw IoError(std::string("Could not read the mod folder. ") + error.what());
+    }
+
+    std::sort(files.begin(), files.end(), [](const std::filesystem::path& left, const std::filesystem::path& right) {
+        return CompareIgnoreCase(PathText(left.filename()), PathText(right.filename())) < 0;
+    });
+
+    FolderImportResult result;
+    for (const std::filesystem::path& file : files) {
+        cancellation.ThrowIfCancelled();
+        if (!IsVpkFileName(file)) {
+            continue;
+        }
+        if (IsChunkName(PathText(file.filename())) || IsGameArchiveName(file)) {
+            ++result.SkippedFiles;
+            continue;
+        }
+        try {
+            // The folder scan already skipped pak01_dir.vpk. Eligible siblings in that folder are mods.
+            result.Snapshots.push_back(ImportVpkFile(file, cancellation, false));
+        } catch (const OperationCancelled&) {
+            throw;
+        } catch (const std::exception& error) {
+            FolderImportFailure failure;
+            failure.Path = file;
+            failure.Message = error.what();
+            result.Failures.push_back(std::move(failure));
+        }
+    }
+    return result;
 }
 
 std::vector<uint8_t> ContentStore::ReadBlob(const BlobId& id) const {
