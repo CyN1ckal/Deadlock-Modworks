@@ -30,19 +30,18 @@ struct Box {
     }
 };
 
-uint32_t Rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
-    return static_cast<uint32_t>(r) | static_cast<uint32_t>(g) << 8 | static_cast<uint32_t>(b) << 16 | static_cast<uint32_t>(a) << 24;
-}
+constexpr uint32_t Rgba(uint8_t r, uint8_t g, uint8_t b) { return PackRgba(r, g, b); }
 
-// Muted, stable color per material path so the same material keeps its color between models.
-std::array<float, 3> MaterialColor(const std::string& material) {
+uint32_t Fnv1a(std::string_view text) {
     uint32_t hash = 2166136261u;
-    for (unsigned char c : material) {
+    for (unsigned char c : text) {
         hash = (hash ^ c) * 16777619u;
     }
+    return hash;
+}
+
+std::array<float, 3> HashColor(uint32_t hash, float saturation, float value) {
     const float hue = static_cast<float>(hash % 360) / 60.0f;
-    const float saturation = 0.45f;
-    const float value = 0.8f;
     const float chroma = value * saturation;
     const float x = chroma * (1 - std::abs(std::fmod(hue, 2.0f) - 1));
     std::array<float, 3> rgb{};
@@ -56,6 +55,11 @@ std::array<float, 3> MaterialColor(const std::string& material) {
     }
     const float m = value - chroma;
     return {rgb[0] + m, rgb[1] + m, rgb[2] + m};
+}
+
+// Muted, stable color per material path so the same material keeps its color between models.
+std::array<float, 3> MaterialColor(const std::string& material) {
+    return HashColor(Fnv1a(material), 0.45f, 0.8f);
 }
 
 // 1, 2 or 5 times a power of ten, close to `target`.
@@ -91,10 +95,35 @@ std::vector<LineVertex> BuildGrid(Vec3 min, Vec3 max) {
 
 }  // namespace
 
+uint32_t BoneNameColor(std::string_view name) {
+    // Spread neighbouring hashes apart so bones with similar names still differ.
+    const std::array<float, 3> rgb = HashColor(Fnv1a(name) * 2654435761u, 0.7f, 0.95f);
+    return PackRgba(static_cast<uint8_t>(rgb[0] * 255), static_cast<uint8_t>(rgb[1] * 255), static_cast<uint8_t>(rgb[2] * 255));
+}
+
+std::vector<LineVertex> SkeletonLines(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors) {
+    std::vector<LineVertex> lines;
+    for (size_t i = 0; i < bones.size(); ++i) {
+        const GeometryBone& bone = bones[i];
+        if (bone.Parent < 0 || static_cast<size_t>(bone.Parent) >= bones.size()) {
+            continue;
+        }
+        const uint32_t color = i < colors.size() ? colors[i] : kBoneLineColor;
+        lines.push_back({bones[static_cast<size_t>(bone.Parent)].ModelPosition, color});
+        lines.push_back({bone.ModelPosition, color});
+    }
+    return lines;
+}
+
 PreviewScene BuildPreviewScene(const ModelGeometry& geometry) {
     PreviewScene scene;
     scene.DefaultMeshGroupMask = geometry.DefaultMeshGroupMask;
     scene.BoneCount = geometry.Bones.size();
+    std::vector<uint32_t> bone_colors;
+    bone_colors.reserve(geometry.Bones.size());
+    for (const GeometryBone& bone : geometry.Bones) {
+        bone_colors.push_back(BoneNameColor(bone.Name));
+    }
 
     for (size_t mesh_index = 0; mesh_index < geometry.Meshes.size(); ++mesh_index) {
         const GeometryMesh& mesh = geometry.Meshes[mesh_index];
@@ -111,6 +140,14 @@ PreviewScene BuildPreviewScene(const ModelGeometry& geometry) {
                 PreviewVertex vertex;
                 vertex.Position = v < buffer.Positions.size() ? buffer.Positions[v] : Vec3{};
                 vertex.Normal = v < buffer.Normals.size() ? buffer.Normals[v] : Vec3{0, 0, 1};
+                if (v < buffer.BoneIndices.size()) {
+                    const auto& weights = buffer.BoneWeights[v];
+                    const size_t strongest = static_cast<size_t>(std::max_element(weights.begin(), weights.end()) - weights.begin());
+                    const size_t bone = buffer.BoneIndices[v][strongest];
+                    if (weights[strongest] > 0 && bone < geometry.Bones.size()) {
+                        vertex.BoneColor = bone_colors[bone];
+                    }
+                }
                 box.Add(vertex.Position);
                 scene.Vertices.push_back(vertex);
             }
@@ -143,14 +180,7 @@ PreviewScene BuildPreviewScene(const ModelGeometry& geometry) {
         scene.Meshes.push_back(std::move(info));
     }
 
-    const uint32_t bone_color = Rgba(255, 200, 40);
-    for (const GeometryBone& bone : geometry.Bones) {
-        if (bone.Parent < 0) {
-            continue;
-        }
-        scene.Skeleton.push_back({geometry.Bones[static_cast<size_t>(bone.Parent)].ModelPosition, bone_color});
-        scene.Skeleton.push_back({bone.ModelPosition, bone_color});
-    }
+    scene.Skeleton = SkeletonLines(geometry.Bones);
 
     Box bounds;
     const std::vector<uint8_t> visible = DefaultVisibility(scene, 0);

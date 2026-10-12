@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace skeleton_repair {
@@ -13,11 +14,28 @@ namespace skeleton_repair {
 // Column-major, as GLSL expects.
 using Mat4 = std::array<float, 16>;
 
+// RGBA8 with red in the low byte, matching VK_FORMAT_R8G8B8A8_UNORM vertex attributes.
+constexpr uint32_t PackRgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+    return static_cast<uint32_t>(r) | static_cast<uint32_t>(g) << 8 | static_cast<uint32_t>(b) << 16 | static_cast<uint32_t>(a) << 24;
+}
+
+constexpr uint32_t kBoneLineColor = PackRgba(255, 200, 40);
+constexpr uint32_t kAddedBoneColor = PackRgba(60, 200, 255);
+constexpr uint32_t kMovedBoneColor = PackRgba(255, 60, 50);
+constexpr uint32_t kReparentedBoneColor = PackRgba(255, 130, 20);
+constexpr uint32_t kRemovedBoneColor = PackRgba(235, 80, 235);
+constexpr uint32_t kUnskinnedColor = PackRgba(120, 120, 120);
+
+// Stable color per bone name, so the same bone has the same color in every model and skeleton order.
+uint32_t BoneNameColor(std::string_view name);
+
 struct PreviewVertex {
     Vec3 Position;
     Vec3 Normal;
+    // Color of the bone with the largest weight, or kUnskinnedColor.
+    uint32_t BoneColor = kUnskinnedColor;
 };
-static_assert(sizeof(PreviewVertex) == 24);
+static_assert(sizeof(PreviewVertex) == 28);
 
 struct LineVertex {
     Vec3 Position;
@@ -64,6 +82,9 @@ struct PreviewScene {
 };
 
 PreviewScene BuildPreviewScene(const ModelGeometry& geometry);
+
+// One line from each bone to its parent. Colors are per bone; missing entries use kBoneLineColor.
+std::vector<LineVertex> SkeletonLines(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors = {});
 
 // One byte per mesh: in the LOD and in the model's default mesh group.
 std::vector<uint8_t> DefaultVisibility(const PreviewScene& scene, int lod);

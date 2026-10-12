@@ -27,12 +27,19 @@ struct VulkanDevice {
     uint32_t QueueFamily = 0;
 };
 
+enum class ColorMode {
+    Clay,
+    Material,
+    // Each vertex takes the color of its strongest bone (BoneNameColor).
+    Bone,
+};
+
 struct RenderOptions {
     // One byte per scene mesh. Missing entries are hidden.
     std::span<const uint8_t> VisibleMeshes;
     bool ShowSkeleton = true;
     bool ShowGrid = true;
-    bool ColorByMaterial = false;
+    ColorMode Coloring = ColorMode::Clay;
     // Display-encoded RGB.
     std::array<float, 3> Background{0.11f, 0.12f, 0.14f};
 };
@@ -52,6 +59,8 @@ public:
     // Uploads the scene and waits for the copy. Waits for the device first if a scene is already loaded.
     void SetScene(const PreviewScene& scene);
     void ClearScene();
+    // Replaces only the skeleton lines of the current scene, for example to show a different skeleton or diff colors.
+    void SetSkeleton(std::span<const LineVertex> skeleton);
     bool HasScene() const { return index_count_ > 0 || line_count_ > 0; }
 
     // Recreates the target when the size changes, waiting for the device first.
@@ -92,6 +101,7 @@ private:
     template <typename Fn>
     void Submit(Fn&& record);
     Buffer Upload(const void* data, VkDeviceSize size, VkBufferUsageFlags usage);
+    void UploadLines(std::span<const LineVertex> skeleton);
 
     VulkanDevice device_;
     VkPhysicalDeviceMemoryProperties memory_{};
@@ -120,6 +130,7 @@ private:
     uint32_t skeleton_first_ = 0;
     uint32_t skeleton_count_ = 0;
     std::vector<PreviewDraw> draws_;
+    std::vector<LineVertex> grid_;
 };
 
 }  // namespace skeleton_repair

@@ -347,4 +347,39 @@ TEST(ModelGeometry, ModelWithoutEmbeddedMeshesHasOnlyBones) {
     EXPECT_EQ(geometry.ExternalMeshes, (std::vector<std::string>{"models/test/test_body.vmesh"}));
 }
 
+TEST(AnimationSkeleton, DecodesBonesAndModelSpacePoses) {
+    KvValue root = KvValue::Object(Fields{
+        {"m_ID", KvValue::String("models/test/test.vnmskel")},
+        {"m_boneIDs", KvValue::Array({KvValue::String("root"), KvValue::String("spine")})},
+        {"m_parentIndices", Ints({-1, 0})},
+        {"m_parentSpaceReferencePose", KvValue::Array({Floats({0, 0, 0, 1, 0, 0, 0, 1}), Floats({0, 0, 5, 1, 0, 0, 0, 1})})},
+        {"m_modelSpaceReferencePose", KvValue::Array({Floats({0, 0, 0, 1, 0, 0, 0, 1}), Floats({1, 2, 5, 1, 0, 0, 0.5f, 0.8660254f})})},
+    });
+    const auto bones = skeleton_repair::DecodeAnimationSkeleton(Resource({{"DATA", Kv(std::move(root))}}));
+    ASSERT_EQ(bones.size(), 2u);
+    EXPECT_EQ(bones[1].Name, "spine");
+    EXPECT_EQ(bones[1].Parent, 0);
+    ExpectNear(bones[1].LocalPosition, 0, 0, 5);
+    // The stored model-space pose is used as-is, not recomposed from the local poses.
+    ExpectNear(bones[1].ModelPosition, 1, 2, 5);
+    EXPECT_FLOAT_EQ(bones[1].ModelRotation.Z, 0.5f);
+}
+
+TEST(AnimationSkeleton, RejectsMismatchedArrays) {
+    KvValue root = KvValue::Object(Fields{
+        {"m_boneIDs", KvValue::Array({KvValue::String("root"), KvValue::String("spine")})},
+        {"m_parentIndices", Ints({-1})},
+        {"m_parentSpaceReferencePose", KvValue::Array({Floats({0, 0, 0, 1, 0, 0, 0, 1})})},
+        {"m_modelSpaceReferencePose", KvValue::Array({Floats({0, 0, 0, 1, 0, 0, 0, 1})})},
+    });
+    EXPECT_THROW(skeleton_repair::DecodeAnimationSkeleton(Resource({{"DATA", Kv(std::move(root))}})), InvalidData);
+}
+
+TEST(ModelGeometry, ListsAnimationSkeletonReferences) {
+    KvValue data = ModelData(Ints({}));
+    data.Set("m_vecNmSkeletonRefs", KvValue::Array({KvValue::String("models/test/test.vnmskel")}));
+    const ModelGeometry geometry = DecodeModelGeometry(Resource({{"DATA", Kv(std::move(data))}}));
+    EXPECT_EQ(geometry.AnimationSkeletons, (std::vector<std::string>{"models/test/test.vnmskel"}));
+}
+
 }  // namespace

@@ -267,7 +267,7 @@ TEST_F(RendererTest, SkeletonDrawsOverTheMesh) {
 TEST_F(RendererTest, MaterialColorsChangeTheShading) {
     renderer_->SetScene(scene_);
     const Pixel clay = At(Render(), kWidth / 2, kHeight / 2);
-    options_.ColorByMaterial = true;
+    options_.Coloring = skeleton_repair::ColorMode::Material;
     const Pixel tinted = At(Render(), kWidth / 2, kHeight / 2);
     EXPECT_TRUE(clay.R != tinted.R || clay.G != tinted.G || clay.B != tinted.B);
 }

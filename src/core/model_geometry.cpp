@@ -810,6 +810,13 @@ ModelGeometry DecodeModelGeometry(std::span<const uint8_t> file) {
     if (const KvValue* mask = root.Find("m_nDefaultMeshGroupMask")) {
         geometry.DefaultMeshGroupMask = ToUInt64(*mask);
     }
+    if (const KvValue* refs = root.Find("m_vecNmSkeletonRefs"); refs != nullptr && refs->IsArray()) {
+        for (const KvValue& ref : refs->Items()) {
+            if (ref.Kind == KvKind::String && !ref.String().empty()) {
+                geometry.AnimationSkeletons.push_back(ref.String());
+            }
+        }
+    }
     if (const KvValue* refs = root.Find("m_refMeshes"); refs != nullptr && refs->IsArray()) {
         for (const KvValue& ref : refs->Items()) {
             if (ref.Kind == KvKind::String && !ref.String().empty()) {
@@ -861,6 +868,46 @@ ModelGeometry DecodeModelGeometry(std::span<const uint8_t> file) {
         geometry.Meshes.push_back(std::move(mesh));
     }
     return geometry;
+}
+
+std::vector<GeometryBone> DecodeAnimationSkeleton(std::span<const uint8_t> file) {
+    const std::vector<Block> blocks = ReadBlocks(file);
+    const Block* data_block = FindBlock(blocks, "DATA");
+    if (data_block == nullptr) {
+        throw InvalidData("Resource has no DATA block.");
+    }
+    const KvValue root = ReadKvBlock(*data_block);
+    const KvValue& ids = RequireArray(root, "m_boneIDs");
+    const KvValue& parents = RequireArray(root, "m_parentIndices");
+    const KvValue& local = RequireArray(root, "m_parentSpaceReferencePose");
+    const KvValue& model = RequireArray(root, "m_modelSpaceReferencePose");
+    const size_t count = ids.Count();
+    if (parents.Count() != count || local.Count() != count || model.Count() != count) {
+        throw InvalidData("Animation skeleton arrays have different lengths.");
+    }
+
+    // Poses are [x, y, z, scale, qx, qy, qz, qw].
+    auto pose = [](const KvValue& value, Vec3& position, Quat& rotation) {
+        if (!value.IsArray() || value.Count() != 8) {
+            throw InvalidData("Animation reference pose is not an eight-component transform.");
+        }
+        auto at = [&](size_t i) { return static_cast<float>(value.At(i).ToDouble()); };
+        position = Vec3{at(0), at(1), at(2)};
+        rotation = Quat{at(4), at(5), at(6), at(7)};
+    };
+
+    std::vector<GeometryBone> bones(count);
+    for (size_t i = 0; i < count; ++i) {
+        GeometryBone& bone = bones[i];
+        bone.Name = ids.At(i).String();
+        bone.Parent = parents.At(i).ToInt32();
+        if (bone.Parent < -1 || bone.Parent >= static_cast<int>(count) || bone.Parent == static_cast<int>(i)) {
+            throw InvalidData("Animation bone " + bone.Name + " has an invalid parent index.");
+        }
+        pose(local.At(i), bone.LocalPosition, bone.LocalRotation);
+        pose(model.At(i), bone.ModelPosition, bone.ModelRotation);
+    }
+    return bones;
 }
 
 }  // namespace skeleton_repair

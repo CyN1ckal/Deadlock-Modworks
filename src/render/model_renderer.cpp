@@ -32,6 +32,7 @@ struct MeshPush {
     Mat4 ViewProjection;
     std::array<float, 4> Eye;
     std::array<float, 4> Color;
+    uint32_t Mode;
 };
 constexpr uint32_t kMeshPushColorOffset = offsetof(MeshPush, Color);
 
@@ -245,15 +246,16 @@ void ModelRenderer::CreatePipelines() {
 
         const VkVertexInputBindingDescription binding{0, lines ? static_cast<uint32_t>(sizeof(LineVertex)) : static_cast<uint32_t>(sizeof(PreviewVertex)),
             VK_VERTEX_INPUT_RATE_VERTEX};
-        const VkVertexInputAttributeDescription attributes[2] = {
+        const VkVertexInputAttributeDescription attributes[3] = {
             {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
             lines ? VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(LineVertex, Color)}
                   : VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(PreviewVertex, Normal)},
+            {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(PreviewVertex, BoneColor)},
         };
         VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         input.vertexBindingDescriptionCount = 1;
         input.pVertexBindingDescriptions = &binding;
-        input.vertexAttributeDescriptionCount = 2;
+        input.vertexAttributeDescriptionCount = lines ? 2 : 3;
         input.pVertexAttributeDescriptions = attributes;
 
         VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -382,16 +384,31 @@ void ModelRenderer::SetScene(const PreviewScene& scene) {
         draws_ = scene.Draws;
     }
 
-    std::vector<LineVertex> lines = scene.Grid;
-    lines.insert(lines.end(), scene.Skeleton.begin(), scene.Skeleton.end());
-    if (!lines.empty()) {
-        lines_ = Upload(lines.data(), lines.size() * sizeof(LineVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        line_count_ = static_cast<uint32_t>(lines.size());
-        grid_first_ = 0;
-        grid_count_ = static_cast<uint32_t>(scene.Grid.size());
-        skeleton_first_ = grid_count_;
-        skeleton_count_ = static_cast<uint32_t>(scene.Skeleton.size());
+    grid_ = scene.Grid;
+    UploadLines(scene.Skeleton);
+}
+
+void ModelRenderer::UploadLines(std::span<const LineVertex> skeleton) {
+    Destroy(lines_);
+    line_count_ = grid_count_ = skeleton_count_ = 0;
+    std::vector<LineVertex> lines = grid_;
+    lines.insert(lines.end(), skeleton.begin(), skeleton.end());
+    if (lines.empty()) {
+        return;
     }
+    lines_ = Upload(lines.data(), lines.size() * sizeof(LineVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    line_count_ = static_cast<uint32_t>(lines.size());
+    grid_first_ = 0;
+    grid_count_ = static_cast<uint32_t>(grid_.size());
+    skeleton_first_ = grid_count_;
+    skeleton_count_ = static_cast<uint32_t>(skeleton.size());
+}
+
+void ModelRenderer::SetSkeleton(std::span<const LineVertex> skeleton) {
+    if (lines_.Handle != VK_NULL_HANDLE) {
+        Check(vkDeviceWaitIdle(device_.Device), "vkDeviceWaitIdle");
+    }
+    UploadLines(skeleton);
 }
 
 void ModelRenderer::ClearScene() {
@@ -401,6 +418,7 @@ void ModelRenderer::ClearScene() {
     index_count_ = line_count_ = 0;
     grid_first_ = grid_count_ = skeleton_first_ = skeleton_count_ = 0;
     draws_.clear();
+    grid_.clear();
 }
 
 bool ModelRenderer::Resize(uint32_t width, uint32_t height) {
@@ -492,14 +510,15 @@ void ModelRenderer::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertices_.Handle, &zero);
         vkCmdBindIndexBuffer(command_buffer, indices_.Handle, 0, VK_INDEX_TYPE_UINT32);
         const Vec3 eye = camera.Eye();
-        MeshPush push{view_projection, {eye.X, eye.Y, eye.Z, 1}, {kClay[0], kClay[1], kClay[2], 1}};
+        MeshPush push{view_projection, {eye.X, eye.Y, eye.Z, 1}, {kClay[0], kClay[1], kClay[2], 1},
+            options.Coloring == ColorMode::Bone ? 1u : 0u};
         constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         vkCmdPushConstants(command_buffer, mesh_layout_, stages, 0, sizeof(push), &push);
         for (const PreviewDraw& draw : draws_) {
             if (draw.Mesh >= options.VisibleMeshes.size() || options.VisibleMeshes[draw.Mesh] == 0) {
                 continue;
             }
-            if (options.ColorByMaterial) {
+            if (options.Coloring == ColorMode::Material) {
                 const std::array<float, 4> tint{draw.MaterialColor[0], draw.MaterialColor[1], draw.MaterialColor[2], 1};
                 vkCmdPushConstants(command_buffer, mesh_layout_, stages, kMeshPushColorOffset, sizeof(tint), tint.data());
             }

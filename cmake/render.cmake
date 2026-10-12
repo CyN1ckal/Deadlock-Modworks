@@ -44,6 +44,8 @@ endforeach()
 add_library(sr_render STATIC
     src/render/preview_scene.cpp
     src/render/model_renderer.cpp
+    src/render/model_comparison.cpp
+    src/render/model_versions.cpp
     ${SR_SHADER_OUTPUTS}
 )
 target_include_directories(sr_render PUBLIC src/render PRIVATE ${SR_SHADER_DIR})
@@ -51,13 +53,16 @@ target_link_libraries(sr_render PUBLIC skeleton_repair_core Vulkan::Vulkan)
 
 add_executable(ModelPreview
     src/preview/main.cpp
+    src/preview/model_viewport.cpp
     src/preview/preview_panel.cpp
+    src/preview/comparison_view.cpp
 )
 target_link_libraries(ModelPreview PRIVATE sr_render sr_imgui shell32 comdlg32)
 
 add_executable(render_tests
     tests/preview_scene_tests.cpp
     tests/render_tests.cpp
+    tests/comparison_tests.cpp
 )
 target_link_libraries(render_tests PRIVATE sr_render GTest::gtest_main)
 

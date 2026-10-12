@@ -66,11 +66,17 @@ struct ModelGeometry {
     std::vector<GeometryBone> Bones;
     // m_refMeshes entries. These live in separate .vmesh_c files and are not decoded here.
     std::vector<std::string> ExternalMeshes;
+    // m_vecNmSkeletonRefs entries: the AG2 animation skeletons (.vnmskel) this model animates with.
+    std::vector<std::string> AnimationSkeletons;
     uint64_t DefaultMeshGroupMask = 0;
 };
 
 // Decodes the embedded meshes and bind-pose skeleton of a compiled .vmdl_c.
 // Layout pinned to ValveResourceFormat 20.0.6980 Model.GetEmbeddedMeshes and VBIB.
 ModelGeometry DecodeModelGeometry(std::span<const uint8_t> file);
+
+// Reads the bones of a compiled AG2 animation skeleton (.vnmskel_c).
+// Model-space positions come from m_modelSpaceReferencePose, as stored by the compiler or the repair.
+std::vector<GeometryBone> DecodeAnimationSkeleton(std::span<const uint8_t> file);
 
 }  // namespace skeleton_repair

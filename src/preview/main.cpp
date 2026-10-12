@@ -13,6 +13,8 @@
 
 #include "model_geometry.hpp"
 #include "model_renderer.hpp"
+#include "comparison_view.hpp"
+#include "model_versions.hpp"
 #include "preview_panel.hpp"
 #include "strings.hpp"
 #include "vpk.hpp"
@@ -23,6 +25,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -32,6 +35,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
@@ -122,7 +126,7 @@ void SetupWindow(VkSurfaceKHR surface, int width, int height) {
         width, height, kMinImageCount);
 }
 
-void FrameRender(ImDrawData* draw_data, PreviewPanel& panel) {
+void FrameRender(ImDrawData* draw_data, const std::function<void(VkCommandBuffer)>& record_offscreen) {
     ImGui_ImplVulkanH_Window* wd = &g_window;
     VkSemaphore acquired = wd->FrameSemaphores[wd->SemaphoreIndex].ImageAcquiredSemaphore;
     VkSemaphore complete = wd->FrameSemaphores[wd->SemaphoreIndex].RenderCompleteSemaphore;
@@ -145,8 +149,8 @@ void FrameRender(ImDrawData* draw_data, PreviewPanel& panel) {
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     CheckVk(vkBeginCommandBuffer(fd->CommandBuffer, &begin));
 
-    // The model image must be rendered before the ImGui pass samples it.
-    panel.Record(fd->CommandBuffer);
+    // Model images must be rendered before the ImGui pass samples them.
+    record_offscreen(fd->CommandBuffer);
 
     VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     pass.renderPass = wd->RenderPass;
@@ -231,57 +235,27 @@ bool EndsWith(const std::string& text, const char* suffix) {
     return text.size() >= length && text.compare(text.size() - length, length, suffix) == 0;
 }
 
-// Loaded VPK and its model list for the browser window.
-struct Browser {
-    std::optional<VpkArchive> Archive;
-    std::string ArchiveName;
-    std::vector<const VpkEntry*> Models;
-    std::string Selected;
-    char Filter[128] = {};
-
-    void Open(const std::filesystem::path& path) {
-        Archive.reset();
-        Models.clear();
-        Selected.clear();
-        Archive.emplace(VpkArchive::Open(path));
-        ArchiveName = Narrow(path.filename().wstring());
-        for (const VpkEntry& entry : Archive->Entries()) {
-            if (EndsWith(entry.FullPath, ".vmdl_c")) {
-                Models.push_back(&entry);
-            }
-        }
-        std::sort(Models.begin(), Models.end(), [](const VpkEntry* a, const VpkEntry* b) { return a->FullPath < b->FullPath; });
-    }
-};
-
-void LoadInto(PreviewPanel& panel, const std::string& title, const std::function<std::vector<uint8_t>()>& read) {
-    try {
-        panel.Load(DecodeModelGeometry(read()), title);
-    } catch (const std::exception& error) {
-        panel.ShowError(title, error.what());
-    }
+bool EqualsIgnoreCase(std::string_view a, std::string_view b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+        return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+    });
 }
 
-void OpenPath(const std::filesystem::path& path, Browser& browser, PreviewPanel& panel) {
-    const std::string name = Narrow(path.wstring());
-    if (EndsWith(name, ".vpk")) {
-        try {
-            browser.Open(path);
-        } catch (const std::exception& error) {
-            browser.Archive.reset();
-            browser.Models.clear();
-            panel.ShowError(name, error.what());
+const VpkEntry* FindEntry(const VpkArchive& archive, std::string_view path) {
+    for (const VpkEntry& entry : archive.Entries()) {
+        if (EqualsIgnoreCase(entry.FullPath, path)) {
+            return &entry;
         }
-        return;
     }
-    LoadInto(panel, name, [&] { return ReadFile(path); });
+    return nullptr;
 }
 
-std::optional<std::filesystem::path> AskForFile(HWND owner) {
+std::optional<std::filesystem::path> AskForFile(HWND owner, const wchar_t* filter, const wchar_t* title) {
     wchar_t buffer[MAX_PATH] = {};
     OPENFILENAMEW dialog{sizeof(dialog)};
     dialog.hwndOwner = owner;
-    dialog.lpstrFilter = L"Models and VPKs (*.vmdl_c;*.vpk)\0*.vmdl_c;*.vpk\0All files\0*.*\0";
+    dialog.lpstrFilter = filter;
+    dialog.lpstrTitle = title;
     dialog.lpstrFile = buffer;
     dialog.nMaxFile = MAX_PATH;
     dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
@@ -291,42 +265,193 @@ std::optional<std::filesystem::path> AskForFile(HWND owner) {
     return std::filesystem::path(buffer);
 }
 
-void DrawBrowser(HWND hwnd, Browser& browser, PreviewPanel& panel) {
-    ImGui::Begin("Browser");
-    if (ImGui::Button("Open...")) {
-        if (auto path = AskForFile(hwnd)) {
-            OpenPath(*path, browser, panel);
+// Accepts the game/citadel folder or its pak01_dir.vpk, like the updater's game directory.
+std::filesystem::path GamePak(const std::filesystem::path& chosen) {
+    if (EndsWith(Narrow(chosen.wstring()), ".vpk")) {
+        return chosen;
+    }
+    return chosen / L"pak01_dir.vpk";
+}
+
+const wchar_t* const kDefaultGameFolder = L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Deadlock\\game\\citadel";
+
+// Archives, the model list, and the two views that show the selection.
+struct App {
+    PreviewPanel Panel;
+    ComparisonView Compare;
+    std::optional<VpkArchive> Mod;
+    std::string ModName;
+    std::vector<const VpkEntry*> Models;
+    std::string Selected;
+    char Filter[128] = {};
+    std::optional<VpkArchive> Game;
+    std::string GameName;
+    std::string GameError;
+    bool FocusCompare = false;
+
+    explicit App(const VulkanDevice& device) : Panel(device), Compare(device) {}
+
+    void OpenGame(const std::filesystem::path& chosen) {
+        Game.reset();
+        GameError.clear();
+        const std::filesystem::path pak = GamePak(chosen);
+        try {
+            Game.emplace(VpkArchive::Open(pak));
+            GameName = Narrow(pak.wstring());
+        } catch (const std::exception& error) {
+            GameError = Narrow(pak.wstring()) + ": " + error.what();
+        }
+        if (!Selected.empty()) {
+            Select(Selected);
         }
     }
-    if (browser.Archive) {
-        ImGui::SameLine();
-        ImGui::Text("%s: %zu models", browser.ArchiveName.c_str(), browser.Models.size());
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputTextWithHint("##filter", "Filter", browser.Filter, sizeof(browser.Filter));
 
-        std::vector<const VpkEntry*> shown;
-        for (const VpkEntry* entry : browser.Models) {
-            if (browser.Filter[0] == '\0' || entry->FullPath.find(browser.Filter) != std::string::npos) {
-                shown.push_back(entry);
+    void OpenMod(const std::filesystem::path& path) {
+        Mod.reset();
+        Models.clear();
+        Selected.clear();
+        ModName = Narrow(path.filename().wstring());
+        try {
+            Mod.emplace(VpkArchive::Open(path));
+        } catch (const std::exception& error) {
+            Panel.ShowError(Narrow(path.wstring()), error.what());
+            return;
+        }
+        for (const VpkEntry& entry : Mod->Entries()) {
+            if (EndsWith(entry.FullPath, ".vmdl_c")) {
+                Models.push_back(&entry);
             }
         }
-        if (ImGui::BeginChild("models")) {
-            ImGuiListClipper clipper;
-            clipper.Begin(static_cast<int>(shown.size()));
-            while (clipper.Step()) {
-                for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-                    const VpkEntry* entry = shown[static_cast<size_t>(i)];
-                    if (ImGui::Selectable(entry->FullPath.c_str(), entry->FullPath == browser.Selected)) {
-                        browser.Selected = entry->FullPath;
-                        LoadInto(panel, entry->FullPath, [&] { return browser.Archive->Read(*entry); });
-                    }
+        std::sort(Models.begin(), Models.end(), [](const VpkEntry* a, const VpkEntry* b) { return a->FullPath < b->FullPath; });
+    }
+
+    void OpenPath(const std::filesystem::path& path) {
+        const std::string name = Narrow(path.wstring());
+        if (EndsWith(name, ".vpk")) {
+            OpenMod(path);
+            return;
+        }
+        try {
+            Panel.Load(DecodeModelGeometry(ReadFile(path)), name);
+        } catch (const std::exception& error) {
+            Panel.ShowError(name, error.what());
+        }
+        Compare.ShowError(name, "Comparison needs a model opened from a mod VPK.");
+    }
+
+    void Select(const std::string& path) {
+        Selected = path;
+        const VpkEntry* entry = Mod ? FindEntry(*Mod, path) : nullptr;
+        if (entry == nullptr) {
+            return;
+        }
+        std::vector<uint8_t> bytes;
+        try {
+            bytes = Mod->Read(*entry);
+            Panel.Load(DecodeModelGeometry(bytes), path);
+        } catch (const std::exception& error) {
+            Panel.ShowError(path, error.what());
+        }
+        if (!Game) {
+            Compare.ShowError(path, "Set the game folder to compare this model with the installed game.");
+            return;
+        }
+        try {
+            Compare.Load(BuildModelVersions(Sources(path, std::move(bytes))));
+            FocusCompare = true;
+        } catch (const std::exception& error) {
+            Compare.ShowError(path, error.what());
+        }
+    }
+
+    ModelSources Sources(const std::string& path, std::vector<uint8_t> bytes) const {
+        ModelSources sources;
+        sources.ModelPath = path;
+        std::optional<std::string> skeleton;
+        try {
+            skeleton = AnimationSkeletonPath(DecodeModelGeometry(bytes));
+        } catch (const std::exception&) {
+            // The comparison view reports the decode error itself.
+        }
+        sources.ModModel = std::move(bytes);
+        if (const VpkEntry* game_model = FindEntry(*Game, path)) {
+            sources.GameModelPath = game_model->FullPath;
+            sources.GameModel = Game->Read(*game_model);
+            if (!skeleton) {
+                try {
+                    skeleton = AnimationSkeletonPath(DecodeModelGeometry(*sources.GameModel));
+                } catch (const std::exception&) {
                 }
             }
         }
-        ImGui::EndChild();
+        if (skeleton) {
+            sources.SkeletonPath = *skeleton;
+            if (const VpkEntry* mod_skeleton = FindEntry(*Mod, *skeleton)) {
+                sources.ModSkeleton = Mod->Read(*mod_skeleton);
+            }
+            if (const VpkEntry* game_skeleton = FindEntry(*Game, *skeleton)) {
+                sources.GameSkeleton = Game->Read(*game_skeleton);
+            }
+        }
+        return sources;
     }
-    ImGui::End();
-}
+
+    void DrawBrowser(HWND hwnd) {
+        ImGui::Begin("Browser");
+        ImGui::SeparatorText("Game");
+        if (Game) {
+            ImGui::TextWrapped("%s", GameName.c_str());
+        } else if (!GameError.empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", GameError.c_str());
+        } else {
+            ImGui::TextDisabled("Not set. Comparisons need the installed game.");
+        }
+        if (ImGui::Button("Set game folder...")) {
+            if (auto path = AskForFile(hwnd, L"Game archive (pak01_dir.vpk)\0pak01_dir.vpk\0VPK archives (*.vpk)\0*.vpk\0",
+                    L"Select game\\citadel\\pak01_dir.vpk")) {
+                OpenGame(*path);
+            }
+        }
+
+        ImGui::SeparatorText("Mod");
+        if (ImGui::Button("Open...")) {
+            if (auto path = AskForFile(hwnd, L"Mod VPKs and models (*.vpk;*.vmdl_c)\0*.vpk;*.vmdl_c\0All files\0*.*\0", nullptr)) {
+                OpenPath(*path);
+            }
+        }
+        if (Mod) {
+            ImGui::SameLine();
+            ImGui::Text("%s: %zu models", ModName.c_str(), Models.size());
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##filter", "Filter", Filter, sizeof(Filter));
+
+            std::vector<const VpkEntry*> shown;
+            for (const VpkEntry* entry : Models) {
+                if (Filter[0] == '\0' || entry->FullPath.find(Filter) != std::string::npos) {
+                    shown.push_back(entry);
+                }
+            }
+            std::optional<std::string> clicked;
+            if (ImGui::BeginChild("models")) {
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(shown.size()));
+                while (clipper.Step()) {
+                    for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                        const VpkEntry* entry = shown[static_cast<size_t>(i)];
+                        if (ImGui::Selectable(entry->FullPath.c_str(), entry->FullPath == Selected)) {
+                            clicked = entry->FullPath;
+                        }
+                    }
+                }
+            }
+            ImGui::EndChild();
+            if (clicked) {
+                Select(*clicked);
+            }
+        }
+        ImGui::End();
+    }
+};
 
 int Run(const std::vector<std::filesystem::path>& args) {
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, GetModuleHandleW(nullptr), nullptr, nullptr, nullptr, nullptr, L"DeadlockModelPreview", nullptr};
@@ -369,19 +494,26 @@ int Run(const std::vector<std::filesystem::path>& args) {
 
     int exit_code = 0;
     {
-        ModelRenderer renderer(g_device);
-        PreviewPanel panel(renderer);
-        Browser browser;
-        if (!args.empty()) {
-            OpenPath(args[0], browser, panel);
-            if (args.size() > 1 && browser.Archive) {
-                const std::string wanted = VpkArchive::Normalize(Narrow(args[1].wstring()));
-                for (const VpkEntry* entry : browser.Models) {
-                    if (entry->FullPath == wanted) {
-                        browser.Selected = entry->FullPath;
-                        LoadInto(panel, entry->FullPath, [&] { return browser.Archive->Read(*entry); });
-                    }
-                }
+        App app(g_device);
+        std::optional<std::filesystem::path> game_folder;
+        std::vector<std::filesystem::path> positional;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (args[i] == L"--game" && i + 1 < args.size()) {
+                game_folder = args[++i];
+            } else {
+                positional.push_back(args[i]);
+            }
+        }
+        if (!game_folder && std::filesystem::exists(GamePak(kDefaultGameFolder))) {
+            game_folder = kDefaultGameFolder;
+        }
+        if (game_folder) {
+            app.OpenGame(*game_folder);
+        }
+        if (!positional.empty()) {
+            app.OpenPath(positional[0]);
+            if (positional.size() > 1 && app.Mod) {
+                app.Select(VpkArchive::Normalize(Narrow(positional[1].wstring())));
             }
         }
 
@@ -429,20 +561,31 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.28f, nullptr, &right);
                 ImGui::DockBuilderDockWindow("Browser", left);
                 ImGui::DockBuilderDockWindow("Preview", right);
+                ImGui::DockBuilderDockWindow("Compare", right);
                 ImGui::DockBuilderFinish(dockspace);
                 first_frame = false;
             }
 
-            DrawBrowser(hwnd, browser, panel);
+            app.DrawBrowser(hwnd);
             ImGui::Begin("Preview", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-            panel.Draw();
+            app.Panel.Draw();
+            ImGui::End();
+            if (app.FocusCompare) {
+                ImGui::SetNextWindowFocus();
+                app.FocusCompare = false;
+            }
+            ImGui::Begin("Compare", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            app.Compare.Draw();
             ImGui::End();
 
             ImGui::Render();
             ImDrawData* draw_data = ImGui::GetDrawData();
             if (draw_data->DisplaySize.x > 0 && draw_data->DisplaySize.y > 0) {
                 g_window.ClearValue.color = {{0.06f, 0.06f, 0.07f, 1.0f}};
-                FrameRender(draw_data, panel);
+                FrameRender(draw_data, [&](VkCommandBuffer command_buffer) {
+                    app.Panel.Record(command_buffer);
+                    app.Compare.Record(command_buffer);
+                });
                 FramePresent();
             }
         }
