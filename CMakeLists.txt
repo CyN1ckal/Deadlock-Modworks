@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DeadlockSkeletonRepair VERSION 0.1.1 LANGUAGES CXX)
+project(DeadlockSkeletonRepair VERSION 0.1.1 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Deadlock Skeleton Repair builds on Windows x64.")
@@ -25,20 +25,57 @@ set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+FetchContent_Declare(
+    lz4
+    URL https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_Declare(
+    zstd
+    URL https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif()
+FetchContent_GetProperties(lz4)
+if(NOT lz4_POPULATED)
+    FetchContent_Populate(lz4)
+endif()
+FetchContent_GetProperties(zstd)
+if(NOT zstd_POPULATED)
+    FetchContent_Populate(zstd)
+endif()
+
+add_library(sr_lz4 STATIC ${lz4_SOURCE_DIR}/lib/lz4.c)
+target_include_directories(sr_lz4 PUBLIC ${lz4_SOURCE_DIR}/lib)
+
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+add_subdirectory(${zstd_SOURCE_DIR}/build/cmake ${CMAKE_BINARY_DIR}/zstd-build EXCLUDE_FROM_ALL)
+
 add_library(skeleton_repair_core STATIC
     src/core/strings.cpp
     src/core/skeleton.cpp
     src/core/vpk.cpp
     src/core/archive_transaction.cpp
+    src/core/kv3.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static)
 
 add_executable(skeleton_repair_tests
     tests/skeleton_tests.cpp
     tests/vpk_tests.cpp
+    tests/kv3_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
+target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 if(MSVC)
     target_compile_options(skeleton_repair_core PRIVATE /W4 /permissive- /utf-8)
