@@ -1,6 +1,6 @@
 # Third-party notices
 
-This application uses ValveResourceFormat and its dependencies as resolved in `packages.lock.json`. NuGet packages and the self-contained .NET runtime retain their respective licenses; this document does not replace their notices.
+Deadlock Skeleton Repair does not link ValveResourceFormat. The binary KV3 reader and writer, and the Source 2 resource block layout, follow that project at release 20.0.6980 (`a06886f7d06049052d32a7381ec05523064a2ca0`). The portable package includes the ValveResourceFormat MIT license as attribution for that format work.
 
 ## ValveResourceFormat
 
@@ -14,16 +14,15 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Other dependencies
+## Libraries linked into DeadlockSkeletonRepair.exe
 
-- ValvePak and ValveKeyValue — ValveResourceFormat/SteamDatabase contributors, MIT.
-- System.IO.Hashing and .NET — Microsoft and .NET contributors, MIT.
-- K4os.Compression.LZ4 — K4os contributors, MIT.
-- KeyValues2 (Datamodel.NET) — Copyright (c) 2013 Tom Edwards, MIT.
-- SharpGLTF — SharpGLTF contributors, MIT.
-- SkiaSharp — Microsoft/Xamarin and contributors, MIT; native Skia carries its own notices.
-- TinyBCSharp and TinyEXR.NET — their respective contributors; see their NuGet license metadata and bundled notices.
-- Vortice.SpirvCross — Vortice contributors, MIT; native SPIRV-Cross carries its own notices.
-- ZstdSharp.Port — ZstdSharp contributors, MIT; Zstandard carries its own notices.
+- LZ4 — https://github.com/lz4/lz4 — BSD 2-Clause. Version 1.10.0.
+- Zstandard — https://github.com/facebook/zstd — BSD License. Version 1.5.7.
+- nlohmann/json — https://github.com/nlohmann/json — MIT License. Version 3.11.3.
+- meshoptimizer — https://github.com/zeux/meshoptimizer — MIT License. Version 0.24.
 
-The portable package includes available package license files, NuGet metadata, the original ValveResourceFormat license, and .NET runtime notices under `licenses/`.
+The portable package copies each of those license files into `licenses/`.
+
+## Optional model preview
+
+`ModelPreview.exe` is built only when the Vulkan SDK and `glslc` are installed. It is not part of the portable repair zip. That target also compiles Dear ImGui (v1.91.9b-docking, MIT) and uses the Vulkan loader from the SDK, which is not redistributed.

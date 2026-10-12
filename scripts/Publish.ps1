@@ -1,49 +1,50 @@
 param([string]$OutputDirectory = '')
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
-if (!$OutputDirectory) { $OutputDirectory = Join-Path $repository 'dist/DeadlockModelUpdater' }
+if (!$OutputDirectory) { $OutputDirectory = Join-Path $repository 'dist/DeadlockSkeletonRepair' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$build = Join-Path $repository 'build/release'
 
-dotnet publish (Join-Path $repository 'DeadlockModelUpdater') -c Release -r win-x64 --self-contained true -o $OutputDirectory -m:1 -p:RestoreLockedMode=true
-if ($LASTEXITCODE -ne 0) { throw 'Portable publish failed.' }
-dotnet publish (Join-Path $repository 'DeadlockModelUpdater.Cli') -c Release -r win-x64 --self-contained true -o $OutputDirectory -m:1 -p:RestoreLockedMode=true
-if ($LASTEXITCODE -ne 0) { throw 'Console launcher publish failed.' }
+if (!(Test-Path -LiteralPath (Join-Path $build 'CMakeCache.txt'))) {
+    $configured = $false
+    foreach ($generator in @('Visual Studio 18 2026', 'Visual Studio 17 2022')) {
+        if (Test-Path -LiteralPath $build) { Remove-Item -LiteralPath $build -Recurse -Force }
+        & cmake -G $generator -A x64 -S $repository -B $build
+        if ($LASTEXITCODE -eq 0) {
+            $configured = $true
+            break
+        }
+    }
+    if (!$configured) { throw 'No supported Visual Studio generator was found.' }
+}
 
-# Keep license files and original package metadata beside the distributed binaries.
-$assets = Get-Content (Join-Path $repository 'DeadlockModelUpdater/obj/project.assets.json') -Raw | ConvertFrom-Json
-$packageRoots = @($assets.packageFolders.PSObject.Properties.Name)
+& cmake --build $build --config Release --target DeadlockSkeletonRepair
+if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+
+$exe = Join-Path $build 'bin\Release\DeadlockSkeletonRepair.exe'
+if (!(Test-Path -LiteralPath $exe)) { throw "Cannot find $exe" }
+
+if (Test-Path -LiteralPath $OutputDirectory) { Remove-Item -LiteralPath $OutputDirectory -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+Copy-Item -LiteralPath $exe -Destination (Join-Path $OutputDirectory 'DeadlockSkeletonRepair.exe')
+Copy-Item -LiteralPath (Join-Path $repository 'README.md') -Destination $OutputDirectory
+Copy-Item -LiteralPath (Join-Path $repository 'THIRD_PARTY_NOTICES.md') -Destination $OutputDirectory
+
 $licenseOutput = Join-Path $OutputDirectory 'licenses'
 New-Item -ItemType Directory -Force -Path $licenseOutput | Out-Null
-Copy-Item -Path (Join-Path $repository 'licenses/*') -Destination $licenseOutput
-foreach ($library in $assets.libraries.PSObject.Properties) {
-    if ($library.Value.type -ne 'package') { continue }
-    $packageDirectory = $packageRoots | ForEach-Object { Join-Path $_ $library.Value.path } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if (!$packageDirectory) { throw "Cannot locate package notices for $($library.Name)" }
-    $packageOutput = Join-Path $licenseOutput ($library.Name -replace '/', '-')
-    New-Item -ItemType Directory -Force -Path $packageOutput | Out-Null
-    Get-ChildItem -LiteralPath $packageDirectory -File | Where-Object { $_.Name -match '(?i)license|copying|notice|\.nuspec$' } |
-        Copy-Item -Destination $packageOutput
+$licenseSources = @(
+    @{ Source = Join-Path $repository 'licenses\ValveResourceFormat-LICENSE.txt'; Name = 'ValveResourceFormat-LICENSE.txt' },
+    @{ Source = Join-Path $build '_deps\lz4-src\LICENSE'; Name = 'lz4-LICENSE.txt' },
+    @{ Source = Join-Path $build '_deps\zstd-src\LICENSE'; Name = 'zstd-LICENSE.txt' },
+    @{ Source = Join-Path $build '_deps\nlohmann_json-src\LICENSE.MIT'; Name = 'nlohmann-json-LICENSE.MIT' },
+    @{ Source = Join-Path $build '_deps\meshoptimizer-src\LICENSE.md'; Name = 'meshoptimizer-LICENSE.md' }
+)
+foreach ($license in $licenseSources) {
+    if (!(Test-Path -LiteralPath $license.Source)) { throw "Cannot locate $($license.Source)" }
+    Copy-Item -LiteralPath $license.Source -Destination (Join-Path $licenseOutput $license.Name)
 }
 
-# Runtime packs are SDK inputs, rather than ordinary libraries in project.assets.json.
-foreach ($runtimeId in @('microsoft.netcore.app.runtime.win-x64', 'microsoft.windowsdesktop.app.runtime.win-x64')) {
-    $runtimeConfig = Get-Content (Join-Path $OutputDirectory 'DeadlockModelUpdater.runtimeconfig.json') -Raw | ConvertFrom-Json
-    $frameworkName = if ($runtimeId -like '*windowsdesktop*') { 'Microsoft.WindowsDesktop.App' } else { 'Microsoft.NETCore.App' }
-    $runtimeVersion = ($runtimeConfig.runtimeOptions.includedFrameworks | Where-Object name -eq $frameworkName).version
-    $copiedRuntime = $false
-    foreach ($packageRoot in $packageRoots) {
-        $runtimeDirectory = Join-Path $packageRoot "$runtimeId/$runtimeVersion"
-        if (!(Test-Path -LiteralPath $runtimeDirectory)) { continue }
-        $runtimeOutput = Join-Path $licenseOutput $runtimeId
-        New-Item -ItemType Directory -Force -Path $runtimeOutput | Out-Null
-        Get-ChildItem -LiteralPath $runtimeDirectory -File | Where-Object { $_.Name -match '(?i)license|notice|\.nuspec$' } |
-            Copy-Item -Destination $runtimeOutput
-        $copiedRuntime = $true
-        break
-    }
-    if (!$copiedRuntime) { throw "Cannot locate notices for runtime $runtimeId/$runtimeVersion" }
-}
-
-$zipPath = Join-Path (Split-Path -Parent $OutputDirectory) 'DeadlockModelUpdater-win-x64.zip'
+$zipPath = Join-Path (Split-Path -Parent $OutputDirectory) 'DeadlockSkeletonRepair-win-x64.zip'
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Compress-Archive -Path (Join-Path $OutputDirectory '*') -DestinationPath $zipPath -Force
 Write-Output "Portable package: $zipPath"

@@ -13,26 +13,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          cache: true
-          cache-dependency-path: '**/packages.lock.json'
-      - run: dotnet restore DeadlockModelUpdater.slnx --locked-mode
-      - run: dotnet build DeadlockModelUpdater.slnx --no-restore -c Release -m:1
-      - run: dotnet run --project DeadlockModelUpdater.Tests -c Release --no-build
-      - run: dotnet run --project DeadlockModelUpdater.Tests -c Release --no-build -- --ui-repair-smoke artifacts/ui-repair-smoke.png
-      - shell: pwsh
-        run: ./scripts/Publish.ps1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DeadlockModelUpdater-win-x64
-          path: dist/DeadlockModelUpdater-win-x64.zip
-
-  cpp:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
       - name: Configure
         shell: pwsh
         run: |
@@ -46,3 +26,10 @@ jobs:
         run: cmake --build build/release --config Release
       - name: Test
         run: .\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+      - name: Package
+        shell: pwsh
+        run: ./scripts/Publish.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeadlockSkeletonRepair-win-x64
+          path: dist/DeadlockSkeletonRepair-win-x64.zip
