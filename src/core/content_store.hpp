@@ -104,7 +104,7 @@ struct SlotObservation {
 
 inline constexpr const char* kUnprovenSlotHeading = "Same path, not proven related";
 
-// Content-addressed library. M1 imports blobs. M2 lists them. M3 records repair edges.
+// Content-addressed library. M1 imports blobs. M2 lists them. M3 records repair edges. M4 queries history.
 class ContentStore {
 public:
     static ContentStore Open(const std::filesystem::path& directory);
@@ -122,6 +122,8 @@ public:
     std::vector<MembershipRow> Memberships(const BlobId& blob) const;
     std::vector<ModelRow> ExactDuplicateModels() const;
     SnapshotId RecordRepair(const RepairRequest& repair, CancellationToken cancellation = {});
+    History HistoryOf(const BlobId& blob) const;
+    std::vector<SlotObservation> UnprovenSamePath(const BlobId& blob) const;
 
 private:
     struct State;

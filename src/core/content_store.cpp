@@ -1180,6 +1180,268 @@ std::string CommitRepair(sqlite3* db, const RepairPlan& plan, CancellationToken 
     }
 }
 
+std::string LineageOfBlob(sqlite3* db, const std::array<uint8_t, 32>& sha) {
+    {
+        Statement stmt(db,
+            "SELECT lineage_id FROM memberships WHERE blob_sha256 = ? AND lineage_id != '' ORDER BY lineage_id LIMIT 1");
+        stmt.BindBlob(1, sha);
+        if (stmt.Step()) {
+            return stmt.ColumnText(0);
+        }
+    }
+    {
+        Statement stmt(db,
+            "SELECT lineage_id FROM edges WHERE (input_blob = ? OR output_blob = ?) AND lineage_id != '' "
+            "ORDER BY lineage_id LIMIT 1");
+        stmt.BindBlob(1, sha);
+        stmt.BindBlob(2, sha);
+        if (stmt.Step()) {
+            return stmt.ColumnText(0);
+        }
+    }
+    Statement stmt(db, "SELECT id FROM lineages WHERE root_sha256 = ? ORDER BY id LIMIT 1");
+    stmt.BindBlob(1, sha);
+    if (stmt.Step()) {
+        return stmt.ColumnText(0);
+    }
+    return {};
+}
+
+std::string EdgeDetail(const std::string& detail_json) {
+    if (detail_json.empty()) {
+        return {};
+    }
+    try {
+        const nlohmann::json parsed = nlohmann::json::parse(detail_json);
+        if (parsed.is_object()) {
+            const auto field = parsed.find("detail");
+            if (field != parsed.end() && field->is_string()) {
+                return field->get<std::string>();
+            }
+        }
+        return {};
+    } catch (const nlohmann::json::exception&) {
+        return detail_json;
+    }
+}
+
+constexpr const char* kLineageBlobs = R"sql(
+SELECT blob_sha256 FROM memberships WHERE lineage_id = ?
+UNION
+SELECT input_blob FROM edges WHERE lineage_id = ? AND input_blob IS NOT NULL
+UNION
+SELECT output_blob FROM edges WHERE lineage_id = ? AND output_blob IS NOT NULL
+UNION
+SELECT root_sha256 FROM lineages WHERE id = ?
+)sql";
+
+void BindLineage(Statement& stmt, int first, const std::string& lineage_id) {
+    stmt.BindText(first, lineage_id);
+    stmt.BindText(first + 1, lineage_id);
+    stmt.BindText(first + 2, lineage_id);
+    stmt.BindText(first + 3, lineage_id);
+}
+
+std::vector<HistoryVersion> LoadHistoryVersions(sqlite3* db, const std::string& lineage_id) {
+    std::unordered_map<std::string, HistoryVersion> versions;
+    {
+        const std::string sql = std::string(
+            "SELECT b.sha256, b.data_sha256, b.created_utc FROM blobs b WHERE b.sha256 IN (")
+            + kLineageBlobs + ")";
+        Statement stmt(db, sql.c_str());
+        BindLineage(stmt, 1, lineage_id);
+        while (stmt.Step()) {
+            HistoryVersion version;
+            version.Blob = stmt.ColumnBlobId(0);
+            if (!stmt.ColumnNull(1)) {
+                version.Data = stmt.ColumnBlobId(1);
+            }
+            version.FirstSeenUtc = stmt.ColumnText(2);
+            const std::string hex = version.Blob.Hex();
+            versions.insert_or_assign(hex, std::move(version));
+        }
+    }
+    {
+        Statement stmt(db,
+            "SELECT blob_sha256, COUNT(DISTINCT snapshot_id) FROM memberships WHERE lineage_id = ? GROUP BY blob_sha256");
+        stmt.BindText(1, lineage_id);
+        while (stmt.Step()) {
+            const auto found = versions.find(stmt.ColumnBlobId(0).Hex());
+            if (found != versions.end()) {
+                found->second.SnapshotCount = static_cast<int>(stmt.ColumnInt64(1));
+            }
+        }
+    }
+    {
+        Statement stmt(db, R"sql(
+SELECT m.blob_sha256, m.path
+FROM memberships m
+JOIN snapshots s ON s.id = m.snapshot_id
+WHERE m.lineage_id = ?
+GROUP BY m.blob_sha256, m.path
+ORDER BY MIN(s.created_utc), m.path
+)sql");
+        stmt.BindText(1, lineage_id);
+        while (stmt.Step()) {
+            const auto found = versions.find(stmt.ColumnBlobId(0).Hex());
+            if (found != versions.end()) {
+                found->second.Paths.push_back(stmt.ColumnText(1));
+            }
+        }
+    }
+    std::vector<HistoryVersion> rows;
+    rows.reserve(versions.size());
+    for (auto& item : versions) {
+        rows.push_back(std::move(item.second));
+    }
+    return rows;
+}
+
+bool VersionBefore(const HistoryVersion& left, const HistoryVersion& right) {
+    if (left.FirstSeenUtc != right.FirstSeenUtc) {
+        return left.FirstSeenUtc < right.FirstSeenUtc;
+    }
+    return left.Blob.Hex() < right.Blob.Hex();
+}
+
+// A renamed edge keeps one blob, so it is a link and not an ordering edge.
+std::vector<HistoryVersion> OrderVersions(std::vector<HistoryVersion> versions, const std::vector<HistoryLink>& links) {
+    std::unordered_map<std::string, size_t> index;
+    index.reserve(versions.size());
+    for (size_t i = 0; i < versions.size(); ++i) {
+        index.emplace(versions[i].Blob.Hex(), i);
+    }
+    std::vector<int> indegree(versions.size(), 0);
+    std::vector<std::vector<size_t>> next(versions.size());
+    for (const HistoryLink& link : links) {
+        if (link.From.Bytes == link.To.Bytes) {
+            continue;
+        }
+        const auto from = index.find(link.From.Hex());
+        const auto to = index.find(link.To.Hex());
+        if (from == index.end() || to == index.end()) {
+            continue;
+        }
+        next[from->second].push_back(to->second);
+        indegree[to->second] += 1;
+    }
+
+    std::vector<size_t> ready;
+    for (size_t i = 0; i < versions.size(); ++i) {
+        if (indegree[i] == 0) {
+            ready.push_back(i);
+        }
+    }
+    const auto earlier = [&](size_t left, size_t right) { return VersionBefore(versions[left], versions[right]); };
+    std::sort(ready.begin(), ready.end(), earlier);
+
+    std::vector<char> emitted(versions.size(), 0);
+    std::vector<size_t> order;
+    order.reserve(versions.size());
+    while (!ready.empty()) {
+        const size_t current = ready.front();
+        ready.erase(ready.begin());
+        emitted[current] = 1;
+        order.push_back(current);
+        for (const size_t child : next[current]) {
+            indegree[child] -= 1;
+            if (indegree[child] == 0) {
+                ready.push_back(child);
+            }
+        }
+        std::sort(ready.begin(), ready.end(), earlier);
+    }
+
+    std::vector<size_t> rest;
+    for (size_t i = 0; i < versions.size(); ++i) {
+        if (emitted[i] == 0) {
+            rest.push_back(i);
+        }
+    }
+    std::sort(rest.begin(), rest.end(), earlier);
+    order.insert(order.end(), rest.begin(), rest.end());
+
+    std::vector<HistoryVersion> ordered;
+    ordered.reserve(order.size());
+    for (const size_t i : order) {
+        ordered.push_back(std::move(versions[i]));
+    }
+    return ordered;
+}
+
+std::vector<HistoryLink> LoadHistoryLinks(sqlite3* db, const std::string& lineage_id) {
+    Statement stmt(db, R"sql(
+SELECT e.input_blob, e.output_blob, e.relation, e.detail_json, t.tool_version, t.finished_utc
+FROM edges e
+INNER JOIN transforms t ON t.id = e.transform_id
+WHERE e.lineage_id = ?
+ORDER BY t.finished_utc, e.relation, e.id
+)sql");
+    stmt.BindText(1, lineage_id);
+    std::vector<HistoryLink> links;
+    while (stmt.Step()) {
+        HistoryLink link;
+        link.From = stmt.ColumnBlobId(0);
+        link.To = stmt.ColumnBlobId(1);
+        link.Relation = stmt.ColumnText(2);
+        link.Detail = EdgeDetail(stmt.ColumnText(3));
+        link.ToolVersion = stmt.ColumnText(4);
+        link.FinishedUtc = stmt.ColumnText(5);
+        links.push_back(std::move(link));
+    }
+    return links;
+}
+
+std::vector<SlotObservation> LoadUnprovenSamePath(sqlite3* db, const std::array<uint8_t, 32>& sha, const std::string& lineage_id) {
+    Statement stmt(db, R"sql(
+SELECT m.blob_sha256, m.lineage_id, m.path, m.snapshot_id,
+  (
+    SELECT o.absolute_path
+    FROM observations o
+    WHERE o.snapshot_id = m.snapshot_id
+    ORDER BY o.observed_utc DESC, o.absolute_path DESC
+    LIMIT 1
+  ),
+  (
+    SELECT o.observed_utc
+    FROM observations o
+    WHERE o.snapshot_id = m.snapshot_id
+    ORDER BY o.observed_utc DESC, o.absolute_path DESC
+    LIMIT 1
+  )
+FROM memberships m
+WHERE m.path_key IN (SELECT path_key FROM memberships WHERE blob_sha256 = ?)
+  AND hex(m.blob_sha256) != hex(?)
+  AND hex(m.blob_sha256) NOT IN (
+    SELECT hex(blob_sha256) FROM memberships WHERE lineage_id = ?
+    UNION
+    SELECT hex(input_blob) FROM edges WHERE lineage_id = ? AND input_blob IS NOT NULL
+    UNION
+    SELECT hex(output_blob) FROM edges WHERE lineage_id = ? AND output_blob IS NOT NULL
+    UNION
+    SELECT hex(root_sha256) FROM lineages WHERE id = ?
+  )
+ORDER BY m.path, hex(m.blob_sha256), m.snapshot_id
+)sql");
+    stmt.BindBlob(1, sha);
+    stmt.BindBlob(2, sha);
+    BindLineage(stmt, 3, lineage_id);
+    std::vector<SlotObservation> rows;
+    while (stmt.Step()) {
+        SlotObservation row;
+        row.Blob = stmt.ColumnBlobId(0);
+        row.LineageId = stmt.ColumnText(1);
+        row.Path = stmt.ColumnText(2);
+        const std::string snapshot_id = stmt.ColumnText(3);
+        const bool path_missing = stmt.ColumnNull(4);
+        const std::string absolute_path = stmt.ColumnText(4);
+        const std::string observed_utc = stmt.ColumnText(5);
+        ApplyPackLabel(snapshot_id, path_missing, absolute_path, observed_utc, row.PackLabel, row.ObservedUtc);
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
 }  // namespace
 
 std::string BlobId::Hex() const { return ToLowerHex(Bytes); }
@@ -1435,6 +1697,21 @@ SnapshotId ContentStore::RecordRepair(const RepairRequest& repair, CancellationT
     SnapshotId id;
     id.Value = CommitRepair(state_->db, plan, cancellation);
     return id;
+}
+
+History ContentStore::HistoryOf(const BlobId& blob) const {
+    History history;
+    history.LineageId = LineageOfBlob(state_->db, blob.Bytes);
+    if (history.LineageId.empty()) {
+        return history;
+    }
+    history.Links = LoadHistoryLinks(state_->db, history.LineageId);
+    history.Versions = OrderVersions(LoadHistoryVersions(state_->db, history.LineageId), history.Links);
+    return history;
+}
+
+std::vector<SlotObservation> ContentStore::UnprovenSamePath(const BlobId& blob) const {
+    return LoadUnprovenSamePath(state_->db, blob.Bytes, LineageOfBlob(state_->db, blob.Bytes));
 }
 
 }  // namespace skeleton_repair

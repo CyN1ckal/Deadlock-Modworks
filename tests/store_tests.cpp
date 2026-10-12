@@ -31,6 +31,9 @@ using skeleton_repair::BlobId;
 using skeleton_repair::CancellationSource;
 using skeleton_repair::ContentStore;
 using skeleton_repair::HeroModelUpdater;
+using skeleton_repair::History;
+using skeleton_repair::HistoryVersion;
+using skeleton_repair::SlotObservation;
 using skeleton_repair::InvalidData;
 using skeleton_repair::InvalidOperation;
 using skeleton_repair::IoError;
@@ -249,6 +252,16 @@ BlobId IdOf(const std::vector<uint8_t>& bytes) {
     BlobId id;
     id.Bytes = Sha256(bytes);
     return id;
+}
+
+bool ContainsVersion(const std::vector<HistoryVersion>& versions, const BlobId& id) {
+    return std::any_of(versions.begin(), versions.end(), [&](const HistoryVersion& version) {
+        return version.Blob.Bytes == id.Bytes;
+    });
+}
+
+bool ContainsSlot(const std::vector<SlotObservation>& slots, const BlobId& id) {
+    return std::any_of(slots.begin(), slots.end(), [&](const SlotObservation& slot) { return slot.Blob.Bytes == id.Bytes; });
 }
 
 std::vector<uint8_t> AsBytes(const std::array<uint8_t, 32>& hash) {
@@ -1261,4 +1274,119 @@ TEST(Store, RepairEdgesCoverRenameRemovalAndMutation) {
         catalog.Text("SELECT lineage_id FROM edges WHERE relation = 'renamed+mutated'"));
     EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM lineages WHERE root_sha256 = ?", IdOf(model_d2).Bytes), 0);
     EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM lineages WHERE root_sha256 = ?", IdOf(model_a2).Bytes), 0);
+}
+
+TEST(Store, HistoryOfMutatedBlobKeepsUntouchedAndUnprovenApart) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model_a{1, 1, 1};
+    const std::vector<uint8_t> model_b{2, 2, 2};
+    const std::vector<uint8_t> model_a2{1, 1, 2};
+    const std::vector<uint8_t> other_a{9, 9, 9};
+    const BlobId id_a = IdOf(model_a);
+    const BlobId id_b = IdOf(model_b);
+    const BlobId id_a2 = IdOf(model_a2);
+    const BlobId id_other = IdOf(other_a);
+
+    ContentStore store = ContentStore::Open(store_path);
+    BlobId unknown{};
+    unknown.Bytes.fill(0xab);
+    EXPECT_TRUE(store.HistoryOf(unknown).LineageId.empty());
+    EXPECT_TRUE(store.HistoryOf(unknown).Versions.empty());
+    EXPECT_TRUE(store.HistoryOf(unknown).Links.empty());
+    EXPECT_TRUE(store.UnprovenSamePath(unknown).empty());
+
+    const fs::path vpk = dir.Path() / "mod.vpk";
+    ArchiveWith(vpk, {VpkChange{"models/a.vmdl_c", model_a}, VpkChange{"models/b.vmdl_c", model_b}});
+    const SnapshotId input = store.ImportVpk(vpk);
+    RepairRequest repair;
+    repair.Input = input;
+    repair.OutputPath = "D:/out/repaired.vpk";
+    repair.Changes.push_back(RepairChange{"models/a.vmdl_c", "models/a.vmdl_c", model_a2});
+    repair.Models.push_back(RepairModelNote{"models/a.vmdl_c", "Updated", "mutate-a", {}, {}, {}, std::nullopt});
+    store.RecordRepair(repair);
+
+    const fs::path other = dir.Path() / "other.vpk";
+    ArchiveWith(other, {VpkChange{"models/a.vmdl_c", other_a}});
+    store.ImportVpk(other);
+
+    const History mutated = store.HistoryOf(id_a2);
+    const History original = store.HistoryOf(id_a);
+    ASSERT_EQ(mutated.Versions.size(), 2u);
+    EXPECT_EQ(original.LineageId, mutated.LineageId);
+    EXPECT_FALSE(mutated.LineageId.empty());
+    EXPECT_EQ(mutated.Versions[0].Blob.Bytes, id_a.Bytes);
+    EXPECT_EQ(mutated.Versions[1].Blob.Bytes, id_a2.Bytes);
+    EXPECT_EQ(original.Versions[0].Blob.Bytes, id_a.Bytes);
+    EXPECT_EQ(original.Versions[1].Blob.Bytes, id_a2.Bytes);
+    EXPECT_FALSE(ContainsVersion(mutated.Versions, id_other));
+    EXPECT_FALSE(ContainsVersion(mutated.Versions, id_b));
+    EXPECT_FALSE(mutated.Versions[0].Data.has_value());
+    EXPECT_FALSE(mutated.Versions[1].Data.has_value());
+    ASSERT_EQ(mutated.Links.size(), 1u);
+    EXPECT_EQ(mutated.Links[0].Relation, "mutated");
+    EXPECT_EQ(mutated.Links[0].Detail, "mutate-a");
+    EXPECT_EQ(mutated.Links[0].From.Bytes, id_a.Bytes);
+    EXPECT_EQ(mutated.Links[0].To.Bytes, id_a2.Bytes);
+    EXPECT_EQ(mutated.Links[0].ToolVersion, "1");
+    EXPECT_FALSE(mutated.Links[0].FinishedUtc.empty());
+
+    const History untouched = store.HistoryOf(id_b);
+    ASSERT_EQ(untouched.Versions.size(), 1u);
+    EXPECT_TRUE(untouched.Links.empty());
+    EXPECT_EQ(untouched.Versions[0].Blob.Bytes, id_b.Bytes);
+    EXPECT_GE(untouched.Versions[0].SnapshotCount, 2);
+    EXPECT_NE(untouched.LineageId, mutated.LineageId);
+
+    const std::vector<SlotObservation> from_original = store.UnprovenSamePath(id_a);
+    const std::vector<SlotObservation> from_mutated = store.UnprovenSamePath(id_a2);
+    ASSERT_EQ(from_original.size(), 1u);
+    ASSERT_EQ(from_mutated.size(), 1u);
+    EXPECT_EQ(from_original[0].Blob.Bytes, id_other.Bytes);
+    EXPECT_EQ(from_mutated[0].Blob.Bytes, id_other.Bytes);
+    EXPECT_EQ(from_original[0].Path, "models/a.vmdl_c");
+    EXPECT_EQ(from_original[0].PackLabel, "other.vpk");
+    EXPECT_FALSE(from_original[0].ObservedUtc.empty());
+    EXPECT_NE(from_original[0].LineageId, mutated.LineageId);
+    EXPECT_FALSE(ContainsSlot(from_original, id_a));
+    EXPECT_FALSE(ContainsSlot(from_original, id_a2));
+    EXPECT_FALSE(ContainsSlot(from_original, id_b));
+    EXPECT_FALSE(ContainsSlot(from_mutated, id_a));
+    EXPECT_FALSE(ContainsSlot(from_mutated, id_a2));
+    EXPECT_FALSE(ContainsSlot(from_mutated, id_b));
+    EXPECT_TRUE(store.UnprovenSamePath(id_b).empty());
+}
+
+TEST(Store, RenameOnlyKeepsOneVersionWithBothPaths) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model{5, 5, 5};
+    const BlobId id = IdOf(model);
+    const fs::path vpk = dir.Path() / "mod.vpk";
+    ArchiveWith(vpk, {VpkChange{"models/old.vmdl_c", model}});
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId input = store.ImportVpk(vpk);
+    RepairRequest repair;
+    repair.Input = input;
+    repair.OutputPath = "D:/out/renamed.vpk";
+    repair.Changes.push_back(RepairChange{"models/old.vmdl_c", "models/new/renamed.vmdl_c", model});
+    repair.Models.push_back(RepairModelNote{"models/old.vmdl_c", "Updated", "rename-only", {}, {}, {}, std::nullopt});
+    store.RecordRepair(repair);
+
+    const History history = store.HistoryOf(id);
+    ASSERT_EQ(history.Versions.size(), 1u);
+    EXPECT_EQ(history.Versions[0].Blob.Bytes, id.Bytes);
+    EXPECT_GE(history.Versions[0].SnapshotCount, 2);
+    ASSERT_EQ(history.Versions[0].Paths.size(), 2u);
+    EXPECT_NE(std::find(history.Versions[0].Paths.begin(), history.Versions[0].Paths.end(), "models/old.vmdl_c"),
+        history.Versions[0].Paths.end());
+    EXPECT_NE(std::find(history.Versions[0].Paths.begin(), history.Versions[0].Paths.end(), "models/new/renamed.vmdl_c"),
+        history.Versions[0].Paths.end());
+    ASSERT_EQ(history.Links.size(), 1u);
+    EXPECT_EQ(history.Links[0].Relation, "renamed");
+    EXPECT_EQ(history.Links[0].Detail, "rename-only");
+    EXPECT_EQ(history.Links[0].From.Bytes, id.Bytes);
+    EXPECT_EQ(history.Links[0].To.Bytes, id.Bytes);
+    EXPECT_TRUE(store.UnprovenSamePath(id).empty());
 }
