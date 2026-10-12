@@ -68,6 +68,13 @@ set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
 set(JSON_Install OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(nlohmann_json)
 
+FetchContent_Declare(
+    meshoptimizer
+    URL https://github.com/zeux/meshoptimizer/archive/refs/tags/v0.24.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(meshoptimizer)
+
 add_library(skeleton_repair_core STATIC
     src/core/strings.cpp
     src/core/skeleton.cpp
@@ -80,9 +87,10 @@ add_library(skeleton_repair_core STATIC
     src/core/updater.cpp
     src/core/report.cpp
     src/core/command_line.cpp
+    src/core/model_geometry.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json meshoptimizer)
 
 add_executable(DeadlockSkeletonRepair src/app/main.cpp)
 target_link_libraries(DeadlockSkeletonRepair PRIVATE skeleton_repair_core shell32)
@@ -95,6 +103,7 @@ add_executable(skeleton_repair_tests
     tests/animation_tests.cpp
     tests/model_tests.cpp
     tests/updater_tests.cpp
+    tests/geometry_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
