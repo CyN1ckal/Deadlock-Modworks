@@ -161,6 +161,16 @@ TEST(Kv3, ReadsLz4AndZstdAsUncompressedDocuments) {
     ExpectBytes(skeleton_repair::WriteKv3(zstd), blob);
 }
 
+TEST(Kv3, ReadsLz4BlobsThatAreShorterThanAFrame) {
+    const auto document = skeleton_repair::ReadKv3(Load("material-lz4-blobs.kv3"));
+    EXPECT_EQ(document.Root.Find("m_shaderName")->String(), "pbr.vfx");
+    const skeleton_repair::KvValue* params = document.Root.Find("m_dynamicParams");
+    ASSERT_NE(params, nullptr);
+    ASSERT_EQ(params->Count(), 2u);
+    EXPECT_EQ(params->At(0).Find("m_value")->Blob(), (std::vector<uint8_t>{0x19, 0x16, 0x42, 0xd3, 0xba, 0x00}));
+    EXPECT_EQ(params->At(1).Find("m_value")->Blob(), (std::vector<uint8_t>{0x19, 0x7d, 0xf7, 0xe1, 0x07, 0x00}));
+}
+
 TEST(Kv3, RejectsATruncatedOrForeignSignature) {
     EXPECT_THROW(skeleton_repair::ReadKv3({}), skeleton_repair::InvalidData);
     const std::vector<uint8_t> foreign{0x00, 0x33, 0x56, 0x4B};
