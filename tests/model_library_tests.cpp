@@ -44,6 +44,22 @@ protected:
         sqlite3_close(db);
         return count;
     }
+    static int QueryInt(const fs::path& database, const std::string& sql) {
+        sqlite3* db = nullptr;
+        sqlite3_stmt* statement = nullptr;
+        int value = -1;
+        if (sqlite3_open(Narrow(database.wstring()).c_str(), &db) == SQLITE_OK
+            && sqlite3_prepare_v2(db, sql.c_str(), -1, &statement, nullptr) == SQLITE_OK
+            && sqlite3_step(statement) == SQLITE_ROW) value = sqlite3_column_int(statement, 0);
+        sqlite3_finalize(statement);
+        sqlite3_close(db);
+        return value;
+    }
+    static const VpkEntry* FindEntry(const VpkArchive& archive, const std::string& path) {
+        const auto& entries = archive.Entries();
+        const auto found = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) { return entry.FullPath == path; });
+        return found == entries.end() ? nullptr : &*found;
+    }
     // Every file under `folder` with its contents, skipping the model library and rebuilt copies, or only files named `only`.
     static std::map<std::string, std::string> Snapshot(const fs::path& folder, const std::string& only = {}) {
         std::map<std::string, std::string> files;
@@ -429,5 +445,175 @@ TEST_F(LibraryTest, LocalStoreFlattensChunkedVpkIntoSelfContainedCopy) {
     ASSERT_EQ(archive.Entries().size(), 1u);
     EXPECT_EQ(archive.Entries().front().ArchiveIndex, VpkArchive::EmbeddedArchive);
     EXPECT_EQ(archive.Read(archive.Entries().front()), (std::vector<uint8_t>{1, 2, 3}));
+}
+TEST_F(LibraryTest, PackageExportsTexturesWithoutAModelOrGameArchive) {
+    const auto source = dir / "portraits.vpk", output = dir / "output.vpk";
+    const std::vector<uint8_t> small{1, 2, 3, 4};
+    const std::vector<uint8_t> large{5, 6, 7, 8, 9};
+    Archive(source, {{"models/hideout/materials/small.vtex_c", small}, {"models/hideout/materials/large.vtex_c", large}});
+    // A missing game archive must not be opened: these files are copied as stored.
+    EXPECT_EQ(ExportModelLibrary({}, dir / "missing-game.vpk", output, {}, {source}), 2u);
+    const auto result = VpkArchive::Open(output);
+    ASSERT_EQ(result.Entries().size(), 2u);
+    const auto* first = FindEntry(result, "models/hideout/materials/small.vtex_c");
+    const auto* second = FindEntry(result, "models/hideout/materials/large.vtex_c");
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(result.Read(*first), small);
+    EXPECT_EQ(result.Read(*second), large);
+}
+TEST_F(LibraryTest, PackageAddsUnreferencedFilesWithoutTheUnselectedModel) {
+    const auto source = dir / "source.vpk";
+    const std::vector<uint8_t> loose{9, 9, 9};
+    Archive(source, {{"models/a.vmdl_c", Resource()}, {"models/b.vmdl_c", Resource({}, 1)}, {"textures/loose.vtex_c", loose}});
+    const auto model_only = dir / "model-only.vpk";
+    EXPECT_EQ(ExportModelLibrary({{source, "models/a.vmdl_c"}}, {}, model_only), 1u);
+    const auto only = VpkArchive::Open(model_only);
+    ASSERT_EQ(only.Entries().size(), 1u);
+    EXPECT_EQ(only.Entries().front().FullPath, "models/a.vmdl_c");
+
+    const auto output = dir / "with-package.vpk";
+    EXPECT_EQ(ExportModelLibrary({{source, "models/a.vmdl_c"}}, {}, output, {}, {source}), 2u);
+    const auto result = VpkArchive::Open(output);
+    ASSERT_EQ(result.Entries().size(), 2u);
+    EXPECT_EQ(FindEntry(result, "models/b.vmdl_c"), nullptr);
+    const auto* texture = FindEntry(result, "textures/loose.vtex_c");
+    ASSERT_NE(texture, nullptr);
+    EXPECT_EQ(result.Read(*texture), loose);
+}
+TEST_F(LibraryTest, PackageConflictsNameBothSourcesAndIdenticalBytesExportOnce) {
+    const auto a = dir / "a.vpk", b = dir / "b.vpk", output = dir / "output.vpk";
+    const std::vector<uint8_t> shared{1, 2, 3};
+    Archive(a, {{"textures/shared.vtex_c", shared}});
+    Archive(b, {{"textures/shared.vtex_c", std::vector<uint8_t>{4, 5, 6}}});
+    try {
+        ExportModelLibrary({}, {}, output, {}, {a, b});
+        FAIL() << "Expected conflict";
+    } catch (const InvalidData& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("textures/shared.vtex_c"), std::string::npos);
+        EXPECT_NE(message.find("a.vpk"), std::string::npos);
+        EXPECT_NE(message.find("b.vpk"), std::string::npos);
+        EXPECT_NE(message.find("Deselect one of the models using this file."), std::string::npos);
+    }
+    EXPECT_FALSE(fs::exists(output));
+
+    Archive(b, {{"textures/shared.vtex_c", shared}});
+    EXPECT_EQ(ExportModelLibrary({}, {}, output, {}, {a, b}), 1u);
+    const auto result = VpkArchive::Open(output);
+    ASSERT_EQ(result.Entries().size(), 1u);
+    EXPECT_EQ(result.Read(result.Entries().front()), shared);
+}
+TEST_F(LibraryTest, PackageOfOnlyModelsAndAnEmptySelectionFailClearly) {
+    const auto source = dir / "source.vpk", output = dir / "output.vpk";
+    Archive(source, {{"models/a.vmdl_c", Resource()}});
+    try {
+        ExportModelLibrary({}, {}, output, {}, {source});
+        FAIL() << "Expected a model-only package to fail";
+    } catch (const InvalidData& error) {
+        EXPECT_NE(std::string(error.what()).find("has no non-model files."), std::string::npos);
+    }
+    EXPECT_FALSE(fs::exists(output));
+    try {
+        ExportModelLibrary({}, {}, output);
+        FAIL() << "Expected an empty pack to fail";
+    } catch (const InvalidData& error) {
+        EXPECT_NE(std::string(error.what()).find("Select at least one model."), std::string::npos);
+    }
+    try {
+        ExportModelLibrary({}, {}, output, {}, {dir / "missing.vpk"});
+        FAIL() << "Expected a missing package to fail";
+    } catch (const InvalidData& error) {
+        EXPECT_NE(std::string(error.what()).find("missing.vpk"), std::string::npos);
+    }
+    EXPECT_FALSE(fs::exists(output));
+}
+TEST_F(LibraryTest, PackageSubtitleCountsHideoutTexturesApartFromOtherFiles) {
+    EXPECT_EQ(PackageSubtitle({
+        "models/hideout/materials/one.vtex_c",
+        "models/hideout/materials/two.vtex_c",
+        "models/hideout/materials/three.vtex_c",
+    }), "3 hideout textures");
+    EXPECT_EQ(PackageSubtitle({"materials/hero.vtex_c"}), "1 texture");
+    EXPECT_EQ(PackageSubtitle({"panorama/layout.vxml_c", "sounds/voice.vsnd_c"}), "1 UI file, 1 sound");
+}
+TEST_F(LibraryTest, LibraryJsonWithoutPackagesLoadsEmptyAndRoundTripsTheList) {
+    const auto source = dir / "portraits.vpk", project = dir / "library.json";
+    Archive(source, {{"a.txt", std::vector<uint8_t>{1}}});
+    {
+        std::ofstream out(project, std::ios::binary);
+        out << nlohmann::json{{"schemaVersion", 1}, {"sources", nlohmann::json::array({Narrow(source.wstring())})},
+            {"selected", nlohmann::json::array()}}.dump(2);
+    }
+    const auto legacy = ModelLibrary::Load(project);
+    EXPECT_TRUE(legacy.Packages.empty());
+    ASSERT_EQ(legacy.Sources.size(), 1u);
+    EXPECT_EQ(legacy.Sources.front(), fs::absolute(source).lexically_normal());
+
+    ModelLibrary{{source}, {}, {}, {source}}.Save(project);
+    const auto loaded = ModelLibrary::Load(project);
+    ASSERT_EQ(loaded.Packages.size(), 1u);
+    EXPECT_EQ(loaded.Packages.front(), fs::absolute(source).lexically_normal());
+    const auto saved = nlohmann::json::parse(std::ifstream(project));
+    EXPECT_EQ(saved.at("schemaVersion").get<int>(), 1);
+    EXPECT_TRUE(saved.contains("packages"));
+
+    ModelLibrary{{source}, {}, {}, {dir / "other.vpk"}}.Save(project);
+    EXPECT_THROW(ModelLibrary::Load(project), InvalidData);
+}
+TEST_F(LibraryTest, LocalStoreSavesAndReloadsAPackageSelection) {
+    const auto hero = dir / "hero.vpk", portraits = dir / "portraits.vpk";
+    Archive(hero, {{"models/a.vmdl_c", Resource()}});
+    Archive(portraits, {{"models/hideout/materials/a.vtex_c", std::vector<uint8_t>{1, 2}}, {"sounds/voice.vsnd_c", std::vector<uint8_t>{3}}});
+    const LocalModStore store(dir / "store");
+    const auto model = store.Import(hero);
+    const auto package = store.Import(portraits);
+    const ModelLibrary library{{model, package}, {{model, "models/a.vmdl_c"}}, {}, {package}};
+    store.Save(library);
+    EXPECT_EQ(LocalModStore(dir / "store").Load(), library);
+    // An older catalog has no package table. Opening it creates the table and the selection is kept.
+    Execute(store.Database(), "DROP TABLE gallery_packages");
+    store.Save(library);
+    EXPECT_EQ(Count(store, "gallery_packages"), 1);
+    EXPECT_EQ(store.Load(), library);
+}
+TEST_F(LibraryTest, SharedLibraryVersionTwoRestoresPackagesAndVersionOneDoesNot) {
+    const auto hero = dir / "hero.vpk", portraits = dir / "portraits.vpk";
+    const std::vector<uint8_t> texture{7, 8, 9};
+    Archive(hero, {{"models/a.vmdl_c", Resource()}});
+    Archive(portraits, {{"models/hideout/materials/a.vtex_c", texture}});
+    const LocalModStore mine(dir / "mine");
+    const auto model = mine.Import(hero);
+    const auto package = mine.Import(portraits);
+    mine.Save({{model, package}, {{model, "models/a.vmdl_c"}}, {}, {package}});
+    const auto file = dir / "shared.db";
+    mine.Export(file);
+    EXPECT_EQ(QueryInt(file, "PRAGMA user_version"), 2);
+
+    const LocalModStore other(dir / "other");
+    other.Merge(file);
+    const auto merged = other.Load();
+    ASSERT_EQ(merged.Sources.size(), 2u);
+    ASSERT_EQ(merged.Selected.size(), 1u);
+    EXPECT_EQ(merged.Selected.front().Model, "models/a.vmdl_c");
+    EXPECT_EQ(merged.Selected.front().Archive, merged.Sources[0]);
+    ASSERT_EQ(merged.Packages.size(), 1u);
+    EXPECT_EQ(merged.Packages.front(), merged.Sources[1]);
+    const auto restored = VpkArchive::Open(merged.Packages.front());
+    const auto* entry = FindEntry(restored, "models/hideout/materials/a.vtex_c");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(restored.Read(*entry), texture);
+    EXPECT_EQ(FindEntry(restored, "models/a.vmdl_c"), nullptr);
+
+    Execute(file, "DROP TABLE library_packages; PRAGMA user_version = 1;");
+    EXPECT_EQ(QueryInt(file, "PRAGMA user_version"), 1);
+    const LocalModStore previous(dir / "previous");
+    previous.Merge(file);
+    const auto legacy = previous.Load();
+    ASSERT_EQ(legacy.Sources.size(), 2u);
+    ASSERT_EQ(legacy.Selected.size(), 1u);
+    EXPECT_EQ(legacy.Selected.front().Model, "models/a.vmdl_c");
+    EXPECT_TRUE(legacy.Packages.empty());
+    EXPECT_NE(FindEntry(VpkArchive::Open(legacy.Sources[1]), "models/hideout/materials/a.vtex_c"), nullptr);
 }
 }

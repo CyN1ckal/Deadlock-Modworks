@@ -1,6 +1,7 @@
 #include "library_panel.hpp"
 #include "character_view.hpp"
 #include "strings.hpp"
+#include "texture.hpp"
 #include "ui.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -22,6 +23,89 @@ namespace skeleton_repair {
 namespace {
 bool Same(const LibraryModel& a, const LibraryModel& b) {
     return EqualsIgnoreCase(Narrow(a.Archive.wstring()), Narrow(b.Archive.wstring())) && EqualsIgnoreCase(a.Model, b.Model);
+}
+bool SamePath(const std::filesystem::path& a, const std::filesystem::path& b) {
+    return EqualsIgnoreCase(Narrow(a.wstring()), Narrow(b.wstring()));
+}
+bool IsModelPath(std::string_view path) {
+    constexpr std::string_view suffix = ".vmdl_c";
+    return path.size() >= suffix.size() && EqualsIgnoreCase(path.substr(path.size() - suffix.size()), suffix);
+}
+bool IsTexturePath(std::string_view path) {
+    constexpr std::string_view suffix = ".vtex_c";
+    return path.size() >= suffix.size() && EqualsIgnoreCase(path.substr(path.size() - suffix.size()), suffix);
+}
+bool ContainsIgnoreCase(std::string_view text, std::string_view needle) {
+    if (needle.empty() || needle.size() > text.size()) return false;
+    for (size_t i = 0; i + needle.size() <= text.size(); ++i) {
+        if (EqualsIgnoreCase(text.substr(i, needle.size()), needle)) return true;
+    }
+    return false;
+}
+bool IsMaskTexture(std::string_view path) {
+    // "rough" covers roughness. "_ao" is the ambient-occlusion atlas, which is not named ambientocclusion.
+    constexpr std::string_view keys[] = {"normal", "tintmask", "ambientocclusion", "_ao", "rough", "sheen", "outline", "selfillum",
+        "transmissive", "metalness", "opacity", "mask"};
+    return std::any_of(std::begin(keys), std::end(keys), [&](std::string_view key) { return ContainsIgnoreCase(path, key); });
+}
+// The albedo. A larger roughness or occlusion map must not take the card instead.
+bool IsAlbedoTexture(std::string_view path) {
+    constexpr std::string_view keys[] = {"color", "albedo", "diffuse", "basecolor"};
+    return std::any_of(std::begin(keys), std::end(keys), [&](std::string_view key) { return ContainsIgnoreCase(path, key); });
+}
+// A portrait or hero card is the picture someone expects. Other panorama files are often tiny icons.
+bool IsHeroArt(std::string_view path) {
+    return ContainsIgnoreCase(path, "portrait") || ContainsIgnoreCase(path, "hideout") || ContainsIgnoreCase(path, "_card");
+}
+bool IsPanorama(std::string_view path) {
+    return ContainsIgnoreCase(path, "panorama/");
+}
+struct PreviewCandidate {
+    std::string Path;
+    uint64_t Bytes = 0;
+    bool Hero = false;
+    bool Panorama = false;
+    bool Albedo = false;
+    bool Mask = false;
+};
+// A 4x4 mask is the smallest file in most character mods, and a single-channel one displays as a red square.
+std::string ChoosePreviewTexture(const std::vector<PreviewCandidate>& textures) {
+    constexpr uint64_t kTiny = 8192;
+    std::vector<const PreviewCandidate*> hero;
+    std::vector<const PreviewCandidate*> panorama;
+    std::vector<const PreviewCandidate*> albedo;
+    std::vector<const PreviewCandidate*> plain;
+    std::vector<const PreviewCandidate*> big;
+    const auto best = [](const std::vector<const PreviewCandidate*>& pool, bool smallest) {
+        const PreviewCandidate* chosen = nullptr;
+        for (const PreviewCandidate* texture : pool) {
+            const bool better = chosen == nullptr || (smallest ? texture->Bytes < chosen->Bytes : texture->Bytes > chosen->Bytes)
+                || (texture->Bytes == chosen->Bytes && texture->Path < chosen->Path);
+            if (better) chosen = texture;
+        }
+        return chosen == nullptr ? std::string{} : chosen->Path;
+    };
+    for (const PreviewCandidate& texture : textures) {
+        if (texture.Mask) continue;
+        if (texture.Hero) hero.push_back(&texture);
+        else if (texture.Panorama) panorama.push_back(&texture);
+        else if (texture.Albedo) albedo.push_back(&texture);
+        else plain.push_back(&texture);
+        if (!texture.Hero && !texture.Panorama && !texture.Albedo && texture.Bytes >= kTiny) big.push_back(&texture);
+    }
+    if (!hero.empty()) return best(hero, true);
+    if (!panorama.empty()) return best(panorama, true);
+    if (!albedo.empty()) return best(albedo, false);
+    if (!big.empty()) return best(big, false);
+    if (!plain.empty()) return best(plain, false);
+    std::vector<const PreviewCandidate*> all;
+    all.reserve(textures.size());
+    for (const PreviewCandidate& texture : textures) all.push_back(&texture);
+    return best(all, false);
+}
+std::string PackageTitle(const std::filesystem::path& archive) {
+    const auto stem = archive.stem().wstring();
+    return Narrow(stem.empty() ? archive.filename().wstring() : stem);
 }
 enum class FileKind { Pack, Library, SharedLibrary };
 std::filesystem::path Dialog(void* owner, FileKind kind) {
@@ -88,7 +172,35 @@ void LibraryPanel::RunThumbnailWorker() {
     lock.unlock();
     if (com) CoUninitialize();
 }
+LibraryPanel::ThumbnailResult LibraryPanel::LoadTextureThumbnail(const ThumbnailJob& job) {
+    ThumbnailResult result{job.Generation, job.Index, true};
+    try {
+        job.Cancellation.ThrowIfCancelled();
+        const LibraryModel identity{job.Model.Archive, job.TexturePath};
+        if (store_) {
+            result.CacheKey = ThumbnailKey(&*store_, identity, {});
+            try {
+                if (const auto png = store_->Thumbnail(result.CacheKey))
+                    if ((result.Pixels = DecodeThumbnail(*png))) return result;
+            } catch (const std::exception&) {}
+        }
+        const auto archive = archives_->Get(job.Model.Archive);
+        const auto lease = archive->Archive().LockSources();
+        const auto bytes = archive->Read(job.TexturePath, job.Cancellation);
+        if (!bytes) throw InvalidData("Texture is no longer present. Refresh the library.");
+        auto image = DecodeTexture(*bytes, kThumbnailSize);
+        if (image.Mips.empty()) throw InvalidData("Texture has no pixels.");
+        // The card shows the mip DecodeTexture kept at 256 pixels on a side.
+        image.Mips.resize(1);
+        result.Texture = std::move(image);
+    } catch (const std::exception& error) {
+        result.Texture.reset();
+        result.Error = error.what();
+    }
+    return result;
+}
 LibraryPanel::ThumbnailResult LibraryPanel::LoadThumbnail(const ThumbnailJob& job) {
+    if (!job.TexturePath.empty()) return LoadTextureThumbnail(job);
     ThumbnailResult result{job.Generation, job.Index};
     try {
         job.Cancellation.ThrowIfCancelled();
@@ -160,11 +272,13 @@ void LibraryPanel::InvalidateThumbnails() {
         renderer_.reset();
     }
 }
-void LibraryPanel::Evict(std::map<size_t, Thumbnail>::iterator thumbnail) {
+void LibraryPanel::Evict(std::map<Card, Thumbnail>::iterator thumbnail) {
     if (thumbnail->second.Image) retired_.push_back(std::move(thumbnail->second.Image));
     if (thumbnail->second.Pending) {
         std::lock_guard lock(queue_mutex_);
-        std::erase_if(jobs_, [&](const ThumbnailJob& job) { return !job.Save && job.Index == thumbnail->first; });
+        std::erase_if(jobs_, [&](const ThumbnailJob& job) {
+            return !job.Save && job.Package == thumbnail->first.Package && job.Index == thumbnail->first.Index;
+        });
     }
     thumbnails_.erase(thumbnail);
 }
@@ -194,11 +308,15 @@ void LibraryPanel::UploadThumbnails() {
     while (!ready_.empty() && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(6)) {
         ThumbnailResult result = std::move(ready_.front());
         ready_.pop_front();
-        const auto found = thumbnails_.find(result.Index);
+        const auto found = thumbnails_.find(Card{result.Package, result.Index});
         if (result.Generation != generation_ || found == thumbnails_.end() || !found->second.Pending) continue;
         Thumbnail& thumbnail = found->second;
         thumbnail.Pending = false;
         try {
+            if (result.Texture) {
+                thumbnail.Image = std::make_unique<ThumbnailImage>(device_, *result.Texture);
+                continue;
+            }
             if (!result.Pixels) {
                 if (!result.Model) throw InvalidData(result.Error);
                 // Render once; later loads read the saved image instead of the model.
@@ -222,10 +340,12 @@ void LibraryPanel::UploadThumbnails() {
         }
     }
 }
-const std::string* LibraryPanel::DrawThumbnail(size_t index, const std::filesystem::path& game, ImVec2 origin, float size,
+const std::string* LibraryPanel::DrawThumbnail(const Card& card, const std::filesystem::path& game, ImVec2 origin, float size,
     size_t cache_limit, bool pause_loading) {
-    auto found = thumbnails_.find(index);
-    if (found == thumbnails_.end() && !pause_loading) {
+    const bool texture_card = card.Package && !payloads_.at(card.Index).Preview.empty();
+    const bool no_preview = card.Package && !texture_card;
+    auto found = thumbnails_.find(card);
+    if (found == thumbnails_.end() && !pause_loading && !no_preview) {
         // Never evict an image referenced by this frame's ImGui draw list.
         while (thumbnails_.size() >= cache_limit) {
             const auto oldest = std::min_element(thumbnails_.begin(), thumbnails_.end(), [](const auto& a, const auto& b) {
@@ -235,10 +355,16 @@ const std::string* LibraryPanel::DrawThumbnail(size_t index, const std::filesyst
             else break;
         }
         if (thumbnails_.size() < cache_limit) {
-            found = thumbnails_.emplace(index, Thumbnail{}).first;
+            found = thumbnails_.emplace(card, Thumbnail{}).first;
             {
                 std::lock_guard lock(queue_mutex_);
-                jobs_.push_back({generation_, index, models_.at(index), game, thumbnail_cancellation_.Token()});
+                ThumbnailJob job{generation_, card.Index, card.Package ? LibraryModel{payloads_.at(card.Index).Archive, payloads_.at(card.Index).Preview} : models_.at(card.Index),
+                    game, thumbnail_cancellation_.Token()};
+                if (card.Package) {
+                    job.Package = true;
+                    job.TexturePath = payloads_.at(card.Index).Preview;
+                }
+                jobs_.push_back(std::move(job));
             }
             queue_changed_.notify_one();
         }
@@ -252,14 +378,14 @@ const std::string* LibraryPanel::DrawThumbnail(size_t index, const std::filesyst
             return nullptr;
         }
     }
-    const bool loading = found == thumbnails_.end() || found->second.Pending;
+    const bool loading = !no_preview && (found == thumbnails_.end() || found->second.Pending);
     draw->AddRectFilled(origin, corner, ImGui::GetColorU32(ImGuiCol_FrameBg), 2);
     const char* label = loading ? "Loading..." : "No preview";
     const auto text_size = ImGui::CalcTextSize(label);
     if (text_size.x < size - 4) {
         draw->AddText({origin.x + (size - text_size.x) / 2, origin.y + (size - text_size.y) / 2}, ImGui::GetColorU32(ImGuiCol_TextDisabled), label);
     }
-    return loading ? nullptr : &found->second.Error;
+    return loading || found == thumbnails_.end() ? nullptr : &found->second.Error;
 }
 void LibraryPanel::Poll() {
     if (worker_.valid() && worker_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) status_ = worker_.get();
@@ -267,6 +393,7 @@ void LibraryPanel::Poll() {
         if (auto scan = scan_.Take()) {
             InvalidateThumbnails();
             models_ = std::move(scan->Models);
+            payloads_ = std::move(scan->Packages);
             errors_ = std::move(scan->Errors);
             current_.reset();
             source_counts_.clear();
@@ -285,6 +412,7 @@ void LibraryPanel::Poll() {
 }
 void LibraryPanel::Restore(const ModelLibrary& library) {
     selected_ = library.Selected;
+    package_selection_ = library.Packages;
     pack_stale_ = true;
     Refresh(library.Sources);
     source_filter_.clear();
@@ -292,17 +420,21 @@ void LibraryPanel::Restore(const ModelLibrary& library) {
 }
 ModelLibrary LibraryPanel::Snapshot(const std::vector<std::filesystem::path>& sources, const std::filesystem::path& game) const {
     ModelLibrary result{sources, {}, game};
-    for (const auto& selected : selected_) if (std::any_of(sources.begin(), sources.end(), [&](const auto& source) {
-        return EqualsIgnoreCase(Narrow(source.wstring()), Narrow(selected.Archive.wstring()));
-    })) result.Selected.push_back(selected);
+    const auto listed = [&](const std::filesystem::path& path) {
+        return std::any_of(sources.begin(), sources.end(), [&](const auto& source) { return SamePath(source, path); });
+    };
+    for (const auto& selected : selected_) if (listed(selected.Archive)) result.Selected.push_back(selected);
+    for (const auto& package : package_selection_) if (listed(package)) result.Packages.push_back(package);
     return result;
 }
 void LibraryPanel::Refresh(const std::vector<std::filesystem::path>& sources) {
     sources_ = sources;
     if (!source_filter_.empty() && std::find(sources.begin(), sources.end(), source_filter_) == sources.end()) source_filter_.clear();
-    std::erase_if(selected_, [&](const auto& selected) {
-        return std::none_of(sources.begin(), sources.end(), [&](const auto& source) { return EqualsIgnoreCase(Narrow(source.wstring()), Narrow(selected.Archive.wstring())); });
-    });
+    const auto listed = [&](const std::filesystem::path& path) {
+        return std::none_of(sources.begin(), sources.end(), [&](const auto& source) { return SamePath(source, path); });
+    };
+    std::erase_if(selected_, [&](const auto& selected) { return listed(selected.Archive); });
+    std::erase_if(package_selection_, [&](const auto& package) { return listed(package); });
     pack_stale_ = true;
     // Opening every archive is slow for large collections, so the gallery keeps the last scan until this finishes.
     scan_.Start([sources, archives = archives_](CancellationToken cancellation) {
@@ -311,11 +443,34 @@ void LibraryPanel::Refresh(const std::vector<std::filesystem::path>& sources) {
             cancellation.ThrowIfCancelled();
             try {
                 const auto archive = archives->Get(path);
-                for (const auto& entry : archive->Archive().Entries()) if (entry.FullPath.ends_with(".vmdl_c")) result.Models.push_back({path, entry.FullPath});
+                PackagePayload payload{path};
+                std::vector<PreviewCandidate> previews;
+                for (const auto& entry : archive->Archive().Entries()) {
+                    const auto normalized = VpkArchive::Normalize(entry.FullPath);
+                    if (IsModelPath(normalized)) {
+                        // Keep the archive's own spelling for skins that already used it.
+                        result.Models.push_back({path, entry.FullPath.ends_with(".vmdl_c") ? entry.FullPath : normalized});
+                    } else {
+                        payload.Paths.push_back(normalized);
+                        if (IsTexturePath(normalized)) {
+                            previews.push_back({normalized, static_cast<uint64_t>(entry.PreloadBytes) + entry.Length, IsHeroArt(normalized),
+                                IsPanorama(normalized), IsAlbedoTexture(normalized), IsMaskTexture(normalized)});
+                        }
+                    }
+                }
+                payload.Preview = ChoosePreviewTexture(previews);
+                if (!payload.Paths.empty()) {
+                    std::sort(payload.Paths.begin(), payload.Paths.end());
+                    result.Packages.push_back(std::move(payload));
+                }
             } catch (const std::exception& error) { result.Errors.push_back(Narrow(path.wstring()) + ": " + error.what()); }
         }
         std::sort(result.Models.begin(), result.Models.end(), [](const auto& a, const auto& b) {
             if (a.Model != b.Model) return a.Model < b.Model;
+            return a.Archive < b.Archive;
+        });
+        std::sort(result.Packages.begin(), result.Packages.end(), [](const auto& a, const auto& b) {
+            if (a.Archive.filename() != b.Archive.filename()) return a.Archive.filename() < b.Archive.filename();
             return a.Archive < b.Archive;
         });
         return result;
@@ -350,6 +505,22 @@ size_t LibraryPanel::ModelsIn(const std::filesystem::path& source) const {
     const auto found = source_counts_.find(source);
     return found == source_counts_.end() ? 0 : found->second;
 }
+size_t LibraryPanel::PackageFiles(const std::filesystem::path& source) const {
+    for (const auto& package : payloads_) if (SamePath(package.Archive, source)) return package.Paths.size();
+    return 0;
+}
+size_t LibraryPanel::SourceCount(const std::filesystem::path& source) const {
+    const size_t skins = ModelsIn(source);
+    return skins > 0 ? skins : PackageFiles(source);
+}
+size_t LibraryPanel::ListedCount() const {
+    size_t total = 0;
+    for (const auto& source : sources_) total += SourceCount(source);
+    return total;
+}
+bool LibraryPanel::PackageInPack(const std::filesystem::path& source) const {
+    return std::any_of(package_selection_.begin(), package_selection_.end(), [&](const auto& path) { return SamePath(path, source); });
+}
 void LibraryPanel::SortModels(int column, bool descending) {
     sort_column_ = column;
     sort_descending_ = descending;
@@ -383,11 +554,19 @@ void LibraryPanel::SetInPack(size_t index, bool include) {
     status_.clear();
 }
 void LibraryPanel::IncludeSource(const std::filesystem::path& source, bool include) {
-    for (size_t i = 0; i < models_.size(); ++i) if (models_[i].Archive == source) SetInPack(i, include);
+    for (size_t i = 0; i < models_.size(); ++i) if (SamePath(models_[i].Archive, source)) SetInPack(i, include);
+}
+void LibraryPanel::IncludePackage(const std::filesystem::path& source, bool include) {
+    const auto found = std::find_if(package_selection_.begin(), package_selection_.end(), [&](const auto& path) { return SamePath(path, source); });
+    if (include == (found != package_selection_.end())) return;
+    if (include) package_selection_.push_back(source);
+    else package_selection_.erase(found);
+    status_.clear();
 }
 void LibraryPanel::ClearPack() {
     if (Busy()) return;
     selected_.clear();
+    package_selection_.clear();
     pack_stale_ = true;
     status_.clear();
 }
@@ -425,18 +604,51 @@ void LibraryPanel::ShareLibrary(void* owner) {
     });
 }
 void LibraryPanel::BuildPack(void* owner, const std::filesystem::path& game) {
-    if (Busy() || selected_.empty()) return;
+    if (Busy() || (selected_.empty() && package_selection_.empty())) return;
     const auto path = Dialog(owner, FileKind::Pack);
     if (path.empty()) return;
     cancellation_ = CancellationSource{};
-    status_ = "Collecting dependencies and validating your pack...";
-    worker_ = std::async(std::launch::async, [models = selected_, game, path, token = cancellation_.Token()] {
-        try { const auto count = ExportModelLibrary(models, game, path, token);
+    status_ = "Collecting files and validating your pack...";
+    worker_ = std::async(std::launch::async, [models = selected_, packages = package_selection_, game, path, token = cancellation_.Token()] {
+        try { const auto count = ExportModelLibrary(models, game, path, token, packages);
             return "Exported " + std::to_string(count) + " files to " + Narrow(path.wstring()) + ". Test the pack in Deadlock.";
         } catch (const std::exception& error) { return std::string(error.what()); }
     });
 }
-void LibraryPanel::DrawModelMenu(size_t index, const std::vector<size_t>& shown, const std::function<void(const LibraryModel&)>& preview) {
+void LibraryPanel::OpenFileList(const Card& card) {
+    const auto& package = payloads_.at(card.Index);
+    file_list_ = package.Paths;
+    file_list_title_ = PackageTitle(package.Archive) + "  —  " + PackageSubtitle(package.Paths);
+    open_file_list_ = true;
+}
+void LibraryPanel::Activate(const Card& card, const std::function<void(const LibraryModel&)>& preview) {
+    if (card.Package) OpenFileList(card);
+    else preview(models_.at(card.Index));
+}
+void LibraryPanel::Toggle(const Card& card) {
+    if (card.Package) IncludePackage(payloads_.at(card.Index).Archive, !PackageInPack(payloads_.at(card.Index).Archive));
+    else SetInPack(card.Index, !InPack(card.Index));
+}
+void LibraryPanel::DrawPackageMenu(const Card& card) {
+    const auto& package = payloads_.at(card.Index);
+    const bool in_pack = PackageInPack(package.Archive);
+    const std::string title = PackageTitle(package.Archive);
+    ImGui::TextDisabled("%s", title.c_str());
+    ImGui::Separator();
+    if (ImGui::MenuItem("Show files", "Enter")) OpenFileList(card);
+    if (ImGui::MenuItem(in_pack ? "Remove from pack" : "Include in pack", "Space")) IncludePackage(package.Archive, !in_pack);
+    ImGui::Separator();
+    const bool filtered = source_filter_ == package.Archive;
+    if (ImGui::MenuItem("Show only this source", nullptr, filtered)) source_filter_ = filtered ? std::filesystem::path{} : package.Archive;
+    ImGui::Separator();
+    ui::CopyMenuItem("Copy name", title);
+    ui::CopyMenuItem("Copy source path", Narrow(package.Archive.wstring()));
+    if (ImGui::MenuItem("Reveal source in Explorer")) ui::RevealInExplorer(package.Archive);
+}
+void LibraryPanel::DrawModelMenu(const Card& card, const std::vector<Card>& shown, const std::function<void(const LibraryModel&)>& preview,
+    const std::function<void(const LibraryModel&)>& analyze, bool can_analyze) {
+    if (card.Package) { DrawPackageMenu(card); return; }
+    const size_t index = card.Index;
     // A copy, because the menu's actions may change the pack.
     const LibraryModel model = models_.at(index);
     const bool in_pack = InPack(index);
@@ -461,10 +673,18 @@ void LibraryPanel::DrawModelMenu(size_t index, const std::vector<size_t>& shown,
             ImGui::SetItemTooltip("Multi view groups models stored under models/heroes/<character>/.");
         }
     }
+    if (analyze) {
+        if (ImGui::MenuItem("Analyze this model", nullptr, false, can_analyze)) analyze(model);
+        ImGui::SetItemTooltip(can_analyze
+            ? "Check this model and its animation skeleton against the installed game. Other models in the archive are not checked."
+            : "Connect Deadlock before checking a model.");
+    }
     if (ImGui::MenuItem(in_pack ? "Remove from pack" : "Include in pack", "Space")) SetInPack(index, !in_pack);
     if (ImGui::BeginMenu("Pack")) {
-        if (ImGui::MenuItem(("Include the " + std::to_string(shown.size()) + " shown skins").c_str())) for (const size_t i : shown) SetInPack(i, true);
-        if (ImGui::MenuItem(("Remove the " + std::to_string(shown.size()) + " shown skins").c_str())) for (const size_t i : shown) SetInPack(i, false);
+        size_t skin_count = 0;
+        for (const auto& item : shown) if (!item.Package) ++skin_count;
+        if (ImGui::MenuItem(("Include the " + std::to_string(skin_count) + " shown skins").c_str())) for (const auto& item : shown) if (!item.Package) SetInPack(item.Index, true);
+        if (ImGui::MenuItem(("Remove the " + std::to_string(skin_count) + " shown skins").c_str())) for (const auto& item : shown) if (!item.Package) SetInPack(item.Index, false);
         ImGui::Separator();
         if (ImGui::MenuItem("Include every skin of this source")) IncludeSource(model.Archive, true);
         if (ImGui::MenuItem("Remove every skin of this source")) IncludeSource(model.Archive, false);
@@ -479,16 +699,17 @@ void LibraryPanel::DrawModelMenu(size_t index, const std::vector<size_t>& shown,
     ui::CopyMenuItem("Copy source path", Narrow(model.Archive.wstring()));
     if (ImGui::MenuItem("Reveal source in Explorer")) ui::RevealInExplorer(model.Archive);
 }
-void LibraryPanel::ModelItemInput(size_t index, const std::vector<size_t>& shown, const std::function<void(const LibraryModel&)>& preview) {
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) || ImGui::IsItemClicked(ImGuiMouseButton_Right)) current_ = index;
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) preview(models_.at(index));
+void LibraryPanel::CardInput(const Card& card, const std::vector<Card>& shown, const std::function<void(const LibraryModel&)>& preview,
+    const std::function<void(const LibraryModel&)>& analyze, bool can_analyze) {
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) || ImGui::IsItemClicked(ImGuiMouseButton_Right)) current_ = card;
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) Activate(card, preview);
     if (ImGui::BeginPopupContextItem("model_menu")) {
-        DrawModelMenu(index, shown, preview);
+        DrawModelMenu(card, shown, preview, analyze, can_analyze);
         ImGui::EndPopup();
     }
 }
-void LibraryPanel::DrawGrid(const std::vector<size_t>& shown, const std::filesystem::path& game, bool pause_loading,
-    const std::function<void(const LibraryModel&)>& preview) {
+void LibraryPanel::DrawGrid(const std::vector<Card>& shown, const std::filesystem::path& game, bool pause_loading,
+    const std::function<void(const LibraryModel&)>& preview, const std::function<void(const LibraryModel&)>& analyze, bool can_analyze) {
     const auto& style = ImGui::GetStyle();
     const float scale = ImGui::GetFontSize() / 15.f;
     const float spacing = style.ItemSpacing.x;
@@ -511,46 +732,56 @@ void LibraryPanel::DrawGrid(const std::vector<size_t>& shown, const std::filesys
         for (int column = 0; column < columns; ++column) {
             const size_t position = static_cast<size_t>(row) * columns + column;
             if (position >= shown.size()) break;
-            const size_t index = shown[position];
-            const auto& model = models_[index];
-            bool checked = InPack(index);
+            const Card card = shown[position];
+            const bool package = card.Package;
+            const std::string title = package ? PackageTitle(payloads_[card.Index].Archive) : SkinTitle(models_[card.Index]);
+            const std::string subtitle = package ? PackageSubtitle(payloads_[card.Index].Paths) : Narrow(models_[card.Index].Archive.filename().wstring());
+            bool checked = package ? PackageInPack(payloads_[card.Index].Archive) : InPack(card.Index);
             if (column > 0) ImGui::SameLine(0, spacing);
-            ImGui::PushID(static_cast<int>(index));
+            ImGui::PushID(package ? "package" : "skin");
+            ImGui::PushID(static_cast<int>(card.Index));
             const ImVec2 min = ImGui::GetCursorScreenPos();
             const ImVec2 max{min.x + card_width, min.y + card_height};
             ImGui::BeginGroup();
             ImGui::SetNextItemAllowOverlap();
             ImGui::InvisibleButton("card", {card_width, card_height});
             const bool hovered = ImGui::IsItemHovered();
-            ModelItemInput(index, shown, preview);
+            CardInput(card, shown, preview, analyze, can_analyze);
             const bool over = ImGui::IsMouseHoveringRect(min, max) && ImGui::IsWindowHovered();
-            const bool current = current_ == index;
+            const bool current = current_ == card;
             draw->AddRectFilled(min, max, ImGui::GetColorU32(hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg, hovered ? 1.f : .55f), 3);
             if (checked) draw->AddRectFilled(min, max, ImGui::GetColorU32(ImVec4{ui::kAccent.x, ui::kAccent.y, ui::kAccent.z, .14f}), 3);
             draw->AddRect(min, max, checked || current ? accent : ImGui::GetColorU32(ImGuiCol_Border), 3, 0, current ? 2.f : 1.f);
-            const std::string* error = DrawThumbnail(index, game, {min.x + pad, min.y + pad}, image_size, cache_limit, pause_loading);
+            const std::string* error = DrawThumbnail(card, game, {min.x + pad, min.y + pad}, image_size, cache_limit, pause_loading);
             const float text_y = min.y + pad + image_size + pad;
-            const std::string title = SkinTitle(model);
-            const std::string source = Narrow(model.Archive.filename().wstring());
             ImGui::RenderTextEllipsis(draw, {min.x + pad, text_y}, {max.x - pad, text_y + line}, max.x - pad, max.x - pad, title.c_str(), nullptr, nullptr);
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            ImGui::RenderTextEllipsis(draw, {min.x + pad, text_y + line}, {max.x - pad, text_y + 2 * line}, max.x - pad, max.x - pad, source.c_str(), nullptr, nullptr);
+            ImGui::RenderTextEllipsis(draw, {min.x + pad, text_y + line}, {max.x - pad, text_y + 2 * line}, max.x - pad, max.x - pad, subtitle.c_str(), nullptr, nullptr);
             ImGui::PopStyleColor();
-            ModelTooltip(model, error);
+            if (!package) ModelTooltip(models_[card.Index], error);
+            else if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip) && ImGui::BeginTooltip()) {
+                ImGui::TextUnformatted(title.c_str());
+                ImGui::TextDisabled("%s", subtitle.c_str());
+                ImGui::TextDisabled("%s", Narrow(payloads_[card.Index].Archive.wstring()).c_str());
+                if (error != nullptr && !error->empty()) ImGui::TextColored(ui::kError, "%s", error->c_str());
+                ImGui::TextDisabled("Double-click to list files. Right-click for more.");
+                ImGui::EndTooltip();
+            }
             if (checked || over) {
                 ImGui::SetCursorScreenPos({min.x + pad + 2, min.y + pad + 2});
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {2, 2});
-                if (ImGui::Checkbox("##pack", &checked)) SetInPack(index, checked);
+                if (ImGui::Checkbox("##pack", &checked)) Toggle(card);
                 ImGui::PopStyleVar();
                 ImGui::SetItemTooltip(checked ? "In the pack. Click to remove." : "Include in pack");
             }
             ImGui::EndGroup();
             ImGui::PopID();
+            ImGui::PopID();
         }
     }
 }
-void LibraryPanel::DrawList(const std::vector<size_t>& shown, const std::filesystem::path& game, bool pause_loading,
-    const std::function<void(const LibraryModel&)>& preview) {
+void LibraryPanel::DrawList(const std::vector<Card>& shown, const std::filesystem::path& game, bool pause_loading,
+    const std::function<void(const LibraryModel&)>& preview, const std::function<void(const LibraryModel&)>& analyze, bool can_analyze) {
     const float line = ImGui::GetTextLineHeight();
     const float row_height = std::round(line * 1.6f);
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable
@@ -575,46 +806,52 @@ void LibraryPanel::DrawList(const std::vector<size_t>& shown, const std::filesys
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(shown.size()), row_height);
     while (clipper.Step()) for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
-        const size_t index = shown[static_cast<size_t>(row)];
-        const auto& model = models_[index];
-        ImGui::PushID(static_cast<int>(index));
+        const Card card = shown[static_cast<size_t>(row)];
+        const bool package = card.Package;
+        const std::string title = package ? PackageTitle(payloads_[card.Index].Archive) : SkinTitle(models_[card.Index]);
+        const std::string detail = package ? PackageSubtitle(payloads_[card.Index].Paths) : models_[card.Index].Model;
+        const auto& archive = package ? payloads_[card.Index].Archive : models_[card.Index].Archive;
+        ImGui::PushID(package ? "package" : "skin");
+        ImGui::PushID(static_cast<int>(card.Index));
         ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
         ImGui::TableNextColumn();
-        bool checked = InPack(index);
+        bool checked = package ? PackageInPack(archive) : InPack(card.Index);
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (row_height - ImGui::GetFrameHeight()) / 2);
-        if (ImGui::Checkbox("##pack", &checked)) SetInPack(index, checked);
+        if (ImGui::Checkbox("##pack", &checked)) Toggle(card);
         ImGui::SetItemTooltip("Include in pack");
         ImGui::TableNextColumn();
         const float image = row_height - 2;
-        const std::string* error = DrawThumbnail(index, game, ImGui::GetCursorScreenPos(), image, cache_limit, pause_loading);
+        const std::string* error = DrawThumbnail(card, game, ImGui::GetCursorScreenPos(), image, cache_limit, pause_loading);
         ImGui::Dummy({image, image});
         ImGui::TableNextColumn();
-        ImGui::Selectable((SkinTitle(model) + "##row").c_str(), current_ == index, ImGuiSelectableFlags_SpanAllColumns, {0, row_height});
-        ModelItemInput(index, shown, preview);
-        ModelTooltip(model, error);
+        ImGui::Selectable((title + "##row").c_str(), current_ == card, ImGuiSelectableFlags_SpanAllColumns, {0, row_height});
+        CardInput(card, shown, preview, analyze, can_analyze);
+        if (!package) ModelTooltip(models_[card.Index], error);
         ImGui::TableNextColumn();
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + text_offset);
-        ImGui::TextDisabled("%s", model.Model.c_str());
+        ImGui::TextDisabled("%s", detail.c_str());
         ImGui::TableNextColumn();
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + text_offset);
-        ImGui::TextUnformatted(Narrow(model.Archive.filename().wstring()).c_str());
+        ImGui::TextUnformatted(Narrow(archive.filename().wstring()).c_str());
+        ImGui::PopID();
         ImGui::PopID();
     }
     ImGui::PopStyleVar();
     if (ImGui::IsWindowFocused() && current_ && !ImGui::GetIO().WantTextInput) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter, false)) preview(models_.at(*current_));
-        if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) SetInPack(*current_, !InPack(*current_));
+        if (ImGui::IsKeyPressed(ImGuiKey_Enter, false)) Activate(*current_, preview);
+        if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) Toggle(*current_);
     }
     ImGui::EndTable();
 }
 void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& sources,
     const std::filesystem::path& game, bool repair_busy, bool pause_loading, bool pack_view, const std::function<void()>& add,
     const std::function<void(const ModelLibrary&)>&, const std::function<void(const std::filesystem::path&)>&,
-    const std::function<void(const LibraryModel&)>& preview) {
+    const std::function<void(const LibraryModel&)>& preview, const std::function<void(const LibraryModel&)>& analyze) {
     Poll();
     if (thumbnail_game_ != game) { InvalidateThumbnails(); thumbnail_game_ = game; }
     if (!Busy() && !repair_busy && sources_ != sources) Refresh(sources);
     const bool locked = Busy() || repair_busy;
+    const bool can_analyze = !locked && !game.empty();
     const auto& style = ImGui::GetStyle();
     const float scale = ImGui::GetFontSize() / 15.f;
 
@@ -629,7 +866,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
     ImGui::BeginDisabled(locked);
     ImGui::SetNextItemWidth(std::max(120.f, ImGui::GetContentRegionAvail().x - reserved));
     if (std::exchange(focus_search_, false)) ImGui::SetKeyboardFocusHere();
-    ImGui::InputTextWithHint("##gallerysearch", "Search skins and sources (Ctrl+F)", filter_, sizeof(filter_));
+    ImGui::InputTextWithHint("##gallerysearch", "Search skins, packages and sources (Ctrl+F)", filter_, sizeof(filter_));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(combo_width);
     const auto source_label = source_filter_.empty() ? std::string("All sources") : Narrow(source_filter_.filename().wstring());
@@ -642,16 +879,16 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
             if (ImGui::Selectable(Narrow(source.filename().wstring()).c_str(), source == source_filter_)) source_filter_ = source;
             ImGui::SetItemTooltip("%s", key.c_str());
             ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::CalcTextSize("00000").x);
-            ImGui::TextDisabled("%zu", ModelsIn(source));
+            ImGui::TextDisabled("%zu", SourceCount(source));
             ImGui::PopID();
         }
         ImGui::EndCombo();
     }
-    ImGui::SetItemTooltip("Show the skins of one source archive");
+    ImGui::SetItemTooltip("Show one source");
     if (!pack_view) {
         ImGui::SameLine();
         ImGui::Checkbox("In pack", &selected_only_);
-        ImGui::SetItemTooltip("Show only skins included in the pack");
+        ImGui::SetItemTooltip("Show only skins and packages included in the pack");
     }
     ImGui::EndDisabled();
     ui::ToolSeparator();
@@ -674,13 +911,21 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
 
     if (pack_view) {
         ImGui::AlignTextToFramePadding();
-        ImGui::Text(selected_.size() == 1 ? "%zu skin in pack" : "%zu skins in pack", selected_.size());
+        const size_t skins = selected_.size();
+        const size_t packages = package_selection_.size();
+        std::string pack_label;
+        if (packages == 0) pack_label = (skins == 1 ? "1 skin in pack" : std::to_string(skins) + " skins in pack");
+        else if (skins == 0) pack_label = (packages == 1 ? "1 package in pack" : std::to_string(packages) + " packages in pack");
+        else pack_label = std::to_string(skins) + (skins == 1 ? " skin and " : " skins and ") + std::to_string(packages) + (packages == 1 ? " package in pack" : " packages in pack");
+        ImGui::TextUnformatted(pack_label.c_str());
         ImGui::SameLine();
-        if (ui::ToolButton("Build VPK...", "Export the pack as one VPK (Ctrl+B). Dependencies are included automatically and shared files are "
-            "deduplicated; conflicting assets and missing dependencies block the export.", !locked && !selected_.empty())) BuildPack(owner, game);
+        const bool pack_ready = skins > 0 || packages > 0;
+        if (ui::ToolButton("Build VPK...", "Export the pack as one VPK (Ctrl+B). Skin dependencies are included automatically. "
+            "A package copies its other files as stored. Shared files are deduplicated; conflicting files block the export.",
+            !locked && pack_ready)) BuildPack(owner, game);
         ImGui::SameLine();
-        if (ui::ToolButton("Clear pack", "Remove every skin from the pack", !locked && !selected_.empty())) ClearPack();
-        if (game.empty()) {
+        if (ui::ToolButton("Clear pack", "Remove every skin and package from the pack", !locked && pack_ready)) ClearPack();
+        if (game.empty() && skins > 0) {
             ImGui::SameLine();
             ImGui::TextColored(ui::kWarning, "Connect Deadlock to resolve base-game assets.");
         }
@@ -704,14 +949,43 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
 
     ImGuiTextFilter filter(filter_);
     if (order_.size() != models_.size()) SortModels(sort_column_, sort_descending_);
-    std::vector<size_t> shown;
-    shown.reserve(order_.size());
-    for (const size_t index : order_) {
-        const auto& model = models_[index];
-        if ((pack_view || selected_only_) && !InPack(index)) continue;
-        if (!source_filter_.empty() && source_filter_ != model.Archive) continue;
-        if (filter.IsActive() && !filter.PassFilter((model.Model + " " + Narrow(model.Archive.wstring())).c_str())) continue;
-        shown.push_back(index);
+    const auto card_key = [&](const Card& card) {
+        if (card.Package) {
+            const auto& package = payloads_[card.Index];
+            const auto file = Narrow(package.Archive.filename().wstring());
+            const auto title = PackageTitle(package.Archive);
+            const auto subtitle = PackageSubtitle(package.Paths);
+            return Lower(sort_column_ == ColumnSource ? file : sort_column_ == ColumnModel ? subtitle : title + "|" + file);
+        }
+        const auto& model = models_[card.Index];
+        return Lower(sort_column_ == ColumnSource ? Narrow(model.Archive.filename().wstring()) + "|" + model.Model
+            : sort_column_ == ColumnModel ? model.Model : SkinTitle(model) + "|" + model.Model);
+    };
+    std::vector<Card> cards;
+    cards.reserve(order_.size() + payloads_.size());
+    for (const size_t index : order_) cards.push_back({false, index});
+    for (size_t index = 0; index < payloads_.size(); ++index) cards.push_back({true, index});
+    std::stable_sort(cards.begin(), cards.end(), [&](const Card& a, const Card& b) {
+        const auto left = card_key(a);
+        const auto right = card_key(b);
+        return sort_descending_ ? right < left : left < right;
+    });
+    std::vector<Card> shown;
+    shown.reserve(cards.size());
+    for (const Card& card : cards) {
+        if (card.Package) {
+            const auto& package = payloads_[card.Index];
+            if ((pack_view || selected_only_) && !PackageInPack(package.Archive)) continue;
+            if (!source_filter_.empty() && source_filter_ != package.Archive) continue;
+            const auto haystack = PackageTitle(package.Archive) + " " + Narrow(package.Archive.filename().wstring()) + " " + PackageSubtitle(package.Paths);
+            if (filter.IsActive() && !filter.PassFilter(haystack.c_str())) continue;
+        } else {
+            const auto& model = models_[card.Index];
+            if ((pack_view || selected_only_) && !InPack(card.Index)) continue;
+            if (!source_filter_.empty() && source_filter_ != model.Archive) continue;
+            if (filter.IsActive() && !filter.PassFilter((model.Model + " " + Narrow(model.Archive.wstring())).c_str())) continue;
+        }
+        shown.push_back(card);
     }
     shown_count_ = shown.size();
 
@@ -755,37 +1029,51 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
             pack_stale_ = true;
         }
     }
+    const bool no_sources = sources.empty();
+    const bool have_items = !models_.empty() || !payloads_.empty();
+    const bool pack_empty = selected_.empty() && package_selection_.empty();
     if (shown.empty()) {
         ImGui::Spacing();
-        if (models_.empty() && Scanning()) {
+        if (!have_items && Scanning()) {
             ImGui::TextDisabled("Loading your collection...");
+        } else if (no_sources) {
+            ImGui::TextUnformatted("Your library has no mods yet.");
+            ImGui::TextDisabled("Add or drop mod VPKs (Ctrl+O). Your source files stay available for future builds.");
+            if (ImGui::Button("Add mods...")) add();
+        } else if (pack_view && pack_empty) {
+            ImGui::TextUnformatted("The pack is empty.");
+            ImGui::TextDisabled("Tick skins in the library, include a mod's other files, or right-click them and choose Include in pack.");
         } else {
-            ImGui::TextUnformatted(models_.empty() ? "Your library has no mods yet." : pack_view && selected_.empty() ? "The pack is empty." : "No skins match.");
-            ImGui::TextDisabled("%s", models_.empty() ? "Add or drop mod VPKs (Ctrl+O). Your source files stay available for future builds."
-                : pack_view && selected_.empty() ? "Tick skins in the library, or right-click them and choose Include in pack."
-                : "Change the search, or show every source.");
-            if (models_.empty()) {
-                if (ImGui::Button("Add mods...")) add();
-            } else if (!pack_view || !selected_.empty()) {
-                if (ImGui::Button("Clear filters")) { filter_[0] = '\0'; source_filter_.clear(); selected_only_ = false; }
-            }
+            ImGui::TextUnformatted("No mods match.");
+            ImGui::TextDisabled("Change the search, or show every source.");
+            if (ImGui::Button("Clear filters")) { filter_[0] = '\0'; source_filter_.clear(); selected_only_ = false; }
         }
     } else if (list_view_) {
-        DrawList(shown, game, pause_loading, preview);
+        DrawList(shown, game, pause_loading, preview, analyze, can_analyze);
     } else {
         // Holding Ctrl turns the wheel into thumbnail zoom instead of scrolling.
         const ImGuiWindowFlags flags = ImGui::GetIO().KeyCtrl ? ImGuiWindowFlags_NoScrollWithMouse : ImGuiWindowFlags_None;
         ImGui::BeginChild("gallery", {0, 0}, ImGuiChildFlags_None, flags);
-        DrawGrid(shown, game, pause_loading, preview);
+        DrawGrid(shown, game, pause_loading, preview, analyze, can_analyze);
         if (ImGui::IsWindowHovered() && ImGui::GetIO().KeyCtrl && ImGui::GetIO().MouseWheel != 0) {
             thumbnail_size_ = std::clamp(thumbnail_size_ + ImGui::GetIO().MouseWheel * 16, 80.f, 256.f);
         }
         if (ImGui::IsWindowFocused() && current_ && !ImGui::GetIO().WantTextInput) {
-            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false)) preview(models_.at(*current_));
-            if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) SetInPack(*current_, !InPack(*current_));
+            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false)) Activate(*current_, preview);
+            if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) Toggle(*current_);
         }
         ImGui::EndChild();
     }
     ImGui::EndDisabled();
+    if (std::exchange(open_file_list_, false)) ImGui::OpenPopup("Package files");
+    ImGui::SetNextWindowSize({ImGui::GetFontSize() * 36, ImGui::GetFontSize() * 24}, ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Package files", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::TextUnformatted(file_list_title_.c_str());
+        ImGui::BeginChild("package_paths", {0, ImGui::GetFontSize() * 16}, ImGuiChildFlags_Borders);
+        for (const auto& path : file_list_) ImGui::TextUnformatted(path.c_str());
+        ImGui::EndChild();
+        if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
 }
 }

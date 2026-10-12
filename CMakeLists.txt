@@ -120,7 +120,7 @@ add_library(skeleton_repair_core STATIC
     src/core/mod_store.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32 windowscodecs)
 
 # Opens the model tools workspace by default; command-line options run the console workflow.
 add_executable(DeadlockSkeletonRepair

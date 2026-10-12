@@ -691,16 +691,27 @@ struct App {
                     for (auto& model : result.Library.Selected) if (skeleton_repair::EqualsIgnoreCase(
                         Narrow(std::filesystem::absolute(model.Archive).lexically_normal().wstring()),
                         Narrow(std::filesystem::absolute(source).lexically_normal().wstring()))) model.Archive = cached;
+                    for (auto& package : result.Library.Packages) if (same(package, source)) package = cached;
                     auto checkpoint = result.Library;
-                    std::erase_if(checkpoint.Selected, [&](const auto& model) { return std::none_of(checkpoint.Sources.begin(), checkpoint.Sources.end(),
-                        [&](const auto& path) { return skeleton_repair::EqualsIgnoreCase(Narrow(path.wstring()), Narrow(model.Archive.wstring())); }); });
+                    const auto listed = [](const std::vector<std::filesystem::path>& paths, const std::filesystem::path& path) {
+                        return std::none_of(paths.begin(), paths.end(), [&](const auto& other) {
+                            return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(path.wstring()));
+                        });
+                    };
+                    std::erase_if(checkpoint.Selected, [&](const auto& model) { return listed(checkpoint.Sources, model.Archive); });
+                    std::erase_if(checkpoint.Packages, [&](const auto& package) { return listed(checkpoint.Sources, package); });
                     if (checkpoints) store.Save(checkpoint);
                 } catch (const OperationCancelled&) { result.Errors += "Import cancelled. Completed imports were kept.\n"; break; }
                 catch (const std::exception& error) { result.Errors += Narrow(source.filename().wstring()) + ": " + error.what() + "\n"; }
                 ++*completed;
             }
-            std::erase_if(result.Library.Selected, [&](const auto& model) { return std::none_of(result.Library.Sources.begin(), result.Library.Sources.end(),
-                [&](const auto& source) { return skeleton_repair::EqualsIgnoreCase(Narrow(source.wstring()), Narrow(model.Archive.wstring())); }); });
+            const auto listed = [](const std::filesystem::path& path, const std::vector<std::filesystem::path>& paths) {
+                return std::none_of(paths.begin(), paths.end(), [&](const auto& other) {
+                    return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(path.wstring()));
+                });
+            };
+            std::erase_if(result.Library.Selected, [&](const auto& model) { return listed(model.Archive, result.Library.Sources); });
+            std::erase_if(result.Library.Packages, [&](const auto& package) { return listed(package, result.Library.Sources); });
             return result;
         });
     }
@@ -1157,7 +1168,7 @@ struct App {
                 Builder.SetSourceFilter({});
                 if (CurrentPage != Page::Pack) ShowPage(Page::Gallery);
             }
-            count_column(Builder.ModelCount());
+            count_column(Builder.ListedCount());
         }
         std::optional<std::filesystem::path> remove;
         for (const auto& path : ModPaths) {
@@ -1169,13 +1180,30 @@ struct App {
                 Builder.SetSourceFilter(active == path ? std::filesystem::path{} : path);
                 if (CurrentPage != Page::Pack) ShowPage(Page::Gallery);
             }
-            ImGui::SetItemTooltip("%s\nClick to show its skins. Right-click for more.", key.c_str());
+            const size_t skins = Builder.ModelsIn(path);
+            const size_t files = Builder.PackageFiles(path);
+            std::string tip = key;
+            if (skins > 0) {
+                tip += "\n" + std::to_string(skins) + (skins == 1 ? " skin" : " skins");
+                if (files > 0) tip += ", " + std::to_string(files) + (files == 1 ? " other file" : " other files");
+                tip += "\nClick to show its skins. Right-click for more.";
+            } else {
+                tip += "\n" + std::to_string(files) + (files == 1 ? " file" : " files");
+                tip += "\nClick to show it. Right-click for more.";
+            }
+            ImGui::SetItemTooltip("%s", tip.c_str());
             if (ImGui::BeginPopupContextItem("source_menu")) {
                 ImGui::TextDisabled("%s", name.c_str());
                 ImGui::Separator();
                 if (ImGui::MenuItem("Show skins")) { Builder.SetSourceFilter(path); ShowPage(Page::Gallery); }
-                if (ImGui::MenuItem("Include every skin in the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, true);
-                if (ImGui::MenuItem("Remove every skin from the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, false);
+                if (skins > 0) {
+                    if (ImGui::MenuItem("Include every skin in the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, true);
+                    if (ImGui::MenuItem("Remove every skin from the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, false);
+                }
+                if (files > 0) {
+                    if (ImGui::MenuItem("Include other files in the pack", nullptr, false, !PackBusy())) Builder.IncludePackage(path, true);
+                    if (ImGui::MenuItem("Remove other files from the pack", nullptr, false, !PackBusy())) Builder.IncludePackage(path, false);
+                }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Rename...", nullptr, false, !FilesBusy() && Store.has_value())) {
                     RenameTarget = path;
@@ -1189,7 +1217,7 @@ struct App {
                 if (ImGui::MenuItem("Remove from library", nullptr, false, !FilesBusy())) remove = path;
                 ImGui::EndPopup();
             }
-            count_column(Builder.ModelsIn(path));
+            count_column(skins > 0 ? skins : files);
             ImGui::PopID();
         }
         if (ModPaths.empty()) {
@@ -1267,7 +1295,7 @@ struct App {
         const std::string inspect_label = (ModName.empty() ? std::string("Model inspector") : "Inspect: " + ModName) + "###inspect";
         const struct { const char* Label; const char* Tooltip; Page Value; } tabs[] = {
             {"Mod library###gallery", "Browse every skin in your library (Ctrl+1)", Page::Gallery},
-            {pack_label, "Choose skins and export them as one VPK (Ctrl+2)", Page::Pack},
+            {pack_label, "Choose skins and other files, then export them as one VPK (Ctrl+2)", Page::Pack},
             {"Version history###history", "Every stored copy of each model, and how repairs changed it (Ctrl+3)", Page::History},
             {"Skin repairs###repair", "Check and repair your mods after game updates (Ctrl+4)", Page::Repair},
             {inspect_label.c_str(), "Textures, animations and skeleton of one model (Ctrl+5)", Page::Inspect},
@@ -1302,7 +1330,11 @@ struct App {
                 Repair.Busy() || ImportBusy(), Repair.Busy() || GameLoader.Busy(), CurrentPage == Page::Pack, [&] { AddMods(hwnd); },
                 [&](const ModelLibrary& library) { StartImport(library, true); },
                 [&](const std::filesystem::path& other) { StartMerge(other); },
-                [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); ShowPage(Page::Inspect); });
+                [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); ShowPage(Page::Inspect); },
+                [&](const LibraryModel& model) {
+                    ShowPage(Page::Repair);
+                    Repair.AnalyzeModel(Narrow(model.Archive.wstring()), model.Model);
+                });
         } else if (CurrentPage == Page::History) {
             const std::string game_directory = Game ? Narrow(GamePath().parent_path().wstring()) : std::string();
             History.Draw(hwnd, Panel, [game = Game](const std::string& path) { return game ? game->Read(path) : std::nullopt; }, GameClips,
@@ -1333,6 +1365,11 @@ struct App {
                         ShowPage(Page::Multi);
                     }
                     ImGui::SetItemTooltip("Show this character's models together, with one shared camera.");
+                    if (ImGui::MenuItem("Analyze this model", nullptr, false, Game && !FilesBusy() && !Selected.empty())) {
+                        ShowPage(Page::Repair);
+                        Repair.AnalyzeModel(Narrow(ActiveMod.wstring()), Selected);
+                    }
+                    ImGui::SetItemTooltip("Check this model and its animation skeleton against the installed game.");
                 }
                 ImGui::EndPopup();
             }
@@ -1370,10 +1407,10 @@ struct App {
         if (ImGui::BeginPopupModal("Keyboard shortcuts", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             static const char* const kShortcuts[][2] = {
                 {"Ctrl+O", "Add mods"}, {"Ctrl+Shift+O", "Add every mod in a folder"}, {"Ctrl+G", "Choose the game archive"},
-                {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins"}, {"F5", "Reopen every source and reload thumbnails"},
+                {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins, packages and sources"}, {"F5", "Reopen every source and reload thumbnails"},
                 {"Ctrl+1 ... Ctrl+6", "Library, builder, history, repairs, inspector, multi view"}, {"Alt+Left", "Back to the previous page"},
-                {"Ctrl+Shift+E", "Show or hide the explorer"}, {"Double-click", "Inspect a skin, view a version"},
-                {"Enter / Space", "Inspect the clicked skin / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
+                {"Ctrl+Shift+E", "Show or hide the explorer"}, {"Double-click", "Inspect a skin, list a package's files, or view a version"},
+                {"Enter / Space", "Inspect a skin or list a package's files / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
                 {"Drag / right-drag / wheel", "Orbit / pan / zoom a viewport"}, {"F", "Frame the model in the hovered viewport"},
                 {"Right-click", "More actions on skins, sources, versions, results and viewports"}, {"F1", "This list"},
             };

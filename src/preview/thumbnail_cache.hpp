@@ -36,6 +36,8 @@ std::vector<uint8_t> EncodeThumbnail(const ThumbnailPixels& pixels);
 class ThumbnailImage {
 public:
     ThumbnailImage(const VulkanDevice& device, const ThumbnailPixels& pixels);
+    // One decoded .vtex_c mip, including block-compressed formats the model view already samples.
+    ThumbnailImage(const VulkanDevice& device, const TextureImage& texture);
     ~ThumbnailImage();
     ThumbnailImage(const ThumbnailImage&) = delete;
     ThumbnailImage& operator=(const ThumbnailImage&) = delete;

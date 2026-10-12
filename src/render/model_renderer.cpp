@@ -276,6 +276,10 @@ ModelRenderer::Image ModelRenderer::CreateImage(VkFormat format, VkImageUsageFla
     view.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view.format = format;
     view.subresourceRange = {aspect, 0, mip_levels, 0, 1};
+    // BC4 is one channel. Sampled as a color it is (R, 0, 0, 1), a red image.
+    if (format == VK_FORMAT_BC4_UNORM_BLOCK) {
+        view.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_ONE};
+    }
     if (VkResult result = vkCreateImageView(device_.Device, &view, nullptr, &image.View); result != VK_SUCCESS) {
         Image partial = image;
         Destroy(partial);

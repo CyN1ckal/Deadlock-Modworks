@@ -148,7 +148,7 @@ TEST(CommandLineStore, ImportReportsModelsAndNewBlobs) {
     const std::string vpk_arg = Utf8(vpk);
     const CliOutput first = Execute({"--store", store_arg, "import", vpk_arg});
     EXPECT_EQ(first.Code, 0);
-    EXPECT_NE(first.Text.find("Imported 2 models, 2 new blobs.\n"), std::string::npos);
+    EXPECT_NE(first.Text.find("Imported 2 models, 0 other files, 2 new blobs.\n"), std::string::npos);
 
     std::string snapshot;
     {
@@ -163,7 +163,7 @@ TEST(CommandLineStore, ImportReportsModelsAndNewBlobs) {
     const CliOutput second = Execute({"--store", store_arg, "import", vpk_arg});
     EXPECT_EQ(second.Code, 0);
     EXPECT_NE(second.Text.find(snapshot + "\n"), std::string::npos);
-    EXPECT_NE(second.Text.find("Imported 2 models, 0 new blobs.\n"), std::string::npos);
+    EXPECT_NE(second.Text.find("Imported 2 models, 0 other files, 0 new blobs.\n"), std::string::npos);
 
     const CliOutput models = Execute({"--store", store_arg, "models"});
     EXPECT_EQ(models.Code, 0);
@@ -190,11 +190,30 @@ TEST(CommandLineStore, ImportCountsTextureBlobsSeparatelyFromModels) {
 
     const CliOutput imported = Execute({"--store", Utf8(store), "import", Utf8(vpk)});
     EXPECT_EQ(imported.Code, 0);
-    EXPECT_NE(imported.Text.find("Imported 2 models, 3 new blobs.\n"), std::string::npos);
+    EXPECT_NE(imported.Text.find("Imported 2 models, 1 other files, 3 new blobs.\n"), std::string::npos);
 
     const CliOutput models = Execute({"--store", Utf8(store), "models"});
     EXPECT_EQ(models.Code, 0);
     EXPECT_EQ(models.Text.find("vtex_c"), std::string::npos);
+}
+
+TEST(CommandLineStore, ImportCountsOtherFilesWhenTheArchiveHasNoModels) {
+    TempDir dir;
+    const fs::path store = dir.Path() / "store";
+    const fs::path vpk = dir.Path() / "portraits.vpk";
+    Archive(vpk, {
+        VpkChange{"models/hideout/materials/one.vtex_c", std::vector<uint8_t>{1, 2, 3}},
+        VpkChange{"models/hideout/materials/two.vtex_c", std::vector<uint8_t>{4, 5}},
+        VpkChange{"panorama/layout.vxml_c", std::vector<uint8_t>{6}},
+    });
+
+    const CliOutput imported = Execute({"--store", Utf8(store), "import", Utf8(vpk)});
+    EXPECT_EQ(imported.Code, 0);
+    EXPECT_NE(imported.Text.find("Imported 0 models, 3 other files, 3 new blobs.\n"), std::string::npos);
+
+    const CliOutput models = Execute({"--store", Utf8(store), "models"});
+    EXPECT_EQ(models.Code, 0);
+    EXPECT_TRUE(models.Text.empty());
 }
 
 TEST(CommandLineStore, DuplicatesUseTheModelLineAndStayEmptyAtExitZero) {

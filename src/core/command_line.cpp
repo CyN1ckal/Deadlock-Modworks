@@ -142,8 +142,13 @@ int ImportStore(std::string_view directory, std::string_view file, const std::fu
     if (!found) {
         throw InvalidData("The model library has no snapshot with that id.");
     }
+    int other_files = 0;
+    for (const SnapshotMember& member : store.SnapshotMembers(snapshot)) {
+        if (!EndsWithIgnoreCase(member.Path, ".vmdl_c")) ++other_files;
+    }
     write(snapshot.Value);
-    write("Imported " + std::to_string(models) + " models, " + std::to_string(new_blobs) + " new blobs.");
+    write("Imported " + std::to_string(models) + " models, " + std::to_string(other_files) + " other files, "
+        + std::to_string(new_blobs) + " new blobs.");
     return 0;
 }
 
