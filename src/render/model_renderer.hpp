@@ -1,5 +1,6 @@
 #pragma once
 
+#include "preview_materials.hpp"
 #include "preview_scene.hpp"
 
 #include <vulkan/vulkan.h>
@@ -20,6 +21,7 @@ public:
 };
 
 // A device created by the host. It must be Vulkan 1.3 with dynamicRendering and synchronization2 enabled.
+// Enable textureCompressionBC too where supported; block-compressed textures are skipped without it.
 struct VulkanDevice {
     VkPhysicalDevice Physical = VK_NULL_HANDLE;
     VkDevice Device = VK_NULL_HANDLE;
@@ -32,6 +34,8 @@ enum class ColorMode {
     Material,
     // Each vertex takes the color of its strongest bone (BoneNameColor).
     Bone,
+    // Material color maps from SetMaterials; draws without one fall back to clay.
+    Textured,
 };
 
 struct RenderOptions {
@@ -61,6 +65,10 @@ public:
     void ClearScene();
     // Replaces only the skeleton lines of the current scene, for example to show a different skeleton or diff colors.
     void SetSkeleton(std::span<const LineVertex> skeleton);
+    // Uploads color maps for the current scene's draws, matched by material name, and waits for the copy.
+    // Returns a note for each texture the device cannot sample.
+    std::vector<std::string> SetMaterials(std::span<const PreviewMaterial> materials);
+    size_t TextureCount() const { return textures_.size(); }
     bool HasScene() const { return index_count_ > 0 || line_count_ > 0; }
 
     // Recreates the target when the size changes, waiting for the device first.
@@ -94,8 +102,16 @@ private:
     uint32_t MemoryType(uint32_t type_bits, VkMemoryPropertyFlags properties) const;
     Buffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) const;
     void Destroy(Buffer& buffer) const;
-    Image CreateImage(VkFormat format, VkImageUsageFlags usage, VkSampleCountFlagBits samples, VkImageAspectFlags aspect) const;
+    Image CreateImage(VkFormat format, VkImageUsageFlags usage, VkSampleCountFlagBits samples, VkImageAspectFlags aspect,
+        uint32_t width, uint32_t height, uint32_t mip_levels = 1) const;
     void Destroy(Image& image) const;
+    struct Texture {
+        Image Pixels;
+        VkDescriptorSet Set = VK_NULL_HANDLE;
+    };
+    void DestroyTextures();
+    // Creates images and descriptor sets for `images`, uploading every mip in one submit. Null entries are skipped.
+    std::vector<Texture> CreateTextures(std::span<const TextureImage* const> images);
     void DestroyTargets();
     void CreatePipelines();
     template <typename Fn>
@@ -111,7 +127,13 @@ private:
     VkPipelineLayout mesh_layout_ = VK_NULL_HANDLE;
     VkPipelineLayout line_layout_ = VK_NULL_HANDLE;
     VkPipeline mesh_pipeline_ = VK_NULL_HANDLE;
+    VkPipeline blend_pipeline_ = VK_NULL_HANDLE;
     VkPipeline line_pipeline_ = VK_NULL_HANDLE;
+    VkSampler texture_sampler_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
+    // Holds the fallback set and the current textures; recreated by SetMaterials.
+    VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
+    Texture fallback_;
 
     VkExtent2D extent_{0, 0};
     Image color_;
@@ -131,6 +153,14 @@ private:
     uint32_t skeleton_count_ = 0;
     std::vector<PreviewDraw> draws_;
     std::vector<LineVertex> grid_;
+    std::vector<Texture> textures_;
+    struct DrawMaterial {
+        int Texture = -1;
+        bool AlphaTest = false;
+        bool Translucent = false;
+    };
+    // One per draw, filled by SetMaterials.
+    std::vector<DrawMaterial> draw_materials_;
 };
 
 }  // namespace skeleton_repair

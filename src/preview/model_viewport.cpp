@@ -18,13 +18,28 @@ bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame) {
     ImGui::SameLine();
     ImGui::Checkbox("Grid", &settings.ShowGrid);
     ImGui::SameLine();
-    static const char* const kModes[] = {"Clay", "Material colors", "Bone colors"};
-    int mode = static_cast<int>(settings.Coloring);
-    ImGui::SetNextItemWidth(130);
-    if (ImGui::Combo("##coloring", &mode, kModes, IM_ARRAYSIZE(kModes))) {
-        settings.Coloring = static_cast<ColorMode>(mode);
+    struct Mode {
+        const char* Label;
+        ColorMode Value;
+    };
+    static const Mode kModes[] = {{"Textured", ColorMode::Textured}, {"Clay", ColorMode::Clay},
+        {"Material colors", ColorMode::Material}, {"Bone colors", ColorMode::Bone}};
+    const char* current = kModes[0].Label;
+    for (const Mode& mode : kModes) {
+        if (mode.Value == settings.Coloring) {
+            current = mode.Label;
+        }
     }
-    ImGui::SetItemTooltip("Bone colors: each vertex takes the color of the bone that moves it most.");
+    ImGui::SetNextItemWidth(130);
+    if (ImGui::BeginCombo("##coloring", current)) {
+        for (const Mode& mode : kModes) {
+            if (ImGui::Selectable(mode.Label, mode.Value == settings.Coloring)) {
+                settings.Coloring = mode.Value;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Textured: material color maps. Bone colors: each vertex takes the color of the bone that moves it most.");
     ImGui::SameLine();
     frame = ImGui::Button("Frame");
     return lod_changed;
@@ -38,7 +53,10 @@ ModelViewport::~ModelViewport() {
     }
 }
 
-void ModelViewport::SetModel(const ModelGeometry* geometry, int lod) {
+void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read) {
+    textured_materials_ = 0;
+    material_count_ = 0;
+    material_notes_.clear();
     if (geometry == nullptr) {
         renderer_.ClearScene();
         scene_ = {};
@@ -48,6 +66,18 @@ void ModelViewport::SetModel(const ModelGeometry* geometry, int lod) {
     scene_ = BuildPreviewScene(*geometry);
     renderer_.SetScene(scene_);
     SetLod(lod);
+    if (read == nullptr) {
+        return;
+    }
+    const std::vector<PreviewMaterial> materials = LoadPreviewMaterials(scene_, *read);
+    material_notes_ = renderer_.SetMaterials(materials);
+    material_count_ = materials.size();
+    textured_materials_ = renderer_.TextureCount();
+    for (const PreviewMaterial& material : materials) {
+        if (!material.Problem.empty()) {
+            material_notes_.push_back(material.Name + ": " + material.Problem);
+        }
+    }
 }
 
 void ModelViewport::SetSkeleton(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors) {

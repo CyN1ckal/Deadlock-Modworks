@@ -6,6 +6,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include <functional>
+#include <optional>
 #include <string>
 
 namespace skeleton_repair {
@@ -22,7 +24,10 @@ class ComparisonView {
 public:
     explicit ComparisonView(const VulkanDevice& device);
 
-    void Load(ModelVersions versions);
+    // Reads a compiled resource as a given version sees it: the mod archive first for Mod and Repaired, the game for Game.
+    using VersionReader = std::function<std::optional<std::vector<uint8_t>>(ModelVersion version, const std::string& path)>;
+
+    void Load(ModelVersions versions, VersionReader read = {});
     void ShowError(std::string title, std::string message);
     bool Loaded() const { return loaded_; }
 
@@ -36,7 +41,12 @@ private:
     void DrawReport();
     void DrawDiff();
 
+    void ShowSide(ModelViewport& view, ModelVersion version, std::optional<ModelVersion>& shown);
+
     ModelVersions versions_;
+    VersionReader read_;
+    std::optional<ModelVersion> left_shown_;
+    std::optional<ModelVersion> right_shown_;
     bool loaded_ = false;
     std::string title_;
     std::string error_;

@@ -34,8 +34,9 @@ struct PreviewVertex {
     Vec3 Normal;
     // Color of the bone with the largest weight, or kUnskinnedColor.
     uint32_t BoneColor = kUnskinnedColor;
+    Vec2 TexCoord;
 };
-static_assert(sizeof(PreviewVertex) == 28);
+static_assert(sizeof(PreviewVertex) == 36);
 
 struct LineVertex {
     Vec3 Position;
@@ -51,6 +52,8 @@ struct PreviewDraw {
     uint32_t Mesh = 0;
     // Linear RGB used when coloring by material.
     std::array<float, 3> MaterialColor{};
+    // Material resource name from the draw call (".vmat", no "_c").
+    std::string Material;
 };
 
 struct PreviewMesh {

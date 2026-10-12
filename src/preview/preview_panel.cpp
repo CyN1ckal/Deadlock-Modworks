@@ -9,9 +9,9 @@ namespace skeleton_repair {
 
 PreviewPanel::PreviewPanel(const VulkanDevice& device) : viewport_(device) {}
 
-void PreviewPanel::Load(const ModelGeometry& geometry, std::string title) {
+void PreviewPanel::Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read) {
     settings_.Lod = 0;
-    viewport_.SetModel(&geometry, settings_.Lod);
+    viewport_.SetModel(&geometry, settings_.Lod, read);
     title_ = std::move(title);
     error_.clear();
     const OrbitCamera framed = OrbitCamera::Framing(viewport_.Scene().Min, viewport_.Scene().Max);
@@ -57,7 +57,13 @@ void PreviewPanel::Draw() {
             vertices += scene.Meshes[i].VertexCount;
         }
     }
-    ImGui::Text("%u triangles, %u vertices, %zu bones", triangles, vertices, scene.BoneCount);
+    ImGui::Text("%u triangles, %u vertices, %zu bones, %zu/%zu materials textured", triangles, vertices, scene.BoneCount,
+        viewport_.TexturedMaterials(), viewport_.MaterialCount());
+    if (!viewport_.MaterialNotes().empty() && ImGui::CollapsingHeader("Material notes")) {
+        for (const std::string& note : viewport_.MaterialNotes()) {
+            ImGui::BulletText("%s", note.c_str());
+        }
+    }
 
     if (!scene.Meshes.empty() && ImGui::CollapsingHeader("Meshes")) {
         for (size_t i = 0; i < scene.Meshes.size(); ++i) {

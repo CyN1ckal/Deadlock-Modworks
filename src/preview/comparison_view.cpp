@@ -72,8 +72,11 @@ void DrawEdit(const char* what, const MigrationEdit& edit) {
 
 ComparisonView::ComparisonView(const VulkanDevice& device) : left_view_(device), right_view_(device) {}
 
-void ComparisonView::Load(ModelVersions versions) {
+void ComparisonView::Load(ModelVersions versions, VersionReader read) {
     versions_ = std::move(versions);
+    read_ = std::move(read);
+    left_shown_.reset();
+    right_shown_.reset();
     loaded_ = true;
     error_.clear();
     title_ = versions_.ModelPath;
@@ -93,11 +96,14 @@ void ComparisonView::Load(ModelVersions versions) {
 
 void ComparisonView::ShowError(std::string title, std::string message) {
     versions_ = {};
+    read_ = {};
     loaded_ = false;
     title_ = std::move(title);
     error_ = std::move(message);
     left_view_.SetModel(nullptr, 0);
     right_view_.SetModel(nullptr, 0);
+    left_shown_.reset();
+    right_shown_.reset();
 }
 
 const std::vector<GeometryBone>* ComparisonView::Skeleton(ModelVersion version) const {
@@ -111,13 +117,29 @@ const std::vector<GeometryBone>* ComparisonView::Skeleton(ModelVersion version) 
     return data.Model ? &data.Model->Bones : nullptr;
 }
 
+void ComparisonView::ShowSide(ModelViewport& view, ModelVersion version, std::optional<ModelVersion>& shown) {
+    // Loading materials reads every color map, so only reload when the side shows another version.
+    if (shown == version) {
+        return;
+    }
+    shown = version;
+    const VersionData& data = versions_.Get(version);
+    const ModelGeometry* model = data.Available && data.Model ? &*data.Model : nullptr;
+    if (!read_) {
+        view.SetModel(model, settings_.Lod);
+        return;
+    }
+    const ResourceReader read = [this, version](const std::string& path) { return read_(version, path); };
+    view.SetModel(model, settings_.Lod, &read);
+}
+
 void ComparisonView::Refresh(bool reframe) {
     const VersionData& left = versions_.Get(left_);
     const VersionData& right = versions_.Get(right_);
     const ModelGeometry* left_model = left.Available && left.Model ? &*left.Model : nullptr;
     const ModelGeometry* right_model = right.Available && right.Model ? &*right.Model : nullptr;
-    left_view_.SetModel(left_model, settings_.Lod);
-    right_view_.SetModel(right_model, settings_.Lod);
+    ShowSide(left_view_, left_, left_shown_);
+    ShowSide(right_view_, right_, right_shown_);
 
     const std::vector<GeometryBone>* left_bones = Skeleton(left_);
     const std::vector<GeometryBone>* right_bones = Skeleton(right_);

@@ -140,6 +140,7 @@ PreviewScene BuildPreviewScene(const ModelGeometry& geometry) {
                 PreviewVertex vertex;
                 vertex.Position = v < buffer.Positions.size() ? buffer.Positions[v] : Vec3{};
                 vertex.Normal = v < buffer.Normals.size() ? buffer.Normals[v] : Vec3{0, 0, 1};
+                vertex.TexCoord = v < buffer.TexCoords.size() ? buffer.TexCoords[v] : Vec2{};
                 if (v < buffer.BoneIndices.size()) {
                     const auto& weights = buffer.BoneWeights[v];
                     const size_t strongest = static_cast<size_t>(std::max_element(weights.begin(), weights.end()) - weights.begin());
@@ -165,6 +166,7 @@ PreviewScene BuildPreviewScene(const ModelGeometry& geometry) {
             draw.VertexOffset = static_cast<int32_t>(vertex_base[call.VertexBuffer] + call.BaseVertex);
             draw.Mesh = static_cast<uint32_t>(mesh_index);
             draw.MaterialColor = MaterialColor(call.Material);
+            draw.Material = call.Material;
             info.TriangleCount += call.IndexCount / 3;
             scene.Draws.push_back(draw);
         }

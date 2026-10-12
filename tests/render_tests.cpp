@@ -1,4 +1,5 @@
 #include "model_renderer.hpp"
+#include "preview_materials.hpp"
 #include "preview_scene.hpp"
 #include "preview_test_model.hpp"
 
@@ -104,8 +105,13 @@ struct Gpu {
                 VkPhysicalDeviceVulkan13Features features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
                 features13.dynamicRendering = VK_TRUE;
                 features13.synchronization2 = VK_TRUE;
+                VkPhysicalDeviceFeatures supported{};
+                vkGetPhysicalDeviceFeatures(physical, &supported);
+                VkPhysicalDeviceFeatures enabled{};
+                enabled.textureCompressionBC = supported.textureCompressionBC;
                 VkDeviceCreateInfo device{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
                 device.pNext = &features13;
+                device.pEnabledFeatures = &enabled;
                 device.queueCreateInfoCount = 1;
                 device.pQueueCreateInfos = &queue;
                 if (vkCreateDevice(physical, &device, nullptr, &gpu->Device.Device) != VK_SUCCESS) {
@@ -287,6 +293,98 @@ TEST_F(RendererTest, ReplacingTheSceneKeepsRendering) {
     options_.ShowSkeleton = true;
     const auto pixels = Render();
     EXPECT_FALSE(IsBackground(At(pixels, kWidth / 2, kHeight / 2)));
+}
+
+skeleton_repair::PreviewMaterial SolidMaterial(const std::string& name, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    skeleton_repair::PreviewMaterial material;
+    material.Name = name;
+    skeleton_repair::TextureImage image;
+    image.Width = 2;
+    image.Height = 2;
+    image.Mips = {{r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a}, {r, g, b, a}};
+    material.Color = image;
+    return material;
+}
+
+TEST_F(RendererTest, TexturedModeSamplesTheColorMap) {
+    renderer_->SetScene(scene_);
+    const skeleton_repair::PreviewMaterial materials[] = {SolidMaterial("models/test/body.vmat", 255, 0, 0, 255)};
+    EXPECT_TRUE(renderer_->SetMaterials(materials).empty());
+    EXPECT_EQ(renderer_->TextureCount(), 1u);
+    options_.Coloring = skeleton_repair::ColorMode::Textured;
+    const Pixel center = At(Render(), kWidth / 2, kHeight / 2);
+    EXPECT_GT(center.R, 150);
+    EXPECT_LT(center.G, 60);
+    EXPECT_LT(center.B, 60);
+}
+
+TEST_F(RendererTest, DrawsWithoutAColorMapStayClay) {
+    renderer_->SetScene(scene_);
+    const Pixel clay = At(Render(), kWidth / 2, kHeight / 2);
+    // A material for another draw only.
+    const skeleton_repair::PreviewMaterial materials[] = {SolidMaterial("models/test/other.vmat", 255, 0, 0, 255)};
+    renderer_->SetMaterials(materials);
+    options_.Coloring = skeleton_repair::ColorMode::Textured;
+    const Pixel textured = At(Render(), kWidth / 2, kHeight / 2);
+    EXPECT_EQ(clay.R, textured.R);
+    EXPECT_EQ(clay.G, textured.G);
+    EXPECT_EQ(clay.B, textured.B);
+}
+
+TEST_F(RendererTest, AlphaTestDiscardsTransparentTexels) {
+    renderer_->SetScene(scene_);
+    skeleton_repair::PreviewMaterial material = SolidMaterial("models/test/body.vmat", 255, 0, 0, 0);
+    material.AlphaTest = true;
+    renderer_->SetMaterials(std::span(&material, 1));
+    options_.Coloring = skeleton_repair::ColorMode::Textured;
+    EXPECT_TRUE(IsBackground(At(Render(), kWidth / 2, kHeight / 2)));
+}
+
+TEST_F(RendererTest, TranslucentMaterialsBlendOverTheBackground) {
+    renderer_->SetScene(scene_);
+    skeleton_repair::PreviewMaterial material = SolidMaterial("models/test/body.vmat", 255, 255, 255, 128);
+    material.Translucent = true;
+    renderer_->SetMaterials(std::span(&material, 1));
+    options_.Coloring = skeleton_repair::ColorMode::Textured;
+    const Pixel center = At(Render(), kWidth / 2, kHeight / 2);
+    EXPECT_FALSE(IsBackground(center));
+    // Half white over a dark background lands between the two.
+    EXPECT_GT(center.R, options_.Background[0] * 255 + 40);
+    EXPECT_LT(center.R, 240);
+}
+
+TEST_F(RendererTest, ReplacingMaterialsKeepsRendering) {
+    renderer_->SetScene(scene_);
+    options_.Coloring = skeleton_repair::ColorMode::Textured;
+    const skeleton_repair::PreviewMaterial red[] = {SolidMaterial("models/test/body.vmat", 255, 0, 0, 255)};
+    renderer_->SetMaterials(red);
+    Render();
+    const skeleton_repair::PreviewMaterial blue[] = {SolidMaterial("models/test/body.vmat", 0, 0, 255, 255)};
+    renderer_->SetMaterials(blue);
+    const Pixel center = At(Render(), kWidth / 2, kHeight / 2);
+    EXPECT_GT(center.B, 150);
+    EXPECT_LT(center.R, 60);
+}
+
+TEST(PreviewMaterials, ReportsMissingFilesInsteadOfThrowing) {
+    const auto scene = BuildPreviewScene(preview_test::TwoLodModel());
+    const auto materials = skeleton_repair::LoadPreviewMaterials(scene, [](const std::string&) { return std::nullopt; });
+    ASSERT_EQ(materials.size(), 2u);
+    EXPECT_EQ(materials[0].Name, "models/test/body.vmat");
+    EXPECT_FALSE(materials[0].Color);
+    EXPECT_EQ(materials[0].Problem, "Material is not in the mod or the game.");
+}
+
+TEST(PreviewMaterials, ReportsUnreadableMaterials) {
+    const auto scene = BuildPreviewScene(preview_test::TwoLodModel());
+    std::vector<std::string> asked;
+    const auto materials = skeleton_repair::LoadPreviewMaterials(scene, [&](const std::string& path) {
+        asked.push_back(path);
+        return std::optional<std::vector<uint8_t>>(std::vector<uint8_t>{1, 2, 3});
+    });
+    EXPECT_EQ(asked.front(), "models/test/body.vmat_c");
+    EXPECT_FALSE(materials[0].Problem.empty());
+    EXPECT_FALSE(materials[0].Color);
 }
 
 }  // namespace

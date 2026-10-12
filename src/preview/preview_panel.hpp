@@ -13,7 +13,7 @@ class PreviewPanel {
 public:
     explicit PreviewPanel(const VulkanDevice& device);
 
-    void Load(const ModelGeometry& geometry, std::string title);
+    void Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read = nullptr);
     void ShowError(std::string title, std::string message);
 
     // Draws the controls and viewport into the current ImGui window.

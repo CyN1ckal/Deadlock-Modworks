@@ -92,8 +92,13 @@ void SetupVulkan() {
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
     const char* device_extensions[] = {"VK_KHR_swapchain"};
+    VkPhysicalDeviceFeatures supported{};
+    vkGetPhysicalDeviceFeatures(g_device.Physical, &supported);
+    VkPhysicalDeviceFeatures enabled{};
+    enabled.textureCompressionBC = supported.textureCompressionBC;
     VkDeviceCreateInfo device{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     device.pNext = &features13;
+    device.pEnabledFeatures = &enabled;
     device.queueCreateInfoCount = 1;
     device.pQueueCreateInfos = &queue;
     device.enabledExtensionCount = 1;
@@ -339,6 +344,25 @@ struct App {
         Compare.ShowError(name, "Comparison needs a model opened from a mod VPK.");
     }
 
+    std::optional<std::vector<uint8_t>> ReadFrom(const std::optional<VpkArchive>& archive, const std::string& path) const {
+        if (!archive) {
+            return std::nullopt;
+        }
+        const VpkEntry* entry = FindEntry(*archive, path);
+        if (entry == nullptr) {
+            return std::nullopt;
+        }
+        return archive->Read(*entry);
+    }
+
+    // How the game resolves a mod's files: the mod archive overrides the game's.
+    std::optional<std::vector<uint8_t>> ReadModThenGame(const std::string& path) const {
+        if (auto bytes = ReadFrom(Mod, path)) {
+            return bytes;
+        }
+        return ReadFrom(Game, path);
+    }
+
     void Select(const std::string& path) {
         Selected = path;
         const VpkEntry* entry = Mod ? FindEntry(*Mod, path) : nullptr;
@@ -348,7 +372,8 @@ struct App {
         std::vector<uint8_t> bytes;
         try {
             bytes = Mod->Read(*entry);
-            Panel.Load(DecodeModelGeometry(bytes), path);
+            const ResourceReader read = [this](const std::string& resource) { return ReadModThenGame(resource); };
+            Panel.Load(DecodeModelGeometry(bytes), path, &read);
         } catch (const std::exception& error) {
             Panel.ShowError(path, error.what());
         }
@@ -357,7 +382,9 @@ struct App {
             return;
         }
         try {
-            Compare.Load(BuildModelVersions(Sources(path, std::move(bytes))));
+            Compare.Load(BuildModelVersions(Sources(path, std::move(bytes))), [this](ModelVersion version, const std::string& resource) {
+                return version == ModelVersion::Game ? ReadFrom(Game, resource) : ReadModThenGame(resource);
+            });
             FocusCompare = true;
         } catch (const std::exception& error) {
             Compare.ShowError(path, error.what());

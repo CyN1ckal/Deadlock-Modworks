@@ -33,7 +33,8 @@ foreach(shader mesh.vert mesh.frag line.vert line.frag)
     set(output ${SR_SHADER_DIR}/${shader}.spv.inc)
     add_custom_command(
         OUTPUT ${output}
-        COMMAND ${Vulkan_GLSLC_EXECUTABLE} --target-env=vulkan1.3 -O -mfmt=num -o ${output} ${source}
+        # Vulkan 1.2 SPIR-V: under 1.3 rules, discard becomes demote-to-helper, which needs an extra device feature.
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} --target-env=vulkan1.2 -O -mfmt=num -o ${output} ${source}
         DEPENDS ${source}
         COMMENT "Compiling ${shader}"
         VERBATIM
@@ -46,6 +47,7 @@ add_library(sr_render STATIC
     src/render/model_renderer.cpp
     src/render/model_comparison.cpp
     src/render/model_versions.cpp
+    src/render/preview_materials.cpp
     ${SR_SHADER_OUTPUTS}
 )
 target_include_directories(sr_render PUBLIC src/render PRIVATE ${SR_SHADER_DIR})
