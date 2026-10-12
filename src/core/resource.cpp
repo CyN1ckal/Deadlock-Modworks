@@ -22,19 +22,16 @@ void Write(std::vector<uint8_t>& bytes, size_t offset, T value) {
     std::memcpy(bytes.data() + offset, &value, sizeof(T));
 }
 
-}  // namespace
+struct LocatedData {
+    uint32_t file_size = 0;
+    int entry = 0;
+    int abs = 0;
+    int size = 0;
+    int table_start = 0;
+    int block_count = 0;
+};
 
-std::vector<uint8_t> ReplaceDataBlock(std::span<const uint8_t> file, std::span<const uint8_t> new_data) {
-    if (file.size() < 16) {
-        throw InvalidData("Resource is too small.");
-    }
-    if (Read<uint16_t>(file, 4) != 12) {
-        throw InvalidData("Resource header is not version 12.");
-    }
-    if (new_data.size() < 4 || !IsBinaryKv3(Read<uint32_t>(new_data, 0))) {
-        throw InvalidData("Replacement DATA is not KV3.");
-    }
-
+LocatedData LocateDataBlock(std::span<const uint8_t> file) {
     const auto file_size = Read<uint32_t>(file, 0);
     const auto block_offset = Read<uint32_t>(file, 8);
     const auto block_count = Read<int32_t>(file, 12);
@@ -106,6 +103,42 @@ std::vector<uint8_t> ReplaceDataBlock(std::span<const uint8_t> file, std::span<c
             throw InvalidData("A block overlaps the DATA block.");
         }
     }
+
+    return LocatedData{file_size, data_entry, data_abs, data_size, table_start, block_count};
+}
+
+}  // namespace
+
+std::span<const uint8_t> FindDataBlock(std::span<const uint8_t> file) {
+    if (file.size() < 16) {
+        throw InvalidData("Resource is too small.");
+    }
+    if (Read<uint16_t>(file, 4) != 12) {
+        throw InvalidData("Resource header is not version 12.");
+    }
+    const LocatedData located = LocateDataBlock(file);
+    return file.subspan(static_cast<size_t>(located.abs), static_cast<size_t>(located.size));
+}
+
+std::vector<uint8_t> ReplaceDataBlock(std::span<const uint8_t> file, std::span<const uint8_t> new_data) {
+    if (file.size() < 16) {
+        throw InvalidData("Resource is too small.");
+    }
+    if (Read<uint16_t>(file, 4) != 12) {
+        throw InvalidData("Resource header is not version 12.");
+    }
+    if (new_data.size() < 4 || !IsBinaryKv3(Read<uint32_t>(new_data, 0))) {
+        throw InvalidData("Replacement DATA is not KV3.");
+    }
+
+    const LocatedData located = LocateDataBlock(file);
+    const uint32_t file_size = located.file_size;
+    const int data_entry = located.entry;
+    const int data_abs = located.abs;
+    const int data_size = located.size;
+    const int table_start = located.table_start;
+    const int block_count = located.block_count;
+    const int data_end = data_abs + data_size;
 
     const int64_t delta = static_cast<int64_t>(new_data.size()) - data_size;
     const int64_t new_length = static_cast<int64_t>(file.size()) + delta;
