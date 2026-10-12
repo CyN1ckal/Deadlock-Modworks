@@ -131,6 +131,7 @@ add_executable(skeleton_repair_tests
     tests/texture_tests.cpp
     tests/animation_clip_tests.cpp
     tests/store_tests.cpp
+    tests/command_line_store_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
