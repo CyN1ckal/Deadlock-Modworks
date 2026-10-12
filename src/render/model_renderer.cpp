@@ -952,4 +952,9 @@ std::vector<uint8_t> ModelRenderer::ReadPixels() {
     return pixels;
 }
 
+std::vector<uint8_t> ModelRenderer::Capture(const OrbitCamera& camera, const RenderOptions& options) {
+    Submit([&](VkCommandBuffer command_buffer) { Record(command_buffer, camera, options); });
+    return ReadPixels();
+}
+
 }  // namespace skeleton_repair

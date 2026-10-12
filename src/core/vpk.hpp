@@ -28,6 +28,14 @@ struct VpkChange {
     std::optional<std::vector<uint8_t>> Data;
 };
 
+// A file streamed into a new archive. Write must pass exactly Length bytes whose CRC is Crc32.
+struct VpkNewFile {
+    std::string Path;
+    uint32_t Crc32 = 0;
+    uint32_t Length = 0;
+    std::function<void(const std::function<void(const uint8_t*, size_t)>&)> Write;
+};
+
 class ReadLease {
 public:
     ReadLease();
@@ -61,6 +69,10 @@ public:
     void Validate(CancellationToken cancellation = {}) const;
     void Write(const std::filesystem::path& destination, const std::vector<VpkChange>& changes,
         CancellationToken cancellation = {}) const;
+
+    // Writes a new embedded archive without holding every file in memory.
+    static void Create(const std::filesystem::path& destination, const std::vector<VpkNewFile>& files,
+        CancellationToken cancellation = {});
 
     static uint32_t Crc(const uint8_t* data, size_t size);
     static uint32_t Crc(const std::vector<uint8_t>& data) { return Crc(data.data(), data.size()); }

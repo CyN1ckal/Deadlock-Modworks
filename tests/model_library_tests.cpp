@@ -2,6 +2,11 @@
 #include "kv3.hpp"
 #include "error.hpp"
 #include "mod_store.hpp"
+#include "strings.hpp"
+#include <nlohmann/json.hpp>
+#include <sqlite3.h>
+#include <algorithm>
+#include <map>
 #include <gtest/gtest.h>
 #include <chrono>
 #include <fstream>
@@ -22,6 +27,36 @@ protected:
         VpkArchive::Open(path).Write(path, entries);
     }
     static void Put(std::vector<uint8_t>& bytes, size_t at, uint32_t value) { std::memcpy(bytes.data() + at, &value, 4); }
+    static void Execute(const fs::path& database, const std::string& sql) {
+        sqlite3* db = nullptr;
+        ASSERT_EQ(sqlite3_open(Narrow(database.wstring()).c_str(), &db), SQLITE_OK);
+        EXPECT_EQ(sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr), SQLITE_OK) << sqlite3_errmsg(db);
+        sqlite3_close(db);
+    }
+    static int64_t Count(const LocalModStore& store, const std::string& table) {
+        sqlite3* db = nullptr;
+        sqlite3_stmt* statement = nullptr;
+        int64_t count = -1;
+        if (sqlite3_open(Narrow(store.Database().wstring()).c_str(), &db) == SQLITE_OK
+            && sqlite3_prepare_v2(db, ("SELECT count(*) FROM " + table).c_str(), -1, &statement, nullptr) == SQLITE_OK
+            && sqlite3_step(statement) == SQLITE_ROW) count = sqlite3_column_int64(statement, 0);
+        sqlite3_finalize(statement);
+        sqlite3_close(db);
+        return count;
+    }
+    // Every file under `folder` with its contents, skipping the model library and rebuilt copies, or only files named `only`.
+    static std::map<std::string, std::string> Snapshot(const fs::path& folder, const std::string& only = {}) {
+        std::map<std::string, std::string> files;
+        for (const auto& entry : fs::recursive_directory_iterator(folder)) {
+            if (!entry.is_regular_file()) continue;
+            const auto relative = entry.path().lexically_relative(folder);
+            if (!only.empty() ? entry.path().filename() != only
+                : relative.begin()->string() == "cache" || relative.begin()->string() == "store") continue;
+            std::ifstream in(entry.path(), std::ios::binary);
+            files[relative.string()] = std::string(std::istreambuf_iterator<char>(in), {});
+        }
+        return files;
+    }
     static std::vector<uint8_t> Resource(const std::vector<std::string>& references = {}, int variant = 0) {
         KvDocument doc;
         std::vector<KvValue> names;
@@ -102,6 +137,13 @@ TEST_F(LibraryTest, MissingDependenciesAndUnavailableSelectionsBlockExport) {
     EXPECT_THROW(ExportModelLibrary({{source, "models/missing.vmdl_c"}}, {}, output), InvalidData);
     EXPECT_FALSE(fs::exists(output));
 }
+TEST_F(LibraryTest, ConnectedGameSkipsStaleReferencesFoundNowhere) {
+    const auto source = dir / "source.vpk", game = dir / "game.vpk", output = dir / "output.vpk";
+    Archive(source, {{"models/a.vmdl_c", Resource({"models/a.vanmgrph", "materials/a.vmat"})}, {"materials/a.vmat_c", Resource({"textures/stale.vtex"})}});
+    Archive(game, {{"unrelated.txt", std::vector<uint8_t>{1}}});
+    EXPECT_EQ(ExportModelLibrary({{source, "models/a.vmdl_c"}}, game, output), 2u);
+    EXPECT_THROW(ExportModelLibrary({{source, "models/missing.vmdl_c"}}, game, dir / "missing.vpk"), InvalidData);
+}
 TEST_F(LibraryTest, RefusesOverwritesAndCancellationDoesNotPublish) {
     const auto source = dir / "source.vpk", output = dir / "output.vpk";
     Archive(source, {{"models/a.vmdl_c", Resource()}});
@@ -139,10 +181,11 @@ TEST_F(LibraryTest, IncludesRerlDependenciesAndPlainSkeletonReferences) {
 TEST_F(LibraryTest, LocalStoreKeepsImportedModsAfterOriginalIsRemoved) {
     const auto source = dir / "source.vpk";
     Archive(source, {{"models/a.vmdl_c", Resource()}});
+    Archive(dir / "game.vpk", {});
     const LocalModStore store(dir / "store");
     const auto cached = store.Import(source);
     ASSERT_NE(cached, source);
-    ModelLibrary library{{cached}, {{cached, "models/a.vmdl_c"}}, dir / "game.vpk"};
+    ModelLibrary library{{cached}, {{cached, "models/a.vmdl_c"}}, fs::absolute(dir / "game.vpk").lexically_normal()};
     store.Save(library);
     fs::remove(source);
     const LocalModStore restarted(dir / "store");
@@ -164,6 +207,22 @@ TEST_F(LibraryTest, LocalStoreDeduplicatesRepeatImportsAndSeparatesSameNames) {
     const auto archive = VpkArchive::Open(second);
     EXPECT_EQ(archive.Read(archive.Entries().front()), (std::vector<uint8_t>{2}));
 }
+TEST_F(LibraryTest, LocalStoreDeduplicatesIdenticalContentByChecksum) {
+    fs::create_directories(dir / "elsewhere");
+    const auto one = dir / "mod.vpk", copy = dir / "elsewhere" / "renamed.vpk", other = dir / "other.vpk";
+    const std::vector<uint8_t> shared(4096, 7);
+    Archive(one, {{"a.txt", std::vector<uint8_t>{1}}, {"shared.bin", shared}});
+    fs::copy_file(one, copy);
+    Archive(other, {{"b.txt", std::vector<uint8_t>{2}}, {"shared.bin", shared}});
+    const LocalModStore store(dir / "store");
+    const auto first = store.Import(one);
+    // A copy under another name and path is the same stored mod.
+    EXPECT_EQ(store.Import(copy), first);
+    store.Import(other);
+    EXPECT_EQ(Count(store, "snapshots"), 2);
+    // a.txt, b.txt, and one shared.bin for both mods.
+    EXPECT_EQ(Count(store, "blobs"), 3);
+}
 TEST_F(LibraryTest, LocalStoreChangedOriginalCreatesAnotherVersion) {
     const auto source = dir / "source.vpk";
     Archive(source, {{"a.txt", std::vector<uint8_t>{1}}});
@@ -174,35 +233,154 @@ TEST_F(LibraryTest, LocalStoreChangedOriginalCreatesAnotherVersion) {
     EXPECT_NE(first, second);
     VpkArchive::Open(first).Validate(); VpkArchive::Open(second).Validate();
 }
-TEST_F(LibraryTest, LocalStorePublishesOnlyValidatedImportsAndHonorsCancellation) {
+TEST_F(LibraryTest, LocalStoreStoresOnlyValidatedImportsAndHonorsCancellation) {
     const auto source = dir / "source.vpk";
     Archive(source, {{"a.txt", std::vector<uint8_t>{1}}});
     const LocalModStore store(dir / "store");
     CancellationSource cancelled; cancelled.Cancel();
     EXPECT_THROW(store.Import(source, cancelled.Token()), OperationCancelled);
-    EXPECT_FALSE(fs::exists(store.Root() / "mods"));
     std::ifstream in(source, std::ios::binary);
     std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {}); in.close();
     uint32_t tree_size = 0; std::memcpy(&tree_size, bytes.data() + 8, 4);
     bytes[28 + tree_size] ^= 0xff;
     { std::ofstream out(source, std::ios::binary); out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size()); }
     EXPECT_THROW(store.Import(source), InvalidData);
-    EXPECT_TRUE(fs::is_empty(store.Root() / "mods"));
+    EXPECT_EQ(Count(store, "snapshots"), 0);
+    EXPECT_FALSE(fs::exists(store.Root() / "cache"));
 }
-TEST_F(LibraryTest, LocalStoreRestoresBackupAndSavesRemovalWithoutDeletingCopies) {
+TEST_F(LibraryTest, LocalStoreSavesRemovalWithoutDeletingStoredMods) {
     const auto source = dir / "source.vpk";
     Archive(source, {{"a.txt", std::vector<uint8_t>{1}}});
     const LocalModStore store(dir / "store");
     const auto cached = store.Import(source);
-    const ModelLibrary library{{cached}, {}};
-    store.Save(library); store.Save({});
+    store.Save({{cached}, {}});
+    store.Save({});
     EXPECT_TRUE(store.Load().Sources.empty());
-    EXPECT_TRUE(fs::exists(cached));
-    { std::ofstream out(store.Root() / "library.json"); out << "invalid"; }
-    EXPECT_EQ(store.Load(), library);
-    store.Save(library);
-    EXPECT_EQ(store.Load(), library);
-    EXPECT_FALSE(fs::is_empty(store.Root() / "mods"));
+    EXPECT_EQ(Count(store, "snapshots"), 1);
+    fs::remove(source);
+    // Still stored: the original import is recognized and rebuilt without the original file.
+    Archive(dir / "again.vpk", {{"a.txt", std::vector<uint8_t>{1}}});
+    fs::remove_all(store.Root() / "cache");
+    EXPECT_EQ(store.Import(dir / "again.vpk"), cached);
+    VpkArchive::Open(cached).Validate();
+}
+TEST_F(LibraryTest, LocalStoreRebuildsMissingOrRepairedCopiesFromTheDatabase) {
+    const auto source = dir / "source.vpk";
+    Archive(source, {{"models/a.vmdl_c", Resource()}, {"a.txt", std::vector<uint8_t>{1, 2}}});
+    const LocalModStore store(dir / "store");
+    const auto cached = store.Import(source);
+    store.Save({{cached}, {{cached, "models/a.vmdl_c"}}});
+    fs::remove_all(store.Root() / "cache");
+    const auto restored = store.Load();
+    ASSERT_EQ(restored.Sources, std::vector<fs::path>{cached});
+    const auto archive = VpkArchive::Open(cached);
+    archive.Validate();
+    EXPECT_EQ(archive.Entries().size(), 2u);
+    // A copy changed in place, as a repair does, is stored as a new version and the original stays.
+    Archive(cached, {{"models/a.vmdl_c", Resource({}, 1)}, {"a.txt", std::vector<uint8_t>{1, 2}}});
+    const auto repaired = store.Import(cached);
+    EXPECT_NE(repaired, cached);
+    EXPECT_EQ(Count(store, "snapshots"), 2);
+    EXPECT_EQ(store.Import(source), cached);
+    const auto rebuilt = VpkArchive::Open(cached);
+    rebuilt.Validate();
+    EXPECT_EQ(rebuilt.Read(*std::find_if(rebuilt.Entries().begin(), rebuilt.Entries().end(), [](const auto& e) { return e.FullPath == "models/a.vmdl_c"; })), Resource());
+    EXPECT_EQ(Count(store, "blobs"), 3);
+}
+TEST_F(LibraryTest, LocalStoreMergesEarlierFolderStoreWithoutChangingIt) {
+    const auto root = dir / "store";
+    const auto original = dir / "original.vpk";
+    Archive(original, {{"models/a.vmdl_c", Resource()}});
+    fs::create_directories(root / "mods" / "0123");
+    const auto legacy = root / "mods" / "0123" / "original.vpk";
+    fs::copy_file(original, legacy);
+    {
+        std::ofstream out(root / "mods" / "0123" / "origin.json");
+        out << nlohmann::json{{"original", Narrow(original.wstring())}, {"size", fs::file_size(original)},
+            {"stamp", fs::last_write_time(original).time_since_epoch().count()}, {"chunks", nlohmann::json::array()}}.dump();
+    }
+    Archive(dir / "game.vpk", {});
+    ModelLibrary{{legacy}, {{legacy, "models/a.vmdl_c"}}, dir / "game.vpk"}.Save(root / "library.json");
+    const auto before = Snapshot(root);
+    const LocalModStore store(root);
+    std::string notice;
+    const auto library = store.Load({}, {}, &notice);
+    EXPECT_EQ(notice, "");
+    ASSERT_EQ(library.Sources.size(), 1u);
+    EXPECT_EQ(library.Selected, (std::vector<LibraryModel>{{library.Sources[0], "models/a.vmdl_c"}}));
+    EXPECT_EQ(library.GameArchive, fs::absolute(dir / "game.vpk").lexically_normal());
+    EXPECT_EQ(Snapshot(root), before);
+    EXPECT_EQ(store.LegacyPaths(library.Sources[0]).size(), 1u);
+    // The original is recognized from its import record.
+    EXPECT_EQ(store.Import(original), library.Sources[0]);
+    // Merged once: a source removed afterwards is not added back.
+    store.Save({});
+    EXPECT_TRUE(store.Load().Sources.empty());
+    EXPECT_EQ(Count(store, "snapshots"), 1);
+}
+TEST_F(LibraryTest, LocalStoreExportsAndMergesSharedLibraries) {
+    const auto one = dir / "one.vpk", two = dir / "two.vpk";
+    Archive(one, {{"models/a.vmdl_c", Resource()}});
+    Archive(two, {{"models/b.vmdl_c", Resource({}, 1)}});
+    const LocalModStore mine(dir / "mine"), theirs(dir / "theirs");
+    const auto a = mine.Import(one);
+    mine.Save({{a}, {{a, "models/a.vmdl_c"}}});
+    theirs.SaveThumbnail("thumb", {1, 2, 3});
+    const auto b = theirs.Import(two);
+    const auto shared_a = theirs.Import(one);
+    theirs.Save({{b, shared_a}, {{b, "models/b.vmdl_c"}, {shared_a, "models/a.vmdl_c"}}});
+    const auto file = dir / "shared library.db";
+    theirs.Export(file);
+    const auto exported = Snapshot(dir, "shared library.db");
+    fs::remove(two); fs::remove(one);
+    mine.Merge(file);
+    mine.Merge(file);
+    EXPECT_EQ(Snapshot(dir, "shared library.db"), exported);
+    const auto merged = mine.Load();
+    ASSERT_EQ(merged.Sources.size(), 2u);
+    EXPECT_EQ(merged.Sources[0], a);
+    EXPECT_EQ(merged.Selected.size(), 2u);
+    EXPECT_EQ(Count(mine, "snapshots"), 2);
+    EXPECT_EQ(mine.Thumbnail("thumb"), (std::vector<uint8_t>{1, 2, 3}));
+    VpkArchive::Open(merged.Sources[1]).Validate();
+    EXPECT_THROW(mine.Merge(dir / "missing.db"), std::exception);
+}
+TEST_F(LibraryTest, LocalStoreMergesPreviousSingleFileLibraryOnce) {
+    const auto one = dir / "one.vpk";
+    Archive(one, {{"models/a.vmdl_c", Resource()}});
+    const LocalModStore previous(dir / "previous");
+    const auto a = previous.Import(one);
+    previous.Save({{a}, {{a, "models/a.vmdl_c"}}});
+    previous.SaveThumbnail("thumb", {4, 5});
+    // The previous release kept the whole library in library.db beside the store folder.
+    const auto root = dir / "store";
+    fs::create_directories(root);
+    previous.Export(root / "library.db");
+    const auto before = Snapshot(root, "library.db");
+    fs::remove(one);
+    const LocalModStore store(root);
+    std::string notice;
+    const auto library = store.Load({}, {}, &notice);
+    EXPECT_EQ(notice, "");
+    ASSERT_EQ(library.Sources.size(), 1u);
+    EXPECT_EQ(library.Selected, (std::vector<LibraryModel>{{library.Sources[0], "models/a.vmdl_c"}}));
+    EXPECT_EQ(store.Thumbnail("thumb"), (std::vector<uint8_t>{4, 5}));
+    EXPECT_EQ(Snapshot(root, "library.db"), before);
+    VpkArchive::Open(library.Sources[0]).Validate();
+    // Merged once: a source removed afterwards is not added back.
+    store.Save({});
+    EXPECT_TRUE(store.Load().Sources.empty());
+}
+TEST_F(LibraryTest, LocalStoreRejectsSharedLibraryWithMismatchedChecksums) {
+    const auto one = dir / "one.vpk";
+    Archive(one, {{"a.txt", std::vector<uint8_t>{1}}});
+    const LocalModStore mine(dir / "mine"), theirs(dir / "theirs");
+    theirs.Import(one);
+    const auto file = dir / "shared.db";
+    theirs.Export(file);
+    Execute(file, "UPDATE archive_entries SET path = 'b.txt'");
+    EXPECT_THROW(mine.Merge(file), InvalidData);
+    EXPECT_EQ(Count(mine, "snapshots"), 0);
 }
 TEST_F(LibraryTest, LocalStoreFlattensChunkedVpkIntoSelfContainedCopy) {
     const auto source = dir / "chunked_dir.vpk", chunk = dir / "chunked_000.vpk";

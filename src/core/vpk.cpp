@@ -334,6 +334,7 @@ struct PlannedFile {
     std::string Name;
     const VpkEntry* Source = nullptr;
     const std::vector<uint8_t>* Replacement = nullptr;
+    const VpkNewFile* Generated = nullptr;
     uint32_t Length = 0;
     uint32_t Offset = 0;
 };
@@ -358,6 +359,95 @@ std::wstring StripDirSuffix(std::wstring name) {
         name.resize(name.size() - 4);
     }
     return name;
+}
+
+using Sink = std::function<void(const uint8_t*, size_t)>;
+
+// Lays out sorted files as one embedded archive. `copy` streams files that come from an existing archive.
+void WritePlanned(const std::filesystem::path& destination, std::vector<PlannedFile>& planned,
+    const std::function<void(const VpkEntry&, const Sink&)>& copy, CancellationToken cancellation) {
+    std::stable_sort(planned.begin(), planned.end(), [](const PlannedFile& left, const PlannedFile& right) {
+        if (const int extension = CompareOrdinal(left.Extension, right.Extension)) {
+            return extension < 0;
+        }
+        if (const int directory = CompareOrdinal(left.Directory, right.Directory)) {
+            return directory < 0;
+        }
+        return CompareOrdinal(left.Name, right.Name) < 0;
+    });
+
+    uint32_t offset = 0;
+    for (PlannedFile& file : planned) {
+        file.Offset = offset;
+        offset = CheckedAdd(offset, file.Length);
+    }
+
+    std::vector<uint8_t> tree;
+    for (size_t index = 0; index < planned.size();) {
+        const std::string& extension = planned[index].Extension;
+        WriteString(tree, extension);
+        while (index < planned.size() && planned[index].Extension == extension) {
+            const std::string& directory = planned[index].Directory;
+            WriteString(tree, directory.empty() ? " " : directory);
+            while (index < planned.size() && planned[index].Extension == extension && planned[index].Directory == directory) {
+                const PlannedFile& file = planned[index];
+                WriteString(tree, file.Name);
+                uint8_t meta[18] = {};
+                const uint32_t crc = file.Replacement != nullptr ? VpkArchive::Crc(*file.Replacement)
+                    : file.Generated != nullptr ? file.Generated->Crc32 : file.Source->Crc32;
+                WriteU32(meta, crc);
+                WriteU16(meta + 6, VpkArchive::EmbeddedArchive);
+                WriteU32(meta + 8, file.Offset);
+                WriteU32(meta + 12, file.Length);
+                WriteU16(meta + 16, 0xFFFF);
+                tree.insert(tree.end(), meta, meta + 18);
+                ++index;
+            }
+            tree.push_back(0);
+        }
+        tree.push_back(0);
+    }
+    tree.push_back(0);
+
+    uint8_t header[28] = {};
+    WriteU32(header, kSignature);
+    WriteU32(header + 4, 2u);
+    WriteU32(header + 8, static_cast<uint32_t>(tree.size()));
+    WriteU32(header + 12, offset);
+    WriteU32(header + 20, 48u);
+
+    FileHandle output = OpenFile(destination, GENERIC_WRITE, 0, CREATE_ALWAYS);
+    Md5 whole;
+    auto emit = [&](const uint8_t* data, size_t size) {
+        if (size == 0) {
+            return;
+        }
+        WriteExact(output.get(), data, size);
+        whole.Append(data, size);
+    };
+    emit(header, 28);
+    emit(tree.data(), tree.size());
+    for (const PlannedFile& file : planned) {
+        cancellation.ThrowIfCancelled();
+        if (file.Replacement != nullptr) {
+            emit(file.Replacement->data(), file.Replacement->size());
+        } else if (file.Generated != nullptr) {
+            uint64_t written = 0;
+            file.Generated->Write([&](const uint8_t* data, size_t size) { written += size; emit(data, size); });
+            if (written != file.Length) {
+                throw InvalidData(file.Path + " did not produce its recorded length.");
+            }
+        } else {
+            copy(*file.Source, [&](const uint8_t* data, size_t size) { emit(data, size); });
+        }
+    }
+
+    const std::array<uint8_t, 16> tree_md5 = Md5Bytes(tree.data(), tree.size());
+    const std::array<uint8_t, 16> empty_md5 = Md5Bytes(nullptr, 0);
+    emit(tree_md5.data(), tree_md5.size());
+    emit(empty_md5.data(), empty_md5.size());
+    const std::array<uint8_t, 16> file_md5 = whole.Finish();
+    WriteExact(output.get(), file_md5.data(), file_md5.size());
 }
 
 }  // namespace
@@ -533,6 +623,24 @@ void VpkArchive::CopyTo(const VpkEntry& entry, const std::function<void(const ui
     }
 }
 
+void VpkArchive::Create(const std::filesystem::path& destination, const std::vector<VpkNewFile>& files,
+    CancellationToken cancellation) {
+    std::set<std::string, IgnoreCaseLess> seen;
+    std::vector<PlannedFile> planned;
+    for (const VpkNewFile& file : files) {
+        const std::string path = Normalize(file.Path);
+        if (!seen.insert(path).second) {
+            throw InvalidData("VPK files contain duplicate paths.");
+        }
+        if (file.Length > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+            throw InvalidData("VPK entry is too large.");
+        }
+        const SplitPath parts = Split(path);
+        planned.push_back(PlannedFile{path, parts.Extension, parts.Directory, parts.Name, nullptr, nullptr, &file, file.Length, 0});
+    }
+    WritePlanned(destination, planned, [](const VpkEntry&, const Sink&) {}, cancellation);
+}
+
 std::vector<uint8_t> VpkArchive::Read(const VpkEntry& entry, CancellationToken cancellation) const {
     std::vector<uint8_t> output;
     output.reserve(static_cast<size_t>(entry.Length) + entry.PreloadBytes);
@@ -575,7 +683,7 @@ void VpkArchive::Write(const std::filesystem::path& destination, const std::vect
                 throw InvalidData("VPK entry is too large.");
             }
             planned.push_back(PlannedFile{entry.FullPath, parts.Extension, parts.Directory, parts.Name,
-                nullptr, &(*change->Data), static_cast<uint32_t>(change->Data->size()), 0});
+                nullptr, &(*change->Data), nullptr, static_cast<uint32_t>(change->Data->size()), 0});
         } else {
             const SplitPath parts = Split(entry.FullPath);
             const uint32_t length = CheckedAdd(entry.Length, entry.PreloadBytes);
@@ -583,7 +691,7 @@ void VpkArchive::Write(const std::filesystem::path& destination, const std::vect
                 throw InvalidData("VPK entry is too large.");
             }
             planned.push_back(PlannedFile{entry.FullPath, parts.Extension, parts.Directory, parts.Name,
-                &entry, nullptr, length, 0});
+                &entry, nullptr, nullptr, length, 0});
         }
     }
     for (const VpkChange& change : changes) {
@@ -596,84 +704,10 @@ void VpkArchive::Write(const std::filesystem::path& destination, const std::vect
             throw InvalidData("VPK entry is too large.");
         }
         planned.push_back(PlannedFile{path, parts.Extension, parts.Directory, parts.Name,
-            nullptr, &(*change.Data), static_cast<uint32_t>(change.Data->size()), 0});
+            nullptr, &(*change.Data), nullptr, static_cast<uint32_t>(change.Data->size()), 0});
     }
 
-    std::stable_sort(planned.begin(), planned.end(), [](const PlannedFile& left, const PlannedFile& right) {
-        if (const int extension = CompareOrdinal(left.Extension, right.Extension)) {
-            return extension < 0;
-        }
-        if (const int directory = CompareOrdinal(left.Directory, right.Directory)) {
-            return directory < 0;
-        }
-        return CompareOrdinal(left.Name, right.Name) < 0;
-    });
-
-    uint32_t offset = 0;
-    for (PlannedFile& file : planned) {
-        file.Offset = offset;
-        offset = CheckedAdd(offset, file.Length);
-    }
-
-    std::vector<uint8_t> tree;
-    for (size_t index = 0; index < planned.size();) {
-        const std::string& extension = planned[index].Extension;
-        WriteString(tree, extension);
-        while (index < planned.size() && planned[index].Extension == extension) {
-            const std::string& directory = planned[index].Directory;
-            WriteString(tree, directory.empty() ? " " : directory);
-            while (index < planned.size() && planned[index].Extension == extension && planned[index].Directory == directory) {
-                const PlannedFile& file = planned[index];
-                WriteString(tree, file.Name);
-                uint8_t meta[18] = {};
-                const uint32_t crc = file.Replacement == nullptr ? file.Source->Crc32 : Crc(*file.Replacement);
-                WriteU32(meta, crc);
-                WriteU16(meta + 6, EmbeddedArchive);
-                WriteU32(meta + 8, file.Offset);
-                WriteU32(meta + 12, file.Length);
-                WriteU16(meta + 16, 0xFFFF);
-                tree.insert(tree.end(), meta, meta + 18);
-                ++index;
-            }
-            tree.push_back(0);
-        }
-        tree.push_back(0);
-    }
-    tree.push_back(0);
-
-    uint8_t header[28] = {};
-    WriteU32(header, kSignature);
-    WriteU32(header + 4, 2u);
-    WriteU32(header + 8, static_cast<uint32_t>(tree.size()));
-    WriteU32(header + 12, offset);
-    WriteU32(header + 20, 48u);
-
-    FileHandle output = OpenFile(destination, GENERIC_WRITE, 0, CREATE_ALWAYS);
-    Md5 whole;
-    auto emit = [&](const uint8_t* data, size_t size) {
-        if (size == 0) {
-            return;
-        }
-        WriteExact(output.get(), data, size);
-        whole.Append(data, size);
-    };
-    emit(header, 28);
-    emit(tree.data(), tree.size());
-    for (const PlannedFile& file : planned) {
-        cancellation.ThrowIfCancelled();
-        if (file.Replacement != nullptr) {
-            emit(file.Replacement->data(), file.Replacement->size());
-        } else {
-            CopyTo(*file.Source, [&](const uint8_t* data, size_t size) { emit(data, size); }, cancellation);
-        }
-    }
-
-    const std::array<uint8_t, 16> tree_md5 = Md5Bytes(tree.data(), tree.size());
-    const std::array<uint8_t, 16> empty_md5 = Md5Bytes(nullptr, 0);
-    emit(tree_md5.data(), tree_md5.size());
-    emit(empty_md5.data(), empty_md5.size());
-    const std::array<uint8_t, 16> file_md5 = whole.Finish();
-    WriteExact(output.get(), file_md5.data(), file_md5.size());
+    WritePlanned(destination, planned, [&](const VpkEntry& entry, const Sink& sink) { CopyTo(entry, sink, cancellation); }, cancellation);
 }
 
 }  // namespace skeleton_repair

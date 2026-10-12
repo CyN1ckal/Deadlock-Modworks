@@ -6,6 +6,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <array>
 #include <functional>
 #include <optional>
 #include <string>
@@ -27,7 +28,17 @@ public:
     // Reads a compiled resource as a given version sees it: the mod archive first for Mod and Repaired, the game for Game.
     using VersionReader = std::function<std::optional<std::vector<uint8_t>>(ModelVersion version, const std::string& path)>;
 
-    void Load(ModelVersions versions, VersionReader read = {}, std::vector<std::string> clips = {});
+    // The versions with their scenes and materials decoded, ready to upload.
+    struct Prepared {
+        ModelVersions Versions;
+        std::array<std::optional<PreparedModel>, 3> Models;
+    };
+    // Decodes every available version. Safe to call from any thread if `read` is. `mod_model` is the mod version
+    // already prepared with the same reader, whose materials the mod and repaired versions can share.
+    static Prepared Prepare(ModelVersions versions, const VersionReader& read, const PreparedModel* mod_model = nullptr);
+
+    // `read` also loads clips on a worker thread, so it must be safe to call from one.
+    void Load(Prepared prepared, VersionReader read = {}, std::vector<std::string> clips = {});
     void ShowError(std::string title, std::string message);
     void PlayClip(const std::string& path);
     bool Loaded() const { return loaded_; }
@@ -45,6 +56,7 @@ private:
     void ShowSide(ModelViewport& view, ModelVersion version, std::optional<ModelVersion>& shown);
 
     ModelVersions versions_;
+    std::array<std::optional<PreparedModel>, 3> prepared_;
     VersionReader read_;
     std::optional<ModelVersion> left_shown_;
     std::optional<ModelVersion> right_shown_;

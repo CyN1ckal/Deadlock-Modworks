@@ -130,8 +130,12 @@ size_t ExportModelLibrary(const std::vector<LibraryModel>& models, const std::fi
             if (!visited.insert(resource).second) continue;
             const auto mod_entry = index.find(resource);
             const auto game_entry = game_index.find(resource);
-            if (mod_entry == index.end() && game_entry == game_index.end())
+            if (mod_entry == index.end() && game_entry == game_index.end()) {
+                // With the game connected, a reference found nowhere is stale (e.g. a removed AG1 graph);
+                // the engine ignores it, and there is nothing to pack.
+                if (game) continue;
                 throw InvalidData("Missing dependency " + resource + " required by " + root + " in " + source_name + ". Connect the installed game or use a complete source VPK.");
+            }
             const auto bytes = mod_entry != index.end() ? source.Read(*mod_entry->second, cancellation) : game->Read(*game_entry->second, cancellation);
             if (mod_entry != index.end()) {
                 const auto found = output.find(resource);

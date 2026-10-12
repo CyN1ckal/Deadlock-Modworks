@@ -5,6 +5,7 @@
 #include "updater.hpp"
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -17,6 +18,14 @@ public:
     void SetSources(std::string game, std::vector<std::string> mods);
     bool Busy() const { return busy_; }
     void Cancel() { cancellation_.Cancel(); }
+    bool CanAnalyze() const { return !busy_ && !game_.empty() && !mods_.empty(); }
+    bool CanRepair() const { return !busy_ && RepairableCount() > 0; }
+    // Archives the last analysis found repairable.
+    size_t RepairableCount() const;
+    void Analyze() { if (CanAnalyze()) Start(false); }
+    // before_repair releases the browser's read locks before replacement starts.
+    void Repair(const std::function<void()>& before_repair) { if (CanRepair()) { before_repair(); Start(true); } }
+    const std::string& Status() const { return status_; }
     // Returns true after a write operation finishes, so the browser can reopen its archive.
     bool Poll();
     // before_repair releases the browser's read locks before replacement starts.
@@ -24,6 +33,7 @@ public:
 
 private:
     void Start(bool repair);
+    void SaveReport(void* owner);
     std::string game_;
     std::vector<std::string> mods_;
     std::vector<ArchiveReport> reports_;
@@ -39,5 +49,8 @@ private:
     std::string pending_status_;
     bool busy_ = false;
     bool repairing_ = false;
+    // Bit per ModelOutcome hidden from the results table.
+    unsigned hidden_outcomes_ = 0;
+    char filter_[128] = {};
 };
 }

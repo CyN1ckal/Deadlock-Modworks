@@ -59,7 +59,7 @@ cmake --build --preset clion-debug
 
 ### Connect the installed game
 
-The app tries to find Deadlock in your Steam libraries automatically. If it is not connected, click **Choose game archive...** and select:
+The app tries to find Deadlock in your Steam libraries automatically. The connection shows under **Game** in the explorer and at the left of the status bar. If it is not connected, choose **File > Choose game archive...** (**Ctrl+G**) and select:
 
 ```text
 <your Steam library>/steamapps/common/Deadlock/game/citadel/pak01_dir.vpk
@@ -69,28 +69,45 @@ The installed game provides the reference models, textures, and animation resour
 
 ### Add your mods
 
-1. Click **Add mods...** in the sidebar or gallery.
+1. Click **Add** in the explorer, or choose **File > Add mods...** (**Ctrl+O**).
 2. Select one or more mod `.vpk` files. Use **Ctrl-click** for individual files or **Shift-click** for a range, then click **Open**.
-3. Browse the **Mod library** gallery. Search by model or source, filter to a source archive, and choose **Inspect** on a card to open its model.
+3. Browse the **Mod library** tab. Search by model or source (**Ctrl+F**), click a source in the explorer to show only its skins, and double-click a skin to inspect its model. **Grid** and **List** switch between thumbnails and a sortable table; **Ctrl + mouse wheel** resizes the thumbnails.
 
-You can also drop multiple VPKs onto the window or executable. Existing library entries are not added twice. Adding a batch keeps you in the gallery. Thumbnails load as cards become visible and stay in a bounded cache. Use **Manage sources** in the sidebar to remove archives from the library; this does not delete the files.
+You can also drop multiple VPKs onto the window or executable. Existing library entries are not added twice. Adding a batch keeps you in the gallery. Thumbnails load as cards become visible and stay in a bounded cache. Right-click a source in the explorer and choose **Remove from library** to remove it; this does not delete the files.
+
+Most items have a right-click menu: skins (inspect, pack selection, copy paths, reveal in Explorer), sources, history versions and copies, repair results, meshes and the 3D viewports. Press **F1** for the keyboard shortcuts.
 
 A standalone compiled `.vmdl_c` file can be opened for viewing. Version comparison requires a model from a mod VPK.
 
 ### View a model
 
-Choose **Inspect** on a gallery card to open the **Model inspector**. Its **Preview** tab shows textures, mesh visibility, levels of detail (LOD), and the skeleton. Choose an animation clip and click **Play** when animation resources are available.
+Double-click a skin, or right-click it and choose **Inspect**, to open the **Model inspector**. Its **Preview** tab shows textures, levels of detail (LOD), and the skeleton, with model statistics and per-mesh visibility in the side pane. Choose an animation clip and click **Play** when animation resources are available.
 
 ### Build a combined model VPK
 
-1. Use **Add mods...** to add your reference mod VPKs to the library.
-2. Check **Include in pack** on the gallery cards you want. Selected cards are highlighted. The **In pack** filter shows only your selections. Missing materials fall back to clay; hover **No preview** for an error. Use **Refresh** after changing source files.
+1. Use **Add mods...** to add your reference mod VPKs to the library, or **Add folder...** to add every mod VPK in a folder such as `addons`. Chunk files and `pak01_dir.vpk` are skipped.
+2. Tick the checkbox on the skins you want, or select one and press **Space**. Selected cards are highlighted. Right-click a skin to include every shown skin or a whole source. The **In pack** filter shows only your selections. Missing materials fall back to clay; hover **No preview** for an error. Use **Refresh** (**F5**) after changing source files.
 3. Connect the installed game archive to resolve dependencies supplied by Deadlock.
-4. Open **VPK builder** in the sidebar to review your selected skins. Click **Build VPK...** and choose a new `.vpk` filename. Export runs in the background and can be cancelled. The output is reopened and validated before it is published. Existing output files and source archives are never overwritten.
+4. Open the **VPK builder** tab to review your selected skins. Click **Build VPK...** (**Ctrl+B**) and choose a new `.vpk` filename. Export runs in the background and can be cancelled. The output is reopened and validated before it is published. Existing output files and source archives are never overwritten.
 
 Export follows external resource references and supported KV3 resource/skeleton references recursively. It includes selected models and reachable overrides from each model's own source archive; base-game dependencies stay in the game. Identical files at the same internal path are deduplicated. Different contents at the same path block export and identify both sources: deselect one of the conflicting models. A missing dependency also blocks export. Dependencies supplied only by another reference VPK are not resolved automatically.
 
-Use **Save library...** to save your source paths and checked models to a JSON library file, and **Open library...** to restore them later. Keep the original source VPKs and any chunk files at their saved locations. **Refresh** rescans changed archives; missing checked models are shown so you can remove them explicitly. Sources are read again when exporting.
+### Your model library
+
+Everything the manager keeps is saved in the model library, `%LOCALAPPDATA%\DeadlockModManager\store`: every imported mod, your collection, pack selections, the connected game, gallery thumbnails, and the repair history of each model. The catalog is `catalog.sqlite`; file contents are kept under `blobs`. Imported mods no longer depend on their original VPKs or chunk files, which can be moved or deleted.
+
+- Each file inside a mod is stored once per SHA-256 checksum. Importing the same mod again, even renamed or from another folder, reuses it, and files that several mods share are stored once.
+- A changed original, or a repaired mod, is stored as a new version. Earlier versions stay in the library.
+- **Remove from library** only takes a mod out of your collection; it stays stored.
+- Mods you open are rebuilt from the library into the `cache` folder next to it. That folder can be deleted at any time and is rebuilt when needed.
+
+Use **Share library...** (in the **File** menu or under **Library** in the explorer) to save a copy of your whole library as one `.db` file. **Add shared library...** adds a shared `.db` library's mods, pack selections and thumbnails to yours; nothing already in your library is replaced. Each shared mod is checked against its checksums first. A game location from another computer is used only if it exists on yours. **Add shared library...** also opens JSON library lists from earlier releases and imports the VPKs they name.
+
+**Version history** lists every model and pack in the library, the versions of each model and how repairs changed them. Click a version to make it **A**; the version clicked before it becomes **B**. From the toolbar or a version's right-click menu you can view or compare versions, compare a version with the game, repair a pack, or assemble one model into a new pack.
+
+On first start, the manager adds the mods, collection and thumbnails from earlier releases (`library.db`, `library.json`, `mods`, `thumbnails`) to the model library. Those files are only read and are left in place.
+
+**Refresh** rescans changed archives; missing checked models are shown so you can remove them explicitly.
 
 Only reachable resource overrides are included. Unreferenced scripts, sounds, addon metadata, or other extras bundled by a mod author are not automatically copied. Test the exported pack in Deadlock; packaging does not repair models or guarantee in-game compatibility.
 
@@ -99,7 +116,8 @@ Only reachable resource overrides are included. Unreferenced scripts, sounds, ad
 | Left mouse drag | Orbit the camera |
 | Mouse wheel | Zoom |
 | Middle or right mouse drag | Pan |
-| **Frame** | Fit the model in view |
+| **Frame** or **F** | Fit the model in view |
+| Right-click | Display options: bones, grid, coloring, LOD |
 
 ### Compare versions
 
@@ -112,9 +130,9 @@ Open **Compare versions** in the **Model inspector** and choose the versions sho
 Close Deadlock and wait for Steam updates to finish before repairing.
 
 1. Add the VPKs you want to check to the library.
-2. Open **Skin repairs** in the sidebar and click **Analyze mods**. This checks every VPK in the library without changing it.
-3. Read the results. Click **Repair supported mods** to repair the archives eligible for automatic fixes.
-4. Use **Save JSON report...** to export the results. Test repaired mods in Deadlock.
+2. Open the **Skin repairs** tab and click **Analyze**. This checks every VPK in the library without changing it.
+3. Read the results table. Click an outcome count in the toolbar to hide or show those results, and hover a row for its full detail and warnings. Click **Repair *N* supported** to repair the archives eligible for automatic fixes.
+4. Use **Save report...** to export the results as JSON. Test repaired mods in Deadlock.
 
 Repair rechecks the current files before writing, replaces each supported VPK, and saves an original `.bak-...` backup beside it. Archives needing review are left untouched. The selected archive reloads after repair.
 

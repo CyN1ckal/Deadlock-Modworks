@@ -21,8 +21,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - nlohmann/json — https://github.com/nlohmann/json — MIT License. Version 3.11.3.
 - meshoptimizer — https://github.com/zeux/meshoptimizer — MIT License. Version 0.24.
 - Dear ImGui — https://github.com/ocornut/imgui — MIT License. Version 1.91.9b-docking.
+- SQLite — https://www.sqlite.org — Public domain. Version 3.54.0.
 
-The portable package copies each of those license files into `licenses/`.
+The portable package copies each of those license files into `licenses/`. SQLite is in the public domain and has no license file.
 
 ## Model tools
 

@@ -1,5 +1,6 @@
 #include "mod_store.hpp"
-#include "archive_transaction.hpp"
+#include "content_hash.hpp"
+#include "content_store.hpp"
 #include "strings.hpp"
 #include "error.hpp"
 #define WIN32_LEAN_AND_MEAN
@@ -7,40 +8,601 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <bcrypt.h>
-#include <nlohmann/json.hpp>
+#include <sqlite3.h>
+#include <zstd.h>
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <fstream>
-#include <set>
-#include <sstream>
-#include <iomanip>
+#include <map>
+#include <cstdio>
+#include <limits>
 
 namespace skeleton_repair {
 namespace {
 namespace fs = std::filesystem;
-std::string Id() {
-    std::array<unsigned char, 16> bytes{};
-    if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
-        throw IoError("Could not generate a local mod identifier.");
+using Hash = std::array<uint8_t, 32>;
+// "DMM1": identifies a shared library file, so arbitrary SQLite files are not merged.
+constexpr int kApplicationId = 0x444D4D31;
+constexpr int kSharedSchemaVersion = 1;
+
+std::string Hex(const uint8_t* data, size_t size) {
     constexpr char digits[] = "0123456789abcdef";
     std::string result;
-    for (const auto byte : bytes) { result += digits[byte >> 4]; result += digits[byte & 15]; }
+    for (size_t i = 0; i < size; ++i) { result += digits[data[i] >> 4]; result += digits[data[i] & 15]; }
     return result;
 }
-bool SamePath(const fs::path& a, const fs::path& b) {
-    return EqualsIgnoreCase(Narrow(fs::absolute(a).lexically_normal().wstring()), Narrow(fs::absolute(b).lexically_normal().wstring()));
+bool IsContentId(std::string_view text) {
+    return text.size() == 64 && std::all_of(text.begin(), text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
-bool Owned(const fs::path& path, const fs::path& folder) {
-    auto root = Narrow(fs::weakly_canonical(folder).wstring());
-    if (!root.ends_with("\\")) root += "\\";
-    const auto full = Narrow(fs::weakly_canonical(path).wstring());
-    return full.size() > root.size() && EqualsIgnoreCase(full.substr(0, root.size()), root);
+std::string RandomId() {
+    std::array<unsigned char, 16> bytes{};
+    if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
+        throw IoError("Could not generate a temporary file name.");
+    return Hex(bytes.data(), bytes.size());
 }
-void Publish(const fs::path& temp, const fs::path& destination) {
-    if (!MoveFileExW(temp.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-        throw IoError("Could not save the local mod library. Windows error " + std::to_string(GetLastError()));
+std::string Key(const fs::path& path) {
+    std::wstring name = fs::absolute(path).lexically_normal().wstring();
+    CharLowerBuffW(name.data(), static_cast<DWORD>(name.size()));
+    return Narrow(name);
 }
+bool SamePath(const fs::path& a, const fs::path& b) { return Key(a) == Key(b); }
+int64_t Stamp(const fs::path& path) { return fs::last_write_time(path).time_since_epoch().count(); }
+int64_t Now() { return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+
+class Statement {
+public:
+    Statement(sqlite3* db, const char* sql) : db_(db) {
+        if (sqlite3_prepare_v2(db, sql, -1, &statement_, nullptr) != SQLITE_OK) Fail();
+    }
+    ~Statement() { sqlite3_finalize(statement_); }
+    Statement(const Statement&) = delete;
+    Statement& operator=(const Statement&) = delete;
+    Statement& Bind(int index, int64_t value) { Check(sqlite3_bind_int64(statement_, index, value)); return *this; }
+    Statement& Bind(int index, const std::string& value) {
+        Check(sqlite3_bind_text(statement_, index, value.data(), static_cast<int>(value.size()), SQLITE_TRANSIENT)); return *this;
+    }
+    Statement& Bind(int index, const uint8_t* data, size_t size) {
+        Check(sqlite3_bind_blob64(statement_, index, size ? data : reinterpret_cast<const uint8_t*>(""), size, SQLITE_TRANSIENT)); return *this;
+    }
+    Statement& Bind(int index, const Hash& value) { return Bind(index, value.data(), value.size()); }
+    Statement& Bind(int index, const std::vector<uint8_t>& value) { return Bind(index, value.data(), value.size()); }
+    // True while a row is available.
+    bool Step() {
+        const int result = sqlite3_step(statement_);
+        if (result == SQLITE_ROW) return true;
+        if (result == SQLITE_DONE) return false;
+        Fail();
+    }
+    void Run() { Step(); Reset(); }
+    void Reset() { sqlite3_reset(statement_); sqlite3_clear_bindings(statement_); }
+    int64_t Int(int column) const { return sqlite3_column_int64(statement_, column); }
+    std::string Text(int column) const {
+        const auto* text = reinterpret_cast<const char*>(sqlite3_column_text(statement_, column));
+        return text ? std::string(text, static_cast<size_t>(sqlite3_column_bytes(statement_, column))) : std::string();
+    }
+    std::vector<uint8_t> Blob(int column) const {
+        const auto* data = static_cast<const uint8_t*>(sqlite3_column_blob(statement_, column));
+        return data ? std::vector<uint8_t>(data, data + sqlite3_column_bytes(statement_, column)) : std::vector<uint8_t>();
+    }
+    Hash HashColumn(int column) const {
+        const auto bytes = Blob(column);
+        if (bytes.size() != 32) throw InvalidData("The library database contains an invalid checksum.");
+        Hash result{}; std::copy(bytes.begin(), bytes.end(), result.begin());
+        return result;
+    }
+private:
+    void Check(int result) { if (result != SQLITE_OK) Fail(); }
+    [[noreturn]] void Fail() {
+        if (sqlite3_errcode(db_) == SQLITE_INTERRUPT) throw OperationCancelled();
+        throw IoError(std::string("Library database error: ") + sqlite3_errmsg(db_));
+    }
+    sqlite3* db_;
+    sqlite3_stmt* statement_ = nullptr;
+};
+
+class SqliteDb {
+public:
+    SqliteDb(const fs::path& path, int flags) {
+        const auto name = Narrow(path.wstring());
+        if (sqlite3_open_v2(name.c_str(), &db_, flags, nullptr) != SQLITE_OK) {
+            const std::string message = db_ ? sqlite3_errmsg(db_) : "out of memory";
+            sqlite3_close(db_);
+            throw IoError("Could not open the library database " + name + ": " + message);
+        }
+        sqlite3_busy_timeout(db_, 60000);
+    }
+    ~SqliteDb() {
+        sqlite3_progress_handler(db_, 0, nullptr, nullptr);
+        sqlite3_close(db_);
+    }
+    SqliteDb(const SqliteDb&) = delete;
+    SqliteDb& operator=(const SqliteDb&) = delete;
+    sqlite3* Get() const { return db_; }
+    void Exec(const char* sql) {
+        char* error = nullptr;
+        if (sqlite3_exec(db_, sql, nullptr, nullptr, &error) != SQLITE_OK) {
+            const std::string message = error ? error : sqlite3_errmsg(db_);
+            const bool cancelled = sqlite3_errcode(db_) == SQLITE_INTERRUPT;
+            sqlite3_free(error);
+            if (cancelled) throw OperationCancelled();
+            throw IoError("Library database error: " + message);
+        }
+    }
+    int64_t Value(const char* sql) {
+        Statement statement(db_, sql);
+        return statement.Step() ? statement.Int(0) : 0;
+    }
+    // Long statements stop with OperationCancelled once the token is cancelled.
+    void Cancel(CancellationToken token) {
+        token_ = std::move(token);
+        sqlite3_progress_handler(db_, 10000, [](void* self) { return static_cast<SqliteDb*>(self)->token_.IsCancelled() ? 1 : 0; }, this);
+    }
+private:
+    sqlite3* db_ = nullptr;
+    CancellationToken token_;
+};
+
+// Rolls back unless committed.
+class Transaction {
+public:
+    explicit Transaction(SqliteDb& db) : db_(db) { db_.Exec("BEGIN IMMEDIATE"); }
+    ~Transaction() { if (open_) sqlite3_exec(db_.Get(), "ROLLBACK", nullptr, nullptr, nullptr); }
+    void Commit() { db_.Exec("COMMIT"); open_ = false; }
+private:
+    SqliteDb& db_;
+    bool open_ = true;
+};
+
+// The gallery's own tables, next to the ContentStore tables in catalog.sqlite. Mods are ContentStore snapshots.
+class GalleryDb : public SqliteDb {
+public:
+    explicit GalleryDb(const fs::path& catalog) : SqliteDb(Prepare(catalog), SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE) {
+        Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+        if (Value("SELECT count(*) FROM sqlite_schema WHERE name = 'gallery_settings'") != 0) return;
+        Transaction transaction(*this);
+        Exec(R"sql(
+CREATE TABLE IF NOT EXISTS gallery_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+-- The file name each mod was first added under, used for its rebuilt copy.
+CREATE TABLE IF NOT EXISTS gallery_names(snapshot_id TEXT PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS gallery_sources(position INTEGER PRIMARY KEY, snapshot_id TEXT NOT NULL UNIQUE);
+CREATE TABLE IF NOT EXISTS gallery_selected(
+    position INTEGER PRIMARY KEY,
+    snapshot_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    UNIQUE(snapshot_id, model)
+);
+-- Copies from the folder-based store of earlier versions, by lowercase path. Not shared with other libraries.
+CREATE TABLE IF NOT EXISTS gallery_legacy_paths(
+    path TEXT PRIMARY KEY,
+    snapshot_id TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    stamp INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS thumbnails(key TEXT PRIMARY KEY, png BLOB NOT NULL) WITHOUT ROWID;
+)sql");
+        transaction.Commit();
+    }
+    std::optional<std::string> Setting(const std::string& key) {
+        Statement select(Get(), "SELECT value FROM gallery_settings WHERE key = ?");
+        select.Bind(1, key);
+        if (!select.Step()) return std::nullopt;
+        return select.Text(0);
+    }
+    void SetSetting(const std::string& key, const std::string& value) {
+        Statement(Get(), "INSERT INTO gallery_settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+            .Bind(1, key).Bind(2, value).Run();
+    }
+private:
+    static const fs::path& Prepare(const fs::path& catalog) {
+        fs::create_directories(catalog.parent_path());
+        return catalog;
+    }
+};
+
+// A standalone library file for sharing: mods, collection and thumbnails in one SQLite file.
+// Its format is unchanged from the release that first shared libraries, so files from that release can be added.
+constexpr const char* kSharedSchema = R"sql(
+-- One row per distinct file content. `compression` is 0 for raw data and 1 for zstd.
+CREATE TABLE blobs(
+    hash BLOB PRIMARY KEY CHECK(length(hash) = 32),
+    size INTEGER NOT NULL,
+    crc INTEGER NOT NULL,
+    compression INTEGER NOT NULL,
+    data BLOB NOT NULL
+) WITHOUT ROWID;
+-- One row per distinct mod. content_hash covers every path and file checksum, so identical mods share a row.
+CREATE TABLE archives(
+    id INTEGER PRIMARY KEY,
+    content_hash BLOB NOT NULL UNIQUE CHECK(length(content_hash) = 32),
+    name TEXT NOT NULL,
+    imported_at INTEGER NOT NULL
+);
+CREATE TABLE archive_entries(
+    archive INTEGER NOT NULL REFERENCES archives(id),
+    path TEXT NOT NULL,
+    blob BLOB NOT NULL REFERENCES blobs(hash),
+    PRIMARY KEY(archive, path)
+) WITHOUT ROWID;
+CREATE INDEX archive_entries_blob ON archive_entries(blob);
+CREATE TABLE archive_origins(
+    archive INTEGER NOT NULL REFERENCES archives(id),
+    path TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    stamp INTEGER NOT NULL,
+    chunks TEXT NOT NULL,
+    PRIMARY KEY(path, size, stamp, chunks)
+) WITHOUT ROWID;
+CREATE TABLE legacy_paths(
+    path TEXT PRIMARY KEY,
+    archive INTEGER NOT NULL REFERENCES archives(id),
+    size INTEGER NOT NULL,
+    stamp INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE library_sources(
+    position INTEGER PRIMARY KEY,
+    archive INTEGER NOT NULL UNIQUE REFERENCES archives(id)
+);
+CREATE TABLE library_selected(
+    position INTEGER PRIMARY KEY,
+    archive INTEGER NOT NULL REFERENCES archives(id),
+    model TEXT NOT NULL,
+    UNIQUE(archive, model)
+);
+CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE thumbnails(key TEXT PRIMARY KEY, png BLOB NOT NULL) WITHOUT ROWID;
+PRAGMA application_id = 1145916721;
+PRAGMA user_version = 1;
+)sql";
+static_assert(kApplicationId == 1145916721, "Update the shared schema script's application_id.");
+
+struct StoredFile { std::string Path; Hash Blob; };
+
+// The shared file's identifier for a mod: every path with its file checksum.
+Hash SharedContentHash(std::vector<StoredFile> files) {
+    std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) { return a.Path < b.Path; });
+    std::vector<uint8_t> manifest;
+    for (const auto& file : files) {
+        manifest.insert(manifest.end(), file.Path.begin(), file.Path.end());
+        manifest.push_back(0);
+        manifest.insert(manifest.end(), file.Blob.begin(), file.Blob.end());
+    }
+    return Sha256(manifest);
 }
+
+// Stored names come from imported files or shared libraries, so only a plain .vpk file name is used.
+std::wstring SafeName(const std::string& name) {
+    const auto wide = fs::path(Widen(name)).filename().wstring();
+    const bool valid = !wide.empty() && wide.find_first_of(L"<>:\"/\\|?*") == std::wstring::npos
+        && EqualsIgnoreCase(Narrow(fs::path(wide).extension().wstring()), ".vpk")
+        && !EqualsIgnoreCase(Narrow(wide), "pak01_dir.vpk");
+    return valid ? wide : L"mod.vpk";
+}
+
+// Removes a temporary folder when it goes out of scope.
+struct TemporaryFolder {
+    fs::path Path;
+    ~TemporaryFolder() { std::error_code error; fs::remove_all(Path, error); }
+};
+
+struct Context {
+    const fs::path& Root;
+    ContentStore& Content;
+    GalleryDb& Db;
+    fs::path Cache() const { return Root / L"cache"; }
+    std::string Name(const SnapshotId& snapshot) const {
+        Statement select(Db.Get(), "SELECT name FROM gallery_names WHERE snapshot_id = ?");
+        select.Bind(1, snapshot.Value);
+        return select.Step() ? select.Text(0) : "mod.vpk";
+    }
+    void Remember(const SnapshotId& snapshot, const std::string& name) const {
+        Statement(Db.Get(), "INSERT OR IGNORE INTO gallery_names(snapshot_id, name) VALUES(?, ?)").Bind(1, snapshot.Value).Bind(2, name).Run();
+    }
+    fs::path CachePath(const std::string& content_id, const SnapshotId& snapshot) const {
+        return Cache() / Widen(content_id) / SafeName(Name(snapshot));
+    }
+    static std::string StampText(const fs::path& path) {
+        return std::to_string(fs::file_size(path)) + " " + std::to_string(Stamp(path));
+    }
+    // True when the rebuilt copy is still exactly what the store wrote, for example not repaired in place since.
+    static bool Fresh(const fs::path& path) {
+        std::error_code error;
+        if (!fs::is_regular_file(path, error)) return false;
+        std::ifstream in(path.parent_path() / L"stamp", std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), {});
+        try { return text == StampText(path); } catch (const std::exception&) { return false; }
+    }
+    std::optional<std::string> CacheContent(const fs::path& path) const {
+        const auto full = fs::absolute(path).lexically_normal();
+        if (!SamePath(full.parent_path().parent_path(), Cache())) return std::nullopt;
+        const auto id = Narrow(full.parent_path().filename().wstring());
+        return IsContentId(id) ? std::optional(id) : std::nullopt;
+    }
+    std::optional<SnapshotId> SnapshotFor(const fs::path& path) const {
+        const auto content = CacheContent(path);
+        return content ? Content.FindSnapshot(*content) : std::nullopt;
+    }
+    std::string ContentIdOf(const SnapshotId& snapshot) const {
+        const auto id = Content.SnapshotContentId(snapshot);
+        if (!id) throw InvalidData("This mod is no longer in the model library.");
+        return *id;
+    }
+    // Writes the snapshot's archive from the library, unless an unchanged copy is already there.
+    fs::path Materialize(const SnapshotId& snapshot, CancellationToken cancellation) const {
+        const auto destination = CachePath(ContentIdOf(snapshot), snapshot);
+        if (Fresh(destination)) return destination;
+        fs::create_directories(destination.parent_path());
+        const auto temp = destination.parent_path() / Widen("build-" + RandomId() + ".tmp");
+        try {
+            std::vector<VpkNewFile> files;
+            for (const auto& member : Content.SnapshotMembers(snapshot)) {
+                if (member.Size < 0 || member.Size > std::numeric_limits<int32_t>::max()) throw InvalidData("The model library contains an invalid file size.");
+                files.push_back({member.Path, member.Crc32, static_cast<uint32_t>(member.Size),
+                    [this, blob = member.Blob](const std::function<void(const uint8_t*, size_t)>& sink) {
+                        // ReadBlob checks the file against its checksum.
+                        const auto data = Content.ReadBlob(blob);
+                        sink(data.data(), data.size());
+                    }});
+            }
+            VpkArchive::Create(temp, files, cancellation);
+            VpkArchive::Open(temp);
+            if (!MoveFileExW(temp.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                throw IoError("Could not rebuild " + Narrow(destination.wstring()) + ". Windows error " + std::to_string(GetLastError()));
+            std::ofstream(destination.parent_path() / L"stamp", std::ios::binary | std::ios::trunc) << StampText(destination);
+        } catch (...) {
+            std::error_code error;
+            fs::remove(temp, error);
+            throw;
+        }
+        return destination;
+    }
+    SnapshotId SourceSnapshot(const fs::path& source, CancellationToken cancellation) const {
+        const auto full = fs::absolute(source).lexically_normal();
+        if (!EqualsIgnoreCase(Narrow(full.extension().wstring()), ".vpk")) throw InvalidData("Import requires a .vpk archive.");
+        if (Fresh(full)) if (const auto snapshot = SnapshotFor(full)) return *snapshot;
+        // A rebuilt copy changed outside the store, for example by a repair, is imported as a new version.
+        const auto snapshot = Content.ImportVpk(full, cancellation);
+        Remember(snapshot, Narrow(full.filename().wstring()));
+        return snapshot;
+    }
+    std::vector<SnapshotId> Sources() const {
+        Statement select(Db.Get(), "SELECT snapshot_id FROM gallery_sources ORDER BY position");
+        std::vector<SnapshotId> result;
+        while (select.Step()) result.push_back({select.Text(0)});
+        return result;
+    }
+    std::vector<std::pair<std::string, std::string>> Selected() const {
+        Statement select(Db.Get(), "SELECT snapshot_id, model FROM gallery_selected ORDER BY position");
+        std::vector<std::pair<std::string, std::string>> result;
+        while (select.Step()) result.emplace_back(select.Text(0), select.Text(1));
+        return result;
+    }
+    // Appends sources and selections that are not in the collection yet. Existing entries keep their order.
+    void AddToCollection(const std::vector<SnapshotId>& sources, const std::vector<std::pair<std::string, std::string>>& selected) const {
+        Statement source(Db.Get(), "INSERT OR IGNORE INTO gallery_sources(position, snapshot_id) VALUES((SELECT coalesce(max(position), 0) + 1 FROM gallery_sources), ?)");
+        for (const auto& id : sources) source.Bind(1, id.Value).Run();
+        Statement selection(Db.Get(), "INSERT OR IGNORE INTO gallery_selected(position, snapshot_id, model) VALUES((SELECT coalesce(max(position), 0) + 1 FROM gallery_selected), ?, ?)");
+        for (const auto& [id, model] : selected) selection.Bind(1, id).Bind(2, model).Run();
+    }
+    void SetGameIfUnset(const fs::path& game) const {
+        if (game.empty() || Db.Setting("game_archive")) return;
+        Db.SetSetting("game_archive", Narrow(fs::absolute(game).lexically_normal().wstring()));
+    }
+
+    void MergeShared(const fs::path& other, CancellationToken cancellation) const;
+
+    // Merges the single-file library.db of the previous release once. The file is only read.
+    void MergeSingleFileStore(CancellationToken cancellation, std::string& notice) const {
+        const auto previous = Root / L"library.db";
+        if (Db.Setting("library_db_merged") || !fs::exists(previous)) return;
+        try {
+            MergeShared(previous, cancellation);
+            Db.SetSetting("library_db_merged", "1");
+        } catch (const OperationCancelled&) { throw; }
+        catch (const std::exception& failure) {
+            notice += "Your library from the previous version could not be added: " + std::string(failure.what()) + " It is still in " + Narrow(previous.wstring()) + ".\n";
+        }
+    }
+
+    // Merges the folder-based store of earlier versions: every stored VPK, the collection and the selections.
+    // The old files are only read, never moved or removed.
+    void MergeLegacy(CancellationToken cancellation, const StoreProgress& progress, std::string& notice) const {
+        if (Db.Setting("legacy_store_merged")) return;
+        const auto mods = Root / L"mods";
+        std::vector<fs::path> archives;
+        std::error_code error;
+        if (fs::is_directory(mods, error)) {
+            for (const auto& folder : fs::directory_iterator(mods)) {
+                if (!folder.is_directory()) continue;
+                for (const auto& file : fs::directory_iterator(folder.path()))
+                    if (file.is_regular_file() && EqualsIgnoreCase(Narrow(file.path().extension().wstring()), ".vpk")) archives.push_back(file.path());
+            }
+        }
+        std::sort(archives.begin(), archives.end());
+        const auto main = Root / L"library.json", backup = Root / L"library.backup.json";
+        if (archives.empty() && !fs::exists(main) && !fs::exists(backup)) { Db.SetSetting("legacy_store_merged", "1"); return; }
+
+        std::map<std::string, SnapshotId> imported;
+        Statement known(Db.Get(), "SELECT snapshot_id FROM gallery_legacy_paths WHERE path = ? AND size = ? AND stamp = ?");
+        std::string problems;
+        for (size_t i = 0; i < archives.size(); ++i) {
+            cancellation.ThrowIfCancelled();
+            if (progress) progress(i, archives.size());
+            const auto& path = archives[i];
+            try {
+                const auto size = static_cast<int64_t>(fs::file_size(path));
+                const auto stamp = Stamp(path);
+                known.Bind(1, Key(path)).Bind(2, size).Bind(3, stamp);
+                std::optional<SnapshotId> id;
+                if (known.Step()) id = SnapshotId{known.Text(0)};
+                known.Reset();
+                if (!id || !Content.SnapshotContentId(*id)) {
+                    id = Content.ImportVpk(path, cancellation);
+                    Remember(*id, Narrow(path.filename().wstring()));
+                    Statement(Db.Get(), "INSERT OR REPLACE INTO gallery_legacy_paths(path, snapshot_id, size, stamp) VALUES(?, ?, ?, ?)")
+                        .Bind(1, Key(path)).Bind(2, id->Value).Bind(3, size).Bind(4, stamp).Run();
+                }
+                imported.emplace(Key(path), *id);
+            } catch (const OperationCancelled&) { throw; }
+            catch (const std::exception& failure) { problems += Narrow(path.wstring()) + ": " + failure.what() + "\n"; }
+        }
+        if (progress) progress(archives.size(), archives.size());
+
+        std::optional<ModelLibrary> library;
+        for (const auto& manifest : {main, backup}) {
+            if (library || !fs::exists(manifest)) continue;
+            try { library = ModelLibrary::Load(manifest); } catch (const std::exception&) {}
+        }
+        if (!library && (fs::exists(main) || fs::exists(backup)) && !Db.Setting("legacy_collection_merged"))
+            problems += "The earlier collection list could not be read, so its mods were added without restoring the collection. It is still in " + Narrow(Root.wstring()) + ".\n";
+        // The collection is merged once, so sources removed afterwards do not come back on the next start.
+        if (library && !Db.Setting("legacy_collection_merged")) {
+            std::map<std::string, SnapshotId> sources;
+            for (const auto& source : library->Sources) {
+                cancellation.ThrowIfCancelled();
+                auto found = imported.find(Key(source));
+                if (found != imported.end()) { sources.emplace(Key(source), found->second); continue; }
+                // Sources outside the old store were used in place; store them now if they still exist.
+                try { sources.emplace(Key(source), SourceSnapshot(source, cancellation)); }
+                catch (const OperationCancelled&) { throw; }
+                catch (const std::exception& failure) { problems += Narrow(source.wstring()) + ": " + failure.what() + "\n"; }
+            }
+            std::vector<SnapshotId> order;
+            for (const auto& source : library->Sources) if (const auto found = sources.find(Key(source)); found != sources.end()) order.push_back(found->second);
+            std::vector<std::pair<std::string, std::string>> selected;
+            for (const auto& model : library->Selected)
+                if (const auto found = sources.find(Key(model.Archive)); found != sources.end()) selected.emplace_back(found->second.Value, model.Model);
+            Transaction transaction(Db);
+            AddToCollection(order, selected);
+            SetGameIfUnset(library->GameArchive);
+            Db.SetSetting("legacy_collection_merged", "1");
+            transaction.Commit();
+        }
+        if (problems.empty()) Db.SetSetting("legacy_store_merged", "1");
+        notice += problems;
+    }
+};
+
+// Checks a shared file's identity and version without changing it.
+void CheckSharedFile(const fs::path& path) {
+    sqlite3* check = nullptr;
+    const auto name = Narrow(path.wstring());
+    const int opened = sqlite3_open_v2(name.c_str(), &check, SQLITE_OPEN_READONLY, nullptr);
+    int application = 0, version = 0;
+    if (opened == SQLITE_OK) {
+        sqlite3_stmt* statement = nullptr;
+        if (sqlite3_prepare_v2(check, "PRAGMA application_id", -1, &statement, nullptr) == SQLITE_OK && sqlite3_step(statement) == SQLITE_ROW) application = sqlite3_column_int(statement, 0);
+        sqlite3_finalize(statement);
+        if (sqlite3_prepare_v2(check, "PRAGMA user_version", -1, &statement, nullptr) == SQLITE_OK && sqlite3_step(statement) == SQLITE_ROW) version = sqlite3_column_int(statement, 0);
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(check);
+    if (application != kApplicationId || version < 1) throw InvalidData(Narrow(path.filename().wstring()) + " is not a Deadlock mod library.");
+    if (version > kSharedSchemaVersion) throw InvalidData(Narrow(path.filename().wstring()) + " was written by a newer version of the mod manager.");
+}
+
+std::vector<StoredFile> SharedFiles(SqliteDb& db, int64_t archive) {
+    Statement select(db.Get(), "SELECT path, blob FROM archive_entries WHERE archive = ?");
+    select.Bind(1, archive);
+    std::vector<StoredFile> files;
+    while (select.Step()) files.push_back({select.Text(0), select.HashColumn(1)});
+    return files;
+}
+
+void Context::MergeShared(const fs::path& other, CancellationToken cancellation) const {
+    if (!fs::is_regular_file(other)) throw IoError("Could not find " + Narrow(other.wstring()) + ".");
+    CheckSharedFile(other);
+    SqliteDb shared(other, SQLITE_OPEN_READONLY);
+    shared.Cancel(cancellation);
+    struct SharedArchive { int64_t Id = 0; std::string Name; };
+    std::vector<SharedArchive> archives;
+    {
+        Statement select(shared.Get(), "SELECT id, content_hash, name FROM archives ORDER BY id");
+        while (select.Step()) {
+            cancellation.ThrowIfCancelled();
+            // Content identifiers come from another file, so each mod must match the files it lists before any is added.
+            if (SharedContentHash(SharedFiles(shared, select.Int(0))) != select.HashColumn(1))
+                throw InvalidData(Narrow(other.filename().wstring()) + " is damaged: a stored mod does not match its checksum.");
+            archives.push_back({select.Int(0), select.Text(2)});
+        }
+    }
+    // Each mod is rebuilt as a VPK and imported like any other, so the model library indexes its models.
+    const TemporaryFolder work{Root / Widen("merging-" + RandomId())};
+    std::map<int64_t, SnapshotId> snapshots;
+    Statement entries(shared.Get(), "SELECT e.path, b.hash, b.size, b.crc FROM archive_entries e JOIN blobs b ON b.hash = e.blob WHERE e.archive = ? ORDER BY e.path");
+    Statement read(shared.Get(), "SELECT compression, data, size FROM blobs WHERE hash = ?");
+    for (const auto& archive : archives) {
+        cancellation.ThrowIfCancelled();
+        const auto folder = work.Path / std::to_wstring(archive.Id);
+        fs::create_directories(folder);
+        const auto vpk = folder / SafeName(archive.Name);
+        std::vector<VpkNewFile> files;
+        entries.Bind(1, archive.Id);
+        while (entries.Step()) {
+            const auto size = entries.Int(2);
+            if (size < 0 || size > std::numeric_limits<int32_t>::max()) throw InvalidData("The shared library contains an invalid file size.");
+            files.push_back({entries.Text(0), static_cast<uint32_t>(entries.Int(3)), static_cast<uint32_t>(size),
+                [&read, hash = entries.HashColumn(1), path = entries.Text(0)](const std::function<void(const uint8_t*, size_t)>& sink) {
+                    read.Bind(1, hash);
+                    if (!read.Step()) throw InvalidData("The shared library is missing " + path + ".");
+                    auto data = read.Blob(1);
+                    const auto compression = read.Int(0);
+                    const auto size = static_cast<size_t>(read.Int(2));
+                    read.Reset();
+                    if (compression == 1) {
+                        std::vector<uint8_t> raw(size);
+                        const size_t written = ZSTD_decompress(raw.data(), raw.size(), data.data(), data.size());
+                        if (ZSTD_isError(written) || written != size) throw InvalidData("Stored file " + path + " is damaged.");
+                        data = std::move(raw);
+                    } else if (compression != 0) {
+                        throw InvalidData("Stored file " + path + " uses an unknown compression.");
+                    }
+                    if (data.size() != size || Sha256(data) != hash) throw InvalidData("Stored file " + path + " is damaged.");
+                    sink(data.data(), data.size());
+                }});
+        }
+        entries.Reset();
+        VpkArchive::Create(vpk, files, cancellation);
+        const auto snapshot = Content.ImportVpk(vpk, cancellation);
+        Remember(snapshot, archive.Name);
+        snapshots.emplace(archive.Id, snapshot);
+        std::error_code error;
+        fs::remove_all(folder, error);
+    }
+    std::vector<SnapshotId> sources;
+    Statement other_sources(shared.Get(), "SELECT archive FROM library_sources ORDER BY position");
+    while (other_sources.Step()) if (const auto found = snapshots.find(other_sources.Int(0)); found != snapshots.end()) sources.push_back(found->second);
+    std::vector<std::pair<std::string, std::string>> selected;
+    Statement other_selected(shared.Get(), "SELECT archive, model FROM library_selected ORDER BY position");
+    while (other_selected.Step()) if (const auto found = snapshots.find(other_selected.Int(0)); found != snapshots.end())
+        selected.emplace_back(found->second.Value, other_selected.Text(1));
+    Transaction transaction(Db);
+    AddToCollection(sources, selected);
+    Statement thumbnails(shared.Get(), "SELECT key, png FROM thumbnails");
+    Statement insert(Db.Get(), "INSERT OR IGNORE INTO thumbnails(key, png) VALUES(?, ?)");
+    while (thumbnails.Step()) insert.Bind(1, thumbnails.Text(0)).Bind(2, thumbnails.Blob(1)).Run();
+    Statement other_game(shared.Get(), "SELECT value FROM settings WHERE key = 'game_archive'");
+    if (other_game.Step()) {
+        const fs::path game = Widen(other_game.Text(0));
+        std::error_code error;
+        if (fs::is_regular_file(game, error)) SetGameIfUnset(game);
+    }
+    transaction.Commit();
+}
+
+// Opens the content library and the gallery tables beside it.
+struct Opened {
+    explicit Opened(const LocalModStore& store, CancellationToken cancellation = {})
+        : Content(ContentStore::Open(store.ContentDirectory())), Db(store.Database()) {
+        Db.Cancel(std::move(cancellation));
+    }
+    ContentStore Content;
+    GalleryDb Db;
+};
+}
+
 LocalModStore::LocalModStore(fs::path root) : root_(fs::absolute(std::move(root)).lexically_normal()) {}
+
 fs::path LocalModStore::DefaultRoot() {
     PWSTR folder = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &folder)))
@@ -49,97 +611,186 @@ fs::path LocalModStore::DefaultRoot() {
     CoTaskMemFree(folder);
     return result;
 }
+
 fs::path LocalModStore::Import(const fs::path& source, CancellationToken cancellation) const {
     cancellation.ThrowIfCancelled();
-    const auto full = fs::absolute(source).lexically_normal();
-    if (!EqualsIgnoreCase(Narrow(full.extension().wstring()), ".vpk")) throw InvalidData("Import requires a .vpk archive.");
-    const auto mods = root_ / L"mods";
-    if (Owned(full, mods) && fs::is_regular_file(full)) {
-        VpkArchive::Open(full); // Existing local copies can be reopened without the original.
-        return full;
-    }
-    const auto archive = VpkArchive::Open(full);
-    auto lease = archive.LockSources();
-    const auto size = fs::file_size(full);
-    const auto stamp = fs::last_write_time(full).time_since_epoch().count();
-    auto chunks = nlohmann::json::array();
-    std::set<uint16_t> chunk_ids;
-    for (const auto& entry : archive.Entries()) if (entry.ArchiveIndex != VpkArchive::EmbeddedArchive) chunk_ids.insert(entry.ArchiveIndex);
-    auto basename = full.stem().wstring();
-    if (basename.ends_with(L"_dir")) basename.resize(basename.size() - 4);
-    for (const auto id : chunk_ids) {
-        std::wostringstream name;
-        name << basename << L"_" << std::setw(3) << std::setfill(L'0') << id << L".vpk";
-        const auto chunk = full.parent_path() / name.str();
-        chunks.push_back({{"index", id}, {"size", fs::file_size(chunk)}, {"stamp", fs::last_write_time(chunk).time_since_epoch().count()}});
-    }
-    fs::create_directories(mods);
-    // Original path and file stamp identify repeat imports. Different versions get independent copies.
-    for (const auto& entry : fs::directory_iterator(mods)) {
-        cancellation.ThrowIfCancelled();
-        if (!entry.is_directory()) continue;
-        try {
-            std::ifstream input(entry.path() / L"origin.json", std::ios::binary);
-            if (!input) continue;
-            nlohmann::json json; input >> json;
-            if (!SamePath(fs::path(Widen(json.at("original").get<std::string>())), full)
-                || json.at("size").get<uintmax_t>() != size || json.at("stamp").get<int64_t>() != stamp
-                || json.value("chunks", nlohmann::json::array()) != chunks) continue;
-            const auto cached = entry.path() / full.filename();
-            if (!Owned(cached, mods) || !fs::is_regular_file(cached)) continue;
-            VpkArchive::Open(cached);
-            return cached;
-        } catch (const std::exception&) { /* Ignore an incomplete or stale import record. */ }
-    }
-    const auto folder = mods / Widen(Id());
-    fs::create_directory(folder);
-    const auto cached = folder / full.filename();
-    try {
-        ArchiveTransaction::Write(archive, full, cached, {}, false, cancellation);
-        cancellation.ThrowIfCancelled();
-        const nlohmann::json metadata = {{"original", Narrow(full.wstring())}, {"size", size}, {"stamp", stamp}, {"chunks", chunks}};
-        std::ofstream output(folder / L"origin.json", std::ios::binary);
-        output << metadata.dump(2) << '\n'; output.flush();
-        if (!output) throw IoError("Could not record the imported mod.");
-        return cached;
-    } catch (...) {
-        // This is the fresh random-id folder created by this import, under the store.
-        std::error_code error;
-        if (Owned(folder, mods)) fs::remove_all(folder, error);
-        throw;
-    }
+    Opened opened(*this, cancellation);
+    const Context context{root_, opened.Content, opened.Db};
+    return context.Materialize(context.SourceSnapshot(source, cancellation), cancellation);
 }
-ModelLibrary LocalModStore::Load() const {
-    const auto main = root_ / L"library.json";
-    const auto backup = root_ / L"library.backup.json";
-    if (!fs::exists(main) && !fs::exists(backup)) return {};
-    try { return ModelLibrary::Load(main); }
-    catch (const std::exception&) {
-        try { return ModelLibrary::Load(backup); }
-        catch (const std::exception&) { throw InvalidData("Could not restore the local library or its backup. Imported VPK copies are still in " + Narrow((root_ / L"mods").wstring())); }
-    }
-}
-void LocalModStore::Save(const ModelLibrary& library) const {
-    fs::create_directories(root_);
-    const auto temp = root_ / Widen("library-" + Id() + ".json");
-    const auto backup_temp = root_ / Widen("backup-" + Id() + ".json");
-    const auto main = root_ / L"library.json";
-    try {
-        library.Save(temp);
-        if (fs::exists(main)) {
-            // Only a readable previous manifest is allowed to replace the recovery copy.
-            bool valid = false;
-            try { ModelLibrary::Load(main); valid = true; } catch (const std::exception&) {}
-            if (valid) {
-                fs::copy_file(main, backup_temp);
-                Publish(backup_temp, root_ / L"library.backup.json");
-            }
+
+ModelLibrary LocalModStore::Load(CancellationToken cancellation, const StoreProgress& progress, std::string* notice) const {
+    Opened opened(*this, cancellation);
+    const Context context{root_, opened.Content, opened.Db};
+    std::string problems;
+    context.MergeSingleFileStore(cancellation, problems);
+    context.MergeLegacy(cancellation, progress, problems);
+    ModelLibrary result;
+    std::map<std::string, fs::path> paths;
+    const auto sources = context.Sources();
+    for (size_t i = 0; i < sources.size(); ++i) {
+        cancellation.ThrowIfCancelled();
+        if (progress) progress(i, sources.size());
+        const auto content_id = opened.Content.SnapshotContentId(sources[i]);
+        if (!content_id) {
+            // Hidden from the version history, which removes its files from the library.
+            problems += context.Name(sources[i]) + " is no longer in the model library, so it was left out.\n";
+            continue;
         }
-        Publish(temp, main);
+        try { paths[sources[i].Value] = context.Materialize(sources[i], cancellation); }
+        catch (const OperationCancelled&) { throw; }
+        catch (const std::exception& error) {
+            // Keep the source in the collection; the gallery reports that it cannot be opened.
+            paths[sources[i].Value] = context.CachePath(*content_id, sources[i]);
+            problems += context.Name(sources[i]) + ": " + error.what() + "\n";
+        }
+        result.Sources.push_back(paths[sources[i].Value]);
+    }
+    for (const auto& [id, model] : context.Selected())
+        if (const auto found = paths.find(id); found != paths.end()) result.Selected.push_back({found->second, model});
+    if (const auto game = opened.Db.Setting("game_archive")) {
+        const fs::path path = Widen(*game);
+        // A library shared from another computer keeps its game path, which only applies where it exists.
+        std::error_code error;
+        if (fs::is_regular_file(path, error)) result.GameArchive = path;
+    }
+    if (notice) *notice = problems;
+    return result;
+}
+
+void LocalModStore::Save(const ModelLibrary& library) const {
+    Opened opened(*this);
+    const Context context{root_, opened.Content, opened.Db};
+    std::vector<SnapshotId> sources;
+    std::map<std::string, std::string> ids;
+    for (const auto& source : library.Sources) {
+        const auto id = context.SnapshotFor(source);
+        if (!id) throw InvalidData(Narrow(source.wstring()) + " is not stored in the library.");
+        ids[Key(source)] = id->Value;
+        if (std::none_of(sources.begin(), sources.end(), [&](const auto& other) { return other.Value == id->Value; })) sources.push_back(*id);
+    }
+    std::vector<std::pair<std::string, std::string>> selected;
+    for (const auto& model : library.Selected) {
+        const auto found = ids.find(Key(model.Archive));
+        if (found == ids.end()) throw InvalidData("Selected model is not in the library sources.");
+        selected.emplace_back(found->second, VpkArchive::Normalize(model.Model));
+    }
+    Transaction transaction(opened.Db);
+    opened.Db.Exec("DELETE FROM gallery_sources; DELETE FROM gallery_selected;");
+    context.AddToCollection(sources, selected);
+    if (!library.GameArchive.empty()) opened.Db.SetSetting("game_archive", Narrow(fs::absolute(library.GameArchive).lexically_normal().wstring()));
+    transaction.Commit();
+}
+
+void LocalModStore::Merge(const fs::path& other, CancellationToken cancellation) const {
+    if (SamePath(other, Database())) throw InvalidData("Choose a library other than the one already open.");
+    Opened opened(*this, cancellation);
+    const Context context{root_, opened.Content, opened.Db};
+    context.MergeShared(other, cancellation);
+}
+
+void LocalModStore::Export(const fs::path& destination, CancellationToken cancellation) const {
+    if (SamePath(destination, Database())) throw InvalidData("Choose a location other than the library itself.");
+    const auto full = fs::absolute(destination).lexically_normal();
+    const auto temp = full.parent_path() / Widen("library-" + RandomId() + ".tmp");
+    try {
+        Opened opened(*this, cancellation);
+        const Context context{root_, opened.Content, opened.Db};
+        {
+            SqliteDb shared(temp, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
+            shared.Cancel(cancellation);
+            Transaction transaction(shared);
+            shared.Exec(kSharedSchema);
+            Statement exists(shared.Get(), "SELECT 1 FROM blobs WHERE hash = ?");
+            Statement blob(shared.Get(), "INSERT INTO blobs(hash, size, crc, compression, data) VALUES(?, ?, ?, ?, ?)");
+            Statement archive(shared.Get(), "INSERT OR IGNORE INTO archives(content_hash, name, imported_at) VALUES(?, ?, ?)");
+            Statement find(shared.Get(), "SELECT id FROM archives WHERE content_hash = ?");
+            Statement entry(shared.Get(), "INSERT OR IGNORE INTO archive_entries(archive, path, blob) VALUES(?, ?, ?)");
+            std::map<std::string, int64_t> archives;
+            for (const auto& pack : opened.Content.ListPacks()) {
+                cancellation.ThrowIfCancelled();
+                std::vector<StoredFile> files;
+                const auto members = opened.Content.SnapshotMembers(pack.Snapshot);
+                for (const auto& member : members) {
+                    files.push_back({member.Path, member.Blob.Bytes});
+                    exists.Bind(1, member.Blob.Bytes);
+                    const bool stored = exists.Step();
+                    exists.Reset();
+                    if (stored) continue;
+                    const auto bytes = opened.Content.ReadBlob(member.Blob);
+                    std::vector<uint8_t> packed(ZSTD_compressBound(bytes.size()));
+                    const size_t size = ZSTD_compress(packed.data(), packed.size(), bytes.data(), bytes.size(), 3);
+                    // Many resources are already compressed, so keep them raw when zstd does not help.
+                    const bool compressed = !ZSTD_isError(size) && size < bytes.size();
+                    if (compressed) packed.resize(size);
+                    blob.Bind(1, member.Blob.Bytes).Bind(2, static_cast<int64_t>(bytes.size())).Bind(3, static_cast<int64_t>(member.Crc32))
+                        .Bind(4, compressed ? 1 : 0).Bind(5, compressed ? packed : bytes).Run();
+                }
+                const auto content = SharedContentHash(files);
+                const auto stored_name = context.Name(pack.Snapshot);
+                archive.Bind(1, content).Bind(2, stored_name == "mod.vpk" ? Narrow(SafeName(pack.Label)) : stored_name).Bind(3, Now()).Run();
+                find.Bind(1, content);
+                find.Step();
+                const auto id = find.Int(0);
+                find.Reset();
+                archives.emplace(pack.Snapshot.Value, id);
+                for (const auto& member : members) entry.Bind(1, id).Bind(2, member.Path).Bind(3, member.Blob.Bytes).Run();
+            }
+            Statement source(shared.Get(), "INSERT OR IGNORE INTO library_sources(position, archive) VALUES(?, ?)");
+            int64_t position = 0;
+            for (const auto& snapshot : context.Sources())
+                if (const auto found = archives.find(snapshot.Value); found != archives.end()) source.Bind(1, ++position).Bind(2, found->second).Run();
+            Statement selection(shared.Get(), "INSERT OR IGNORE INTO library_selected(position, archive, model) VALUES(?, ?, ?)");
+            position = 0;
+            for (const auto& [snapshot, model] : context.Selected())
+                if (const auto found = archives.find(snapshot); found != archives.end()) selection.Bind(1, ++position).Bind(2, found->second).Bind(3, model).Run();
+            Statement thumbnails(opened.Db.Get(), "SELECT key, png FROM thumbnails");
+            Statement thumbnail(shared.Get(), "INSERT INTO thumbnails(key, png) VALUES(?, ?)");
+            while (thumbnails.Step()) thumbnail.Bind(1, thumbnails.Text(0)).Bind(2, thumbnails.Blob(1)).Run();
+            if (const auto game = opened.Db.Setting("game_archive"))
+                Statement(shared.Get(), "INSERT INTO settings(key, value) VALUES('game_archive', ?)").Bind(1, *game).Run();
+            transaction.Commit();
+        }
+        if (!MoveFileExW(temp.c_str(), full.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            throw IoError("Could not write " + Narrow(full.wstring()) + ". Windows error " + std::to_string(GetLastError()));
     } catch (...) {
         std::error_code error;
-        fs::remove(temp, error); fs::remove(backup_temp, error);
+        fs::remove(temp, error);
         throw;
     }
+}
+
+std::optional<std::string> LocalModStore::ContentId(const fs::path& archive) const {
+    const auto full = fs::absolute(archive).lexically_normal();
+    if (!SamePath(full.parent_path().parent_path(), root_ / L"cache")) return std::nullopt;
+    const auto id = Narrow(full.parent_path().filename().wstring());
+    if (!IsContentId(id)) return std::nullopt;
+    return id;
+}
+
+std::vector<fs::path> LocalModStore::LegacyPaths(const fs::path& archive) const {
+    const auto id = ContentId(archive);
+    if (!id) return {};
+    Opened opened(*this);
+    const auto snapshot = opened.Content.FindSnapshot(*id);
+    if (!snapshot) return {};
+    Statement select(opened.Db.Get(), "SELECT path FROM gallery_legacy_paths WHERE snapshot_id = ?");
+    select.Bind(1, snapshot->Value);
+    std::vector<fs::path> result;
+    while (select.Step()) result.emplace_back(Widen(select.Text(0)));
+    return result;
+}
+
+std::optional<std::vector<uint8_t>> LocalModStore::Thumbnail(const std::string& key) const {
+    GalleryDb db(Database());
+    Statement select(db.Get(), "SELECT png FROM thumbnails WHERE key = ?");
+    select.Bind(1, key);
+    if (!select.Step()) return std::nullopt;
+    return select.Blob(0);
+}
+
+void LocalModStore::SaveThumbnail(const std::string& key, const std::vector<uint8_t>& png) const {
+    GalleryDb db(Database());
+    Statement(db.Get(), "INSERT OR REPLACE INTO thumbnails(key, png) VALUES(?, ?)").Bind(1, key).Bind(2, png).Run();
 }
 }

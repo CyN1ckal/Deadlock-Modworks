@@ -1,5 +1,7 @@
 #include "comparison_view.hpp"
 
+#include "ui.hpp"
+
 #include <imgui.h>
 
 #include <algorithm>
@@ -72,8 +74,34 @@ void DrawEdit(const char* what, const MigrationEdit& edit) {
 
 ComparisonView::ComparisonView(const VulkanDevice& device) : left_view_(device), right_view_(device) {}
 
-void ComparisonView::Load(ModelVersions versions, VersionReader read, std::vector<std::string> clips) {
-    versions_ = std::move(versions);
+ComparisonView::Prepared ComparisonView::Prepare(ModelVersions versions, const VersionReader& read, const PreparedModel* mod_model) {
+    Prepared prepared;
+    for (ModelVersion version : {ModelVersion::Mod, ModelVersion::Repaired, ModelVersion::Game}) {
+        const VersionData& data = versions.Get(version);
+        if (!data.Available || !data.Model) {
+            continue;
+        }
+        // The mod and repaired versions resolve resources the same way, so they can share decoded materials.
+        const PreparedModel* reuse = nullptr;
+        if (version != ModelVersion::Game) {
+            const auto& mod = prepared.Models[static_cast<size_t>(ModelVersion::Mod)];
+            reuse = mod ? &*mod : mod_model;
+        }
+        auto& slot = prepared.Models[static_cast<size_t>(version)];
+        if (read) {
+            const ResourceReader reader = [&read, version](const std::string& path) { return read(version, path); };
+            slot = PrepareModel(*data.Model, &reader, 2048, reuse);
+        } else {
+            slot = PrepareModel(*data.Model);
+        }
+    }
+    prepared.Versions = std::move(versions);
+    return prepared;
+}
+
+void ComparisonView::Load(Prepared prepared, VersionReader read, std::vector<std::string> clips) {
+    versions_ = std::move(prepared.Versions);
+    prepared_ = std::move(prepared.Models);
     read_ = std::move(read);
     clips_ = std::move(clips);
     player_.SetClips(read_ ? clips_ : std::vector<std::string>{});
@@ -98,18 +126,20 @@ void ComparisonView::Load(ModelVersions versions, VersionReader read, std::vecto
 
 void ComparisonView::PlayClip(const std::string& path) {
     if (read_) {
-        player_.Select(path, [this](const std::string& resource) { return read_(ModelVersion::Mod, resource); });
+        player_.Select(path, [read = read_](const std::string& resource) { return read(ModelVersion::Mod, resource); });
     }
 }
 
 void ComparisonView::ShowError(std::string title, std::string message) {
     versions_ = {};
+    prepared_ = {};
     read_ = {};
     loaded_ = false;
     title_ = std::move(title);
     error_ = std::move(message);
-    left_view_.SetModel(nullptr, 0);
-    right_view_.SetModel(nullptr, 0);
+    player_.SetClips({});
+    left_view_.SetModel(static_cast<const PreparedModel*>(nullptr), 0);
+    right_view_.SetModel(static_cast<const PreparedModel*>(nullptr), 0);
     left_shown_.reset();
     right_shown_.reset();
 }
@@ -126,19 +156,13 @@ const std::vector<GeometryBone>* ComparisonView::Skeleton(ModelVersion version) 
 }
 
 void ComparisonView::ShowSide(ModelViewport& view, ModelVersion version, std::optional<ModelVersion>& shown) {
-    // Loading materials reads every color map, so only reload when the side shows another version.
+    // Uploading materials copies every color map to the GPU, so only reload when the side shows another version.
     if (shown == version) {
         return;
     }
     shown = version;
-    const VersionData& data = versions_.Get(version);
-    const ModelGeometry* model = data.Available && data.Model ? &*data.Model : nullptr;
-    if (!read_) {
-        view.SetModel(model, settings_.Lod);
-        return;
-    }
-    const ResourceReader read = [this, version](const std::string& path) { return read_(version, path); };
-    view.SetModel(model, settings_.Lod, &read);
+    const auto& prepared = prepared_[static_cast<size_t>(version)];
+    view.SetModel(prepared ? &*prepared : nullptr, settings_.Lod);
 }
 
 void ComparisonView::Refresh(bool reframe) {
@@ -195,16 +219,25 @@ void ComparisonView::DrawReport() {
     for (ModelVersion version : {left_, right_}) {
         const VersionData& data = versions_.Get(version);
         for (const std::string& note : data.Notes) {
-            ImGui::TextDisabled("%s: %s", ModelVersionName(version), note.c_str());
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::TextWrapped("%s: %s", ModelVersionName(version), note.c_str());
+            ImGui::PopStyleColor();
         }
         if (!data.Error.empty()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.35f, 1.0f), "%s: %s", ModelVersionName(version), data.Error.c_str());
+            ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
+            ImGui::TextWrapped("%s: %s", ModelVersionName(version), data.Error.c_str());
+            ImGui::PopStyleColor();
         }
     }
-    ImGui::TextDisabled("The preview runs the model and animation-skeleton migrations only; a full update also fixes dependent files.");
+    ImGui::TextDisabled("Preview of the model and animation-skeleton migrations only.");
+    ImGui::SameLine();
+    ui::HelpMarker("The preview runs the model and animation-skeleton migrations only; a full update also fixes dependent files.");
 }
 
 void ComparisonView::DrawDiff() {
+    if (!ImGui::CollapsingHeader("Differences", ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
     const char* kind = kind_ == SkeletonKind::Animation ? "Animation skeleton" : "Render skeleton";
     if (!Skeleton(left_) || !Skeleton(right_)) {
         ImGui::TextDisabled("%s: not available on both sides.", kind);
@@ -224,20 +257,27 @@ void ComparisonView::DrawDiff() {
     }
 
     if (!binding_diff_.Comparable) {
-        ImGui::TextDisabled("Skin bindings: not compared. %s", binding_diff_.Reason.c_str());
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("Skin bindings: not compared. %s", binding_diff_.Reason.c_str());
+        ImGui::PopStyleColor();
     } else if (binding_diff_.Changed == 0) {
-        ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "Skin bindings: every vertex keeps its bones and weights (%llu vertices).",
+        ImGui::PushStyleColor(ImGuiCol_Text, ui::kGood);
+        ImGui::TextWrapped("Skin bindings: every vertex keeps its bones and weights (%llu vertices).",
             static_cast<unsigned long long>(binding_diff_.Vertices));
+        ImGui::PopStyleColor();
     } else {
-        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.35f, 1.0f), "Skin bindings: %llu of %llu vertices are driven by different bones.",
+        ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
+        ImGui::TextWrapped("Skin bindings: %llu of %llu vertices are driven by different bones.",
             static_cast<unsigned long long>(binding_diff_.Changed), static_cast<unsigned long long>(binding_diff_.Vertices));
+        ImGui::PopStyleColor();
         for (const std::string& example : binding_diff_.Examples) {
             ImGui::BulletText("%s", example.c_str());
         }
     }
 
     const size_t changed = skeleton_diff_.Bones.size() - skeleton_diff_.Same;
-    if (skeleton_diff_.Bones.empty() || !ImGui::CollapsingHeader(("Bone changes (" + std::to_string(changed) + ")###bones").c_str())) {
+    if (skeleton_diff_.Bones.empty() || !ImGui::CollapsingHeader(("Bone changes (" + std::to_string(changed) + ")###bones").c_str(),
+            ImGuiTreeNodeFlags_DefaultOpen)) {
         return;
     }
     Swatch(kAddedBoneColor, "added");
@@ -246,9 +286,9 @@ void ComparisonView::DrawDiff() {
     ImGui::SameLine();
     Swatch(kReparentedBoneColor, "reparented");
     ImGui::SameLine();
-    Swatch(kRemovedBoneColor, "removed (left side)");
-    ImGui::SameLine();
-    ImGui::Checkbox("Show unchanged", &show_unchanged_);
+    Swatch(kRemovedBoneColor, "removed");
+    ImGui::SetItemTooltip("Removed bones are drawn on the left side.");
+    ImGui::Checkbox("Show unchanged bones", &show_unchanged_);
 
     std::vector<const BoneDiff*> rows;
     for (const BoneDiff& bone : skeleton_diff_.Bones) {
@@ -257,12 +297,13 @@ void ComparisonView::DrawDiff() {
         }
     }
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
-    if (ImGui::BeginTable("bone_changes", 4, flags, ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 9))) {
+    const float table_height = std::max(ImGui::GetContentRegionAvail().y, ImGui::GetTextLineHeightWithSpacing() * 9);
+    if (ImGui::BeginTable("bone_changes", 4, flags | ImGuiTableFlags_Hideable | ImGuiTableFlags_SizingFixedFit, ImVec2(0, table_height))) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Bone");
-        ImGui::TableSetupColumn("Change", ImGuiTableColumnFlags_WidthFixed, 90);
-        ImGui::TableSetupColumn("Moved by", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("Parent (left -> right)");
+        ImGui::TableSetupColumn("Bone", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Change", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("Moved", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("Parent", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(rows.size()));
@@ -271,7 +312,15 @@ void ComparisonView::DrawDiff() {
                 const BoneDiff& bone = *rows[static_cast<size_t>(i)];
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(bone.Name.c_str());
+                ImGui::PushID(i);
+                ImGui::Selectable(bone.Name.c_str(), false, ImGuiSelectableFlags_SpanAllColumns);
+                if (ImGui::BeginPopupContextItem("bone_menu")) {
+                    ui::CopyMenuItem("Copy bone name", bone.Name);
+                    ui::CopyMenuItem("Copy left parent", bone.LeftParent);
+                    ui::CopyMenuItem("Copy right parent", bone.RightParent);
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
                 ImGui::TableNextColumn();
                 ImGui::TextColored(Unpack(ChangeColor(bone.Change)), "%s", ChangeName(bone.Change));
                 ImGui::TableNextColumn();
@@ -292,21 +341,25 @@ void ComparisonView::DrawDiff() {
 }
 
 void ComparisonView::Draw() {
-    ImGui::TextUnformatted(title_.empty() ? "Open a mod VPK and pick a model to compare it with the game." : title_.c_str());
     if (!error_.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.45f, 0.4f, 1.0f));
+        if (!title_.empty()) {
+            ui::TextEllipsis(title_);
+        }
+        ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
         ImGui::TextWrapped("%s", error_.c_str());
         ImGui::PopStyleColor();
         return;
     }
     if (!loaded_) {
+        ImGui::TextDisabled("%s", title_.empty() ? "Inspect a skin from the library to compare it with the game." : title_.c_str());
         return;
     }
 
+    const float scale = ImGui::GetFontSize() / 15.0f;
     bool changed = false;
-    auto version_combo = [&](const char* label, ModelVersion& version) {
-        ImGui::SetNextItemWidth(150);
-        if (ImGui::BeginCombo(label, ModelVersionName(version))) {
+    auto version_combo = [&](const char* id, const char* tooltip, ModelVersion& version) {
+        ImGui::SetNextItemWidth(110 * scale);
+        if (ImGui::BeginCombo(id, ModelVersionName(version))) {
             for (ModelVersion option : {ModelVersion::Mod, ModelVersion::Repaired, ModelVersion::Game}) {
                 const bool available = versions_.Get(option).Available;
                 if (ImGui::Selectable(ModelVersionName(option), option == version, available ? 0 : ImGuiSelectableFlags_Disabled)) {
@@ -316,27 +369,128 @@ void ComparisonView::Draw() {
             }
             ImGui::EndCombo();
         }
+        ImGui::SetItemTooltip("%s", tooltip);
     };
-    version_combo("Left", left_);
+    version_combo("##left", "Version shown on the left", left_);
     ImGui::SameLine();
-    version_combo("Right", right_);
+    ImGui::TextDisabled("vs");
     ImGui::SameLine();
+    version_combo("##right", "Version shown on the right", right_);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Swap")) {
+        std::swap(left_, right_);
+        changed = true;
+    }
+    ImGui::SetItemTooltip("Swap the two sides");
+    ui::ToolSeparator();
     int kind = static_cast<int>(kind_);
-    changed = ImGui::RadioButton("Render skeleton", &kind, 0) || changed;
-    ImGui::SetItemTooltip("m_modelSkeleton: the bones the mesh is skinned to.");
+    changed = ImGui::RadioButton("Render", &kind, 0) || changed;
+    ImGui::SetItemTooltip("Compare the render skeleton (m_modelSkeleton): the bones the mesh is skinned to.");
     ImGui::SameLine();
-    changed = ImGui::RadioButton("Animation skeleton", &kind, 1) || changed;
-    ImGui::SetItemTooltip("The AG2 .vnmskel that animations play on.");
+    changed = ImGui::RadioButton("Animation", &kind, 1) || changed;
+    ImGui::SetItemTooltip("Compare the animation skeleton: the AG2 .vnmskel that animations play on.");
     kind_ = static_cast<SkeletonKind>(kind);
     ImGui::SameLine();
-    ImGui::Checkbox("Link cameras", &link_cameras_);
+    ImGui::Checkbox("Link", &link_cameras_);
+    ImGui::SetItemTooltip("Move both cameras together");
     if (changed) {
         Refresh(false);
     }
 
     bool frame = false;
     const int lod_count = std::max(left_view_.Scene().LodCount, right_view_.Scene().LodCount);
-    if (DrawViewSettings(settings_, lod_count, frame)) {
+    ImGui::SameLine();
+    if (ImGui::GetContentRegionAvail().x < 380 * scale) {
+        ImGui::NewLine();
+    } else {
+        ui::ToolSeparator();
+    }
+    bool lod_changed = DrawViewSettings(settings_, lod_count, frame);
+
+    if (read_ && (left_view_.CanAnimate() || right_view_.CanAnimate())) {
+        player_.Draw([read = read_](const std::string& path) { return read(ModelVersion::Mod, path); });
+        player_.Advance(ImGui::GetIO().DeltaTime);
+        left_warning_ = left_view_.Animate(player_.Clip(), player_.Time());
+        right_warning_ = right_view_.Animate(player_.Clip(), player_.Time());
+    }
+
+    // Cell padding is added below each row, so the cells leave room for it.
+    const float height = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().CellPadding.y * 2;
+    if (ImGui::BeginTable("compare_split", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoPadOuterX,
+            {0, height})) {
+        ImGui::TableSetupColumn("viewports", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("details", ImGuiTableColumnFlags_WidthFixed, 330 * scale);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        const float spacing = 2;
+        const ImVec2 size{(ImGui::GetContentRegionAvail().x - spacing) * 0.5f, height};
+        bool open_menu = false;
+        auto column = [&](const char* id, ModelVersion version, ModelViewport& view, OrbitCamera& camera, const std::string& warning) {
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            auto* draw = ImGui::GetWindowDrawList();
+            if (view.Empty()) {
+                ImGui::Dummy(size);
+                draw->AddRectFilled(origin, {origin.x + size.x, origin.y + size.y}, ImGui::GetColorU32(ImGuiCol_FrameBg));
+            } else {
+                if (view.Draw(id, size, camera) && link_cameras_) {
+                    // Whichever side the user moves becomes the shared view.
+                    left_camera_ = camera;
+                    right_camera_ = camera;
+                }
+                open_menu = view.TakeContextMenu() || open_menu;
+            }
+            // The version name and any clip mismatch sit on the image instead of a line above it.
+            const char* name = ModelVersionName(version);
+            const ImVec2 text = ImGui::CalcTextSize(name);
+            draw->AddRectFilled({origin.x, origin.y}, {origin.x + text.x + 12, origin.y + text.y + 6}, IM_COL32(0, 0, 0, 140));
+            draw->AddText({origin.x + 6, origin.y + 3}, ImGui::GetColorU32(ImGuiCol_Text), name);
+            if (view.Empty()) {
+                draw->AddText({origin.x + 6, origin.y + text.y + 10}, ImGui::GetColorU32(ImGuiCol_TextDisabled), "Not available");
+            }
+            if (!warning.empty()) {
+                draw->AddText({origin.x + text.x + 18, origin.y + 3}, ImGui::GetColorU32(ui::kWarning), "clip mismatch");
+            }
+        };
+        column("left_viewport", left_, left_view_, left_camera_, left_warning_);
+        ImGui::SameLine(0, spacing);
+        column("right_viewport", right_, right_view_, right_camera_, right_warning_);
+        if (open_menu) {
+            ImGui::OpenPopup("view_menu");
+        }
+        if (ImGui::BeginPopup("view_menu")) {
+            bool menu_frame = false;
+            lod_changed = DrawViewMenu(settings_, lod_count, menu_frame) || lod_changed;
+            frame = frame || menu_frame;
+            ImGui::Separator();
+            ImGui::MenuItem("Link cameras", nullptr, &link_cameras_);
+            if (ImGui::MenuItem("Swap sides")) {
+                std::swap(left_, right_);
+                Refresh(false);
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::TableNextColumn();
+        ImGui::BeginChild("details", {0, height});
+        ui::TextEllipsis(title_);
+        if (ImGui::BeginPopupContextItem("title_menu")) {
+            ui::CopyMenuItem("Copy path", title_);
+            ImGui::EndPopup();
+        }
+        for (const std::string* warning : {&left_warning_, &right_warning_}) {
+            if (!warning->empty()) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ui::kWarning);
+                ImGui::TextWrapped("%s", warning->c_str());
+                ImGui::PopStyleColor();
+                break;
+            }
+        }
+        DrawReport();
+        DrawDiff();
+        ImGui::EndChild();
+        ImGui::EndTable();
+    }
+
+    if (lod_changed) {
         left_view_.SetLod(settings_.Lod);
         right_view_.SetLod(settings_.Lod);
     }
@@ -345,40 +499,6 @@ void ComparisonView::Draw() {
         left_camera_ = OrbitCamera::Framing(scene.Min, scene.Max);
         right_camera_ = left_camera_;
     }
-
-    if (read_ && (left_view_.CanAnimate() || right_view_.CanAnimate())) {
-        player_.Draw([this](const std::string& path) { return read_(ModelVersion::Mod, path); });
-        player_.Advance(ImGui::GetIO().DeltaTime);
-        left_warning_ = left_view_.Animate(player_.Clip(), player_.Time());
-        right_warning_ = right_view_.Animate(player_.Clip(), player_.Time());
-    }
-
-    DrawReport();
-    DrawDiff();
-
-    const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    const ImVec2 available = ImGui::GetContentRegionAvail();
-    const ImVec2 size{(available.x - spacing) * 0.5f, available.y - ImGui::GetTextLineHeightWithSpacing()};
-    auto column = [&](const char* id, ModelVersion version, ModelViewport& view, OrbitCamera& camera, const std::string& warning) {
-        ImGui::BeginGroup();
-        ImGui::TextUnformatted(ModelVersionName(version));
-        if (!warning.empty()) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f), "(clip mismatch)");
-            ImGui::SetItemTooltip("%s", warning.c_str());
-        }
-        if (view.Empty()) {
-            ImGui::Dummy(size);
-        } else if (view.Draw(id, size, camera) && link_cameras_) {
-            // Whichever side the user moves becomes the shared view.
-            left_camera_ = camera;
-            right_camera_ = camera;
-        }
-        ImGui::EndGroup();
-    };
-    column("left_viewport", left_, left_view_, left_camera_, left_warning_);
-    ImGui::SameLine();
-    column("right_viewport", right_, right_view_, right_camera_, right_warning_);
 }
 
 void ComparisonView::Record(VkCommandBuffer command_buffer) {

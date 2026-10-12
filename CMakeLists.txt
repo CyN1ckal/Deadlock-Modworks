@@ -75,6 +75,29 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(meshoptimizer)
 
+FetchContent_Declare(
+    sqlite3
+    URL https://www.sqlite.org/2026/sqlite-amalgamation-3540000.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_GetProperties(sqlite3)
+if(NOT sqlite3_POPULATED)
+    FetchContent_Populate(sqlite3)
+endif()
+add_library(sr_sqlite STATIC ${sqlite3_SOURCE_DIR}/sqlite3.c)
+target_include_directories(sr_sqlite PUBLIC ${sqlite3_SOURCE_DIR})
+# Stored mod files can be larger than SQLite's default 1 GB value limit.
+target_compile_definitions(sr_sqlite PRIVATE
+    SQLITE_MAX_LENGTH=2147483647
+    SQLITE_DEFAULT_FOREIGN_KEYS=1
+    SQLITE_OMIT_LOAD_EXTENSION
+    SQLITE_DQS=0
+    SQLITE_THREADSAFE=1
+)
+if(MSVC)
+    target_compile_options(sr_sqlite PRIVATE /W0)
+endif()
+
 add_library(skeleton_repair_core STATIC
     src/core/strings.cpp
     src/core/skeleton.cpp
@@ -92,10 +115,12 @@ add_library(skeleton_repair_core STATIC
     src/core/animation_clip.cpp
     src/core/game_folder.cpp
     src/core/model_library.cpp
+    src/core/content_hash.cpp
+    src/core/content_store.cpp
     src/core/mod_store.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32)
 
 # Opens the model tools workspace by default; command-line options run the console workflow.
 add_executable(DeadlockSkeletonRepair
@@ -118,7 +143,16 @@ add_executable(skeleton_repair_tests
     tests/animation_clip_tests.cpp
     tests/game_folder_tests.cpp
     tests/model_library_tests.cpp
+    tests/store_tests.cpp
+    tests/library_model_tests.cpp
+    tests/store_reader_tests.cpp
+    tests/history_compare_tests.cpp
+    tests/command_line_store_tests.cpp
+    src/preview/library_model.cpp
+    src/preview/store_reader.cpp
+    src/preview/history_compare.cpp
 )
+target_include_directories(skeleton_repair_tests PRIVATE src/preview)
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 

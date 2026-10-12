@@ -6,36 +6,43 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <stdexcept>
 #include <string_view>
 
 namespace skeleton_repair {
 
+namespace {
+struct ColorModeOption {
+    const char* Label;
+    ColorMode Value;
+};
+constexpr ColorModeOption kColorModes[] = {{"Textured", ColorMode::Textured}, {"Clay", ColorMode::Clay},
+    {"Material colors", ColorMode::Material}, {"Bone colors", ColorMode::Bone}};
+}  // namespace
+
 bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame) {
+    const float scale = ImGui::GetFontSize() / 15.0f;
     bool lod_changed = false;
     if (lod_count > 1) {
-        ImGui::SetNextItemWidth(90);
-        lod_changed = ImGui::SliderInt("LOD", &settings.Lod, 0, lod_count - 1);
+        ImGui::SetNextItemWidth(64 * scale);
+        lod_changed = ImGui::SliderInt("##lod", &settings.Lod, 0, lod_count - 1, "LOD %d");
+        ImGui::SetItemTooltip("Level of detail. 0 is the full-quality mesh.");
         ImGui::SameLine();
     }
-    ImGui::Checkbox("Skeleton", &settings.ShowSkeleton);
+    ImGui::Checkbox("Bones", &settings.ShowSkeleton);
+    ImGui::SetItemTooltip("Draw the skeleton over the model");
     ImGui::SameLine();
     ImGui::Checkbox("Grid", &settings.ShowGrid);
     ImGui::SameLine();
-    struct Mode {
-        const char* Label;
-        ColorMode Value;
-    };
-    static const Mode kModes[] = {{"Textured", ColorMode::Textured}, {"Clay", ColorMode::Clay},
-        {"Material colors", ColorMode::Material}, {"Bone colors", ColorMode::Bone}};
-    const char* current = kModes[0].Label;
-    for (const Mode& mode : kModes) {
+    const char* current = kColorModes[0].Label;
+    for (const ColorModeOption& mode : kColorModes) {
         if (mode.Value == settings.Coloring) {
             current = mode.Label;
         }
     }
-    ImGui::SetNextItemWidth(130);
+    ImGui::SetNextItemWidth(118 * scale);
     if (ImGui::BeginCombo("##coloring", current)) {
-        for (const Mode& mode : kModes) {
+        for (const ColorModeOption& mode : kColorModes) {
             if (ImGui::Selectable(mode.Label, mode.Value == settings.Coloring)) {
                 settings.Coloring = mode.Value;
             }
@@ -44,7 +51,32 @@ bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame) {
     }
     ImGui::SetItemTooltip("Textured: material color maps. Bone colors: each vertex takes the color of the bone that moves it most.");
     ImGui::SameLine();
-    frame = ImGui::Button("Frame");
+    frame = ImGui::SmallButton("Frame");
+    ImGui::SetItemTooltip("Fit the model in view (F over the viewport)");
+    return lod_changed;
+}
+
+bool DrawViewMenu(ViewSettings& settings, int lod_count, bool& frame) {
+    bool lod_changed = false;
+    frame = ImGui::MenuItem("Frame model", "F");
+    ImGui::Separator();
+    ImGui::MenuItem("Show bones", nullptr, &settings.ShowSkeleton);
+    ImGui::MenuItem("Show grid", nullptr, &settings.ShowGrid);
+    ImGui::Separator();
+    for (const ColorModeOption& mode : kColorModes) {
+        if (ImGui::MenuItem(mode.Label, nullptr, mode.Value == settings.Coloring)) {
+            settings.Coloring = mode.Value;
+        }
+    }
+    if (lod_count > 1 && ImGui::BeginMenu("Level of detail")) {
+        for (int lod = 0; lod < lod_count; ++lod) {
+            if (ImGui::MenuItem(("LOD " + std::to_string(lod)).c_str(), nullptr, settings.Lod == lod)) {
+                lod_changed = settings.Lod != lod;
+                settings.Lod = lod;
+            }
+        }
+        ImGui::EndMenu();
+    }
     return lod_changed;
 }
 
@@ -54,6 +86,7 @@ void AnimationPlayer::SetClips(const std::vector<std::string>& paths) {
     std::vector<std::string> sorted = paths;
     std::sort(sorted.begin(), sorted.end());
     clips_.clear();
+    loading_.Cancel();
     for (const std::string& path : sorted) {
         const bool twin = path.size() > kTwin.size() && path.compare(path.size() - kTwin.size(), kTwin.size(), kTwin) == 0;
         std::string base = twin ? path.substr(0, path.size() - kTwin.size()) : path.substr(0, path.size() - kClip.size());
@@ -70,8 +103,9 @@ void AnimationPlayer::SetClips(const std::vector<std::string>& paths) {
 }
 
 bool AnimationPlayer::Draw(const ResourceReader& read) {
-    bool changed = false;
-    ImGui::SetNextItemWidth(260);
+    bool changed = Poll();
+    const float scale = ImGui::GetFontSize() / 15.0f;
+    ImGui::SetNextItemWidth(220 * scale);
     const char* preview = selected_ >= 0 ? clips_[static_cast<size_t>(selected_)].Label.c_str() : "Bind pose";
     if (ImGui::BeginCombo("##clip", clips_.empty() ? "No animation clips" : preview, ImGuiComboFlags_HeightLarge)) {
         ImGui::SetNextItemWidth(-1);
@@ -81,6 +115,7 @@ bool AnimationPlayer::Draw(const ResourceReader& read) {
         ImGui::InputTextWithHint("##clip_filter", "Filter", filter_, sizeof(filter_));
         if (ImGui::Selectable("Bind pose", selected_ < 0)) {
             selected_ = -1;
+            loading_.Cancel();
             clip_.reset();
             error_.clear();
             changed = true;
@@ -96,23 +131,29 @@ bool AnimationPlayer::Draw(const ResourceReader& read) {
         }
         ImGui::EndCombo();
     }
+    ImGui::SetItemTooltip("Animation clip. Type in the list to filter it.");
     ImGui::SameLine();
-    if (ImGui::Button(playing_ ? "Pause" : "Play")) {
+    if (ImGui::SmallButton(playing_ ? "Pause" : "Play")) {
         playing_ = !playing_;
     }
     if (clip_) {
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(180);
+        ImGui::SetNextItemWidth(150 * scale);
         float shown = clip_->Duration > 0 ? std::fmod(time_, clip_->Duration) : 0;
         if (ImGui::SliderFloat("##time", &shown, 0, std::max(clip_->Duration, 0.001f), "%.2f s")) {
             time_ = shown;
             playing_ = false;
         }
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(90);
-        ImGui::SliderFloat("Speed", &speed_, 0.1f, 2.0f, "%.1fx");
+        ImGui::SetNextItemWidth(70 * scale);
+        ImGui::SliderFloat("##speed", &speed_, 0.1f, 2.0f, "%.1fx");
+        ImGui::SetItemTooltip("Playback speed");
         ImGui::SameLine();
         ImGui::TextDisabled("%u frames%s", clip_->FrameCount, clip_->Additive ? ", additive" : "");
+    }
+    if (loading_.Busy()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Loading clip...");
     }
     if (!error_.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", error_.c_str());
@@ -128,18 +169,29 @@ bool AnimationPlayer::Select(const std::string& path, const ResourceReader& read
     selected_ = static_cast<int>(found - clips_.begin());
     clip_.reset();
     error_.clear();
+    time_ = 0;
+    playing_ = true;
+    loading_.Start([read, path](CancellationToken) {
+        const auto bytes = read(path);
+        if (!bytes) {
+            throw std::runtime_error("Clip is missing.");
+        }
+        return DecodeAnimationClip(*bytes);
+    });
+    return true;
+}
+
+bool AnimationPlayer::Poll() {
     try {
-        if (const auto bytes = read(path)) {
-            clip_ = DecodeAnimationClip(*bytes);
-        } else {
-            error_ = "Clip is missing.";
+        if (auto clip = loading_.Take()) {
+            clip_ = std::move(*clip);
+            time_ = 0;
+            return true;
         }
     } catch (const std::exception& error) {
         error_ = error.what();
     }
-    time_ = 0;
-    playing_ = true;
-    return true;
+    return false;
 }
 
 void AnimationPlayer::Advance(float seconds) {
@@ -159,7 +211,41 @@ ModelViewport::~ModelViewport() {
     }
 }
 
+PreparedModel PrepareModel(const ModelGeometry& geometry, const ResourceReader* read, uint32_t max_texture_size,
+    const PreparedModel* reuse) {
+    PreparedModel prepared;
+    prepared.Bones = geometry.Bones;
+    prepared.Scene = BuildPreviewScene(geometry);
+    if (read == nullptr) {
+        return prepared;
+    }
+    const auto names = [](const PreviewScene& scene) {
+        std::vector<std::string> materials;
+        for (const PreviewDraw& draw : scene.Draws) {
+            if (!draw.Material.empty() && std::find(materials.begin(), materials.end(), draw.Material) == materials.end()) {
+                materials.push_back(draw.Material);
+            }
+        }
+        return materials;
+    };
+    if (reuse != nullptr && reuse->Materials && names(reuse->Scene) == names(prepared.Scene)) {
+        prepared.Materials = reuse->Materials;
+    } else {
+        prepared.Materials = std::make_shared<const std::vector<PreviewMaterial>>(LoadPreviewMaterials(prepared.Scene, *read, max_texture_size));
+    }
+    return prepared;
+}
+
 void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read, uint32_t max_texture_size) {
+    if (geometry == nullptr) {
+        SetModel(static_cast<const PreparedModel*>(nullptr), lod);
+        return;
+    }
+    const PreparedModel prepared = PrepareModel(*geometry, read, max_texture_size);
+    SetModel(&prepared, lod);
+}
+
+void ModelViewport::SetModel(const PreparedModel* model, int lod) {
     textured_materials_ = 0;
     material_count_ = 0;
     material_notes_.clear();
@@ -167,21 +253,21 @@ void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const Resou
     posed_.reset();
     overlay_colors_.clear();
     overlay_animation_ = false;
-    if (geometry == nullptr) {
+    if (model == nullptr) {
         renderer_.ClearScene();
         scene_ = {};
         model_bones_.clear();
         visible_.clear();
         return;
     }
-    model_bones_ = geometry->Bones;
-    scene_ = BuildPreviewScene(*geometry);
+    model_bones_ = model->Bones;
+    scene_ = model->Scene;
     renderer_.SetScene(scene_);
     SetLod(lod);
-    if (read == nullptr) {
+    if (!model->Materials) {
         return;
     }
-    const std::vector<PreviewMaterial> materials = LoadPreviewMaterials(scene_, *read, max_texture_size);
+    const std::vector<PreviewMaterial>& materials = *model->Materials;
     material_notes_ = renderer_.SetMaterials(materials);
     material_count_ = materials.size();
     textured_materials_ = renderer_.TextureCount();
@@ -279,10 +365,19 @@ bool ModelViewport::Draw(const char* id, ImVec2 size, OrbitCamera& camera, bool 
             camera = OrbitCamera::Framing(scene_.Min, scene_.Max);
             moved = true;
         }
-        ImGui::SetItemTooltip("Left drag: orbit   Right/middle drag: pan   Wheel: zoom   F: frame");
+        // A right drag pans, so only a click opens the menu.
+        const float threshold = io.MouseDragThreshold;
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < threshold * threshold) {
+            context_requested_ = true;
+        }
     }
-    ImGui::GetWindowDrawList()->AddImage(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture_)), origin,
-        ImVec2(origin.x + size.x, origin.y + size.y));
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture_)), origin, ImVec2(origin.x + size.x, origin.y + size.y));
+    if (ImGui::IsItemHovered()) {
+        constexpr const char* kHint = "Drag: orbit   Right/middle drag: pan   Wheel: zoom   F: frame   Right-click: options";
+        const float line = ImGui::GetTextLineHeight();
+        draw->AddText({origin.x + 6, origin.y + size.y - line - 4}, ImGui::GetColorU32(ImGuiCol_TextDisabled), kHint);
+    }
     drawn_ = true;
     return moved;
 }
