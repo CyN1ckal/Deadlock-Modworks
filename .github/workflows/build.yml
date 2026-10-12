@@ -13,6 +13,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
       - name: Configure
         shell: pwsh
         run: |
@@ -25,7 +30,12 @@ jobs:
       - name: Build
         run: cmake --build build/release --config Release
       - name: Test
-        run: .\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+        shell: pwsh
+        run: |
+          .\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\build\release\bin\Release\render_tests.exe --gtest_brief=1
+          exit $LASTEXITCODE
       - name: Package
         shell: pwsh
         run: ./scripts/Publish.ps1

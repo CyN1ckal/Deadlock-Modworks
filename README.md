@@ -1,89 +1,189 @@
-# Deadlock Skeleton Repair
+# Deadlock Model Tools
 
-A Windows x64 command-line tool for checking Deadlock hero-model mods against the installed game, repairing supported skeleton changes, and writing a JSON report of anything that needs author review.
+A native C++20 app for Windows x64 that lets you view Deadlock model mods, compare them with the installed game, and repair supported skeleton changes.
 
-The program is `DeadlockSkeletonRepair.exe`. It does not open a window. With no arguments, or with arguments it does not understand, it prints usage and exits 2.
+The main executable is **`DeadlockSkeletonRepair.exe`**. Launch it without arguments to open the GUI, or use command-line options to analyze and repair a mod from a terminal.
 
-## Use the tool
+## Build from source
 
-Close Deadlock and wait for Steam updates to finish before running repairs. The tool holds read locks while it works; a concurrent update may cause either operation to report a file-access error. A repair always re-analyzes the current files before writing.
+### 1. Install the build tools
 
-```powershell
-.\DeadlockSkeletonRepair.exe --analyze "C:\Games\Deadlock\game\citadel" "mod.vpk" --report "report.json"
-.\DeadlockSkeletonRepair.exe --update "C:\Games\Deadlock\game\citadel" "mod.vpk" "mod-repaired.vpk"
-.\DeadlockSkeletonRepair.exe --repair "C:\Games\Deadlock\game\citadel" "mod.vpk" --report "repair.json"
-```
+- **Visual Studio 2026 or 2022**, with the **Desktop development with C++** workload and a Windows SDK.
+- **CMake 3.24 or newer**, available on your `PATH`.
+- **Vulkan SDK**, including `glslc`. Restart your terminal after installation so it picks up `VULKAN_SDK`.
 
-`<citadel-folder>` is the installed `Deadlock/game/citadel` directory, the folder that contains `pak01_dir.vpk`.
+The viewer needs a graphics driver supporting **Vulkan 1.3**. The SDK is a build dependency; you do not need it to run a packaged app.
 
-- `--analyze` reads the mod and prints one line per hero resource. It does not write a VPK.
-- `--update` writes a new archive. It refuses to overwrite an existing file.
-- `--repair` replaces the mod with a validated archive and keeps a uniquely named `.bak-...` backup beside the original.
+### 2. Configure and build
 
-`--report` is optional, must be the last two arguments, and the path must end in `.json`. A VPK with any blocked model is left untouched. Test a repaired mod in-game.
+Open PowerShell in the repository folder, where `CMakeLists.txt` is located. The first configure downloads the C++ dependencies, so it needs an internet connection.
 
-To undo a repair, close the game, move the repaired VPK out of the addons folder, then copy its original `.bak-...` file back to the original VPK filename. For a chunked mod, leave its original chunk files in place: the backup directory VPK still refers to them. Repaired VPKs contain their data in a single archive.
-
-## What the results mean
-
-| Result | Meaning |
-| --- | --- |
-| Repairable | A supported skeleton rewrite passed the structural checks. Analysis uses this before any file is written. |
-| Updated | The complete repaired VPK was written, reopened, and validated. |
-| Current | No actionable supported rig issue was found. Custom render bones, poses and cloth can differ from the stock model. This does not certify in-game compatibility. |
-| NeedsReview | An incompatible animation override, unresolved declared rig dependency, ambiguous legacy mapping, or unsupported structure needs a mod author's judgment. |
-| Failed | The input could not be read or validated, or the operation failed. |
-| Skipped | No supported hero models were found. The tool cannot assess that content. |
-
-Progress lines spell “Needs review”. The result line and the JSON report use `NeedsReview`.
-
-## Scope and limits
-
-The tool supports VPK version 2, hero `.vmdl_c` resources and AG2 `.vnmskel_c` animation-skeleton overrides. A custom render skeleton is not a copy of the stock mesh skeleton: different proportions, helper bones, cloth topology, LOD flags and bone order can be intentional. Models declaring external AG2 skeleton bindings keep their render skeletons unchanged. These differences appear as non-blocking notes.
-
-A bundled stock-named `.vnmskel_c` can override the installed game and break animation when its binding order or low-LOD sampling layout is outdated. The tool checks that layout separately and migrates compatible overrides onto the current game binding order. It preserves existing parent-space reference poses and authored masks, adds new stock bones, recomputes world-space poses, and updates the low-LOD sampling count. A changed parent hierarchy, custom or removed animation bone, or unsupported secondary skeleton blocks that migration. Model geometry and other archive resources stay as they were.
-
-Unique case-only bone renames are supported when they are one-to-one and their mapped parent relationships agree. The tool canonicalizes bone IDs and same-skeleton mask bone references while preserving reference poses, mask weights, mask labels and references to other skeletons. It reports the mappings as `BoneRenames` in JSON. Ambiguous casing, collapsed names, semantic renames and a render model still using incompatible spelling remain review cases.
-
-Haze is the case this covers: its render model already uses `weapon_hand_L`, `magazine_L`, `weapon_hand_R` and `magazine_R`, while its animation override used lowercase side suffixes. That override also had 97 bones and sampled all 97 at low LOD; the installed skeleton has 98 bones and samples 32. The repair updates the four names, 22 mask references, binding order and sampling layout, and leaves the render model and the other archive entries unchanged. In-game verification is still required.
-
-For embedded rigs without external AG2 bindings, the supported skeleton normalization can reorder compatible bones and add unambiguous missing bones. It updates the mesh remapping table while preserving authored transforms and flags.
-
-The tool checks archive bounds and per-file CRCs, skeleton array sizes, duplicate names, parent cycles, transform validity, mesh remapping indices, and declared rig dependencies in the current game and the selected VPK. Rest-pose and LOD-usage differences alone are not blockers. Missing legacy AG1 graphs are notes for models declaring AG2 bindings. Missing declared animation includes or active AG2 dependencies remain review alerts. Models with embedded physics or animation blocks, unknown skeleton metadata, or missing remap tables are blocked when a render-skeleton rewrite would be required.
-
-The tool does not infer arbitrary bone renames, migrate resource paths, rewrite animation clips, physics or cloth, or recompile source assets. It does not inspect other installed addons when resolving dependencies. A mod that depends on another addon may therefore need review.
-
-Two-way comparison cannot always distinguish intentional customization from an obsolete binding, so unresolved cases remain review alerts. A hero whose animation binding already matches the installed game is `Current` and is not rewritten. A missing declared animation include, such as Geist's `geist_backup.vmdl`, is a dependency alert, not proof that the whole mod is unusable.
-
-Reopening a compiled model proves structural readability, not correct animation, skinning, attachments, or appearance in Deadlock.
-
-## Command line
-
-`--help` and `-h` print usage when they are the only argument.
-
-Exit codes: **0** means supported analysis or a completed repair, **1** means review or unsupported content, **2** means invalid input, failure, or cancellation. Exit code 0 from analysis does not guarantee gameplay compatibility.
-
-JSON reports use schema version 2. `GeneratedUtc` is the time the report was written.
-
-## Build and test
-
-Requires Windows x64, CMake 3.24 or newer, and Visual Studio 2026 or Visual Studio 2022 with the C++ desktop workload. The repair tool does not need a .NET install. The executable uses the Visual C++ redistributable that comes with that Visual Studio install.
+**Visual Studio 2026:**
 
 ```powershell
 cmake --preset windows-release
 cmake --build --preset windows-release
-.\build\release\bin\Release\skeleton_repair_tests.exe
+```
+
+**Visual Studio 2022:**
+
+```powershell
+cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64
+cmake --build build/release --config Release
+```
+
+Choose the commands for your installed Visual Studio version. If you switch generators later, use a different build folder, such as `build/release-vs2022`.
+
+### 3. Start the app
+
+```powershell
+.\build\release\bin\Release\DeadlockSkeletonRepair.exe
+```
+
+You can also double-click that executable in File Explorer. Close the app before rebuilding it, so Windows can replace the executable.
+
+## Use the GUI
+
+### Connect the installed game
+
+The app tries to find Deadlock in your Steam libraries automatically. If it is not connected, click **Choose game archive...** and select:
+
+```text
+<your Steam library>/steamapps/common/Deadlock/game/citadel/pak01_dir.vpk
+```
+
+The installed game provides the reference models, textures, and animation resources used by the viewer and comparison tools.
+
+### Add your mods
+
+1. Click **Add VPKs or model...**.
+2. Select one or more mod `.vpk` files. Use **Ctrl-click** for individual files or **Shift-click** for a range, then click **Open**.
+3. Choose an archive from the library dropdown and a model from its model list. Use the filter to find a model by path.
+
+You can also drop multiple VPKs onto the window or executable. Existing library entries are not added twice. Adding a batch opens the first selected file; the other VPKs remain available in the library.
+
+A standalone compiled `.vmdl_c` file can be opened for viewing. Version comparison requires a model from a mod VPK.
+
+### View a model
+
+Open **View model** to inspect textures, mesh visibility, levels of detail (LOD), and the skeleton. Choose an animation clip and click **Play** when animation resources are available.
+
+| Control | Action |
+| --- | --- |
+| Left mouse drag | Orbit the camera |
+| Mouse wheel | Zoom |
+| Middle or right mouse drag | Pan |
+| **Frame** | Fit the model in view |
+
+### Compare versions
+
+Open **Compare versions** and choose the versions shown on the left and right: **Mod**, **Game**, or **Repaired**, when available. **Link cameras** keeps the two views aligned. The panel also shows skeleton differences, skin-binding checks, and available animation playback.
+
+**Repaired** is a proposed repair held in memory. Viewing it does not change a VPK. The comparison previews model and animation-skeleton migrations; the repair workflow also checks the archive's dependent resources.
+
+### Analyze and repair
+
+Close Deadlock and wait for Steam updates to finish before repairing.
+
+1. Add the VPKs you want to check to the library.
+2. Open **Repair mods** and click **Analyze mods**. This checks every VPK in the library without changing it.
+3. Read the results. Click **Repair supported mods** to repair the archives eligible for automatic fixes.
+4. Use **Save JSON report...** to export the results. Test repaired mods in Deadlock.
+
+Repair rechecks the current files before writing, replaces each supported VPK, and saves an original `.bak-...` backup beside it. Archives needing review are left untouched. The selected archive reloads after repair.
+
+**Cancel** stops at the next cancellation checkpoint. Changing the game or mod library clears the analysis. File selection is disabled while analysis or repair is running.
+
+### Understand the results
+
+| Result | Meaning |
+| --- | --- |
+| Repairable | A supported fix passed the structural checks and can be applied. |
+| Updated | The repaired archive was written, reopened, and validated. |
+| Current | No supported rig issue needing repair was found. This does not guarantee in-game compatibility. |
+| Needs review (`NeedsReview` in JSON/CLI) | A dependency, incompatible rig, or unsupported structure needs a mod author's review. |
+| Failed | The input could not be read, validated, or repaired. |
+| Skipped | No supported hero models were found in the archive. |
+
+### Undo a repair
+
+Close Deadlock, move the repaired VPK out of the addons folder, and copy its `.bak-...` backup back to the original VPK filename. Keep the backup until you have tested the mod. For a chunked VPK, keep its original chunk files too: the backup directory VPK still refers to them.
+
+## Use the command line
+
+Run these examples from `build/release/bin/Release`, or from an extracted portable package. Replace the game and mod paths with your own.
+
+```powershell
+# Check a mod without changing it and save a report.
+.\DeadlockSkeletonRepair.exe --analyze "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" --report "report.json"
+
+# Write a repaired copy to a new file.
+.\DeadlockSkeletonRepair.exe --update "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" "C:\Mods\mod-repaired.vpk"
+
+# Repair the original mod and keep a backup.
+.\DeadlockSkeletonRepair.exe --repair "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" --report "repair.json"
+
+# Show command-line help.
+.\DeadlockSkeletonRepair.exe --help
+```
+
+Each command accepts one mod VPK. Use the GUI to work with multiple archives. The game argument is the **citadel folder**, not the `pak01_dir.vpk` file. `--update` refuses to overwrite an existing output file. Optional `--report` must come last and use a `.json` filename. **Ctrl+C** cancels the operation.
+
+Exit codes: **0** = supported analysis or completed repair; **1** = needs review or unsupported content; **2** = invalid input, failure, or cancellation. JSON reports use schema version 2.
+
+## Run the tests
+
+After building, run both C++ test executables:
+
+```powershell
+.\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+.\build\release\bin\Release\render_tests.exe --gtest_brief=1
+```
+
+The core suite checks archives, resources, skeleton migration, and command-line behavior. The rendering suite checks model previews, comparisons, skinning, and animation poses; GPU tests may skip when a compatible Vulkan device is unavailable.
+
+## Create a portable package
+
+From the repository folder:
+
+```powershell
 .\scripts\Publish.ps1
 ```
 
-`windows-release` uses the Visual Studio 18 2026 generator. On a machine that only has Visual Studio 2022, `Publish.ps1` configures with that generator instead. The script builds `DeadlockSkeletonRepair.exe`, copies the README, third-party notices and license texts, and writes `dist/DeadlockSkeletonRepair-win-x64.zip`. The zip is a single executable plus those notices.
+The script builds the release app, chooses Visual Studio 2026 or 2022 when configuring a fresh build folder, and creates **`dist/DeadlockSkeletonRepair-win-x64.zip`**. Extract the ZIP and launch `DeadlockSkeletonRepair.exe`. It includes the README and third-party licenses. Shaders are embedded; game assets are not included.
 
-GitHub Actions builds and tests on Windows and uploads that zip. No game assets are distributed.
+The executable uses the Visual C++ runtime. If Windows reports a missing `VCRUNTIME` or `MSVCP` DLL, install the Microsoft Visual C++ x64 Redistributable. The GUI also needs a Vulkan 1.3 graphics driver.
 
-## Model preview
+## Build a repair-only app
 
-When the Vulkan SDK, including `glslc`, is installed, the same build also produces `ModelPreview.exe`. It opens a compiled hero model, or a model inside a VPK, and draws the decoded meshes. The repair command does not use it, and the portable zip does not include it. Without the SDK, that target is skipped and the repair tool still builds.
+To build without the Vulkan SDK, use a separate build folder:
+
+```powershell
+cmake -S . -B build/repair-only -G "Visual Studio 17 2022" -A x64 -DSR_BUILD_MODEL_TOOLS=OFF
+cmake --build build/repair-only --config Release
+.\build\repair-only\bin\Release\DeadlockSkeletonRepair.exe
+```
+
+For Visual Studio 2026, use `-G "Visual Studio 18 2026"`. This build opens the native repair window and supports the same CLI commands. Model viewing and comparison are available in the standard build.
+
+## Scope and limits
+
+Automatic repair supports VPK version 2, hero `.vmdl_c` models, and AG2 `.vnmskel_c` animation-skeleton overrides. It can migrate compatible animation bindings, handle unambiguous case-only bone renames, and normalize supported embedded skeletons while preserving authored poses and skin bindings.
+
+Custom proportions, helper bones, cloth, and reference poses can be intentional. Differences from the game are not automatically treated as errors. The tool does not infer arbitrary bone renames, recompile source assets, or rewrite animation clips, physics, or cloth. Dependencies are resolved from the selected mod VPK and installed game, not from other addons in the library.
+
+Structural validation and preview playback cannot guarantee correct appearance or behavior in Deadlock. Test repaired mods in-game.
+
+## C++ source layout
+
+- `src/app`: main executable, CLI dispatch, and the repair-only Win32 GUI.
+- `src/core`: VPK/resource parsing, skeleton repair, game detection, and reports.
+- `src/render`: Vulkan rendering, model versions, and comparison logic.
+- `src/preview`: the shared model tools GUI and animation controls.
+- `tests`: core and rendering tests.
+
+The standard build also produces `ModelPreview.exe`, a development entry point to the same workspace with `--game <citadel-folder>` and `--clip <resource-path>` options.
 
 ## Credits
 
-Binary KV3 and Source 2 resource layouts follow [Source 2 Viewer](https://s2v.app) ([ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat)), pinned to release 20.0.6980. That library is not linked into this executable. See [third-party notices](THIRD_PARTY_NOTICES.md) for the format credit and for LZ4, Zstandard, nlohmann/json, and meshoptimizer.
+Binary KV3 and Source 2 resource layouts follow [Source 2 Viewer](https://s2v.app) / [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat), pinned to release 20.0.6980. ValveResourceFormat is not linked into the executable. See [third-party notices](THIRD_PARTY_NOTICES.md) for attribution and the licenses for LZ4, Zstandard, nlohmann/json, meshoptimizer, and Dear ImGui.

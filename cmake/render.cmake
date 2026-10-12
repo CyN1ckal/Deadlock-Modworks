@@ -1,11 +1,11 @@
-# Model preview: Vulkan renderer, ImGui preview tool and their tests.
-# Needs the Vulkan SDK (headers, loader and glslc). Without it these targets are skipped.
+# Default model tools GUI, Vulkan renderer and their tests.
 
-find_package(Vulkan COMPONENTS glslc)
-if(NOT Vulkan_FOUND OR NOT Vulkan_glslc_FOUND)
-    message(STATUS "Vulkan SDK with glslc not found; skipping the model preview renderer.")
+option(SR_BUILD_MODEL_TOOLS "Build the default model viewing, comparison and repair GUI" ON)
+if(NOT SR_BUILD_MODEL_TOOLS)
+    message(STATUS "Building the repair-only GUI (SR_BUILD_MODEL_TOOLS=OFF).")
     return()
 endif()
+find_package(Vulkan REQUIRED COMPONENTS glslc)
 
 FetchContent_Declare(
     imgui
@@ -54,13 +54,19 @@ add_library(sr_render STATIC
 target_include_directories(sr_render PUBLIC src/render PRIVATE ${SR_SHADER_DIR})
 target_link_libraries(sr_render PUBLIC skeleton_repair_core Vulkan::Vulkan)
 
-add_executable(ModelPreview
+add_library(sr_model_tools STATIC
     src/preview/main.cpp
     src/preview/model_viewport.cpp
     src/preview/preview_panel.cpp
     src/preview/comparison_view.cpp
+    src/preview/repair_panel.cpp
 )
-target_link_libraries(ModelPreview PRIVATE sr_render sr_imgui shell32 comdlg32)
+target_include_directories(sr_model_tools PUBLIC src/preview)
+target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32)
+target_link_libraries(DeadlockSkeletonRepair PRIVATE sr_model_tools)
+target_compile_definitions(DeadlockSkeletonRepair PRIVATE SR_MODEL_TOOLS)
+add_executable(ModelPreview src/preview/standalone.cpp)
+target_link_libraries(ModelPreview PRIVATE sr_model_tools)
 
 add_executable(render_tests
     tests/preview_scene_tests.cpp
@@ -71,7 +77,7 @@ add_executable(render_tests
 target_link_libraries(render_tests PRIVATE sr_render GTest::gtest_main)
 
 if(MSVC)
-    foreach(target sr_render ModelPreview render_tests)
+    foreach(target sr_render sr_model_tools ModelPreview render_tests)
         target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
     endforeach()
 endif()

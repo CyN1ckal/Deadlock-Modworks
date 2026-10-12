@@ -90,12 +90,18 @@ add_library(skeleton_repair_core STATIC
     src/core/model_geometry.cpp
     src/core/texture.cpp
     src/core/animation_clip.cpp
+    src/core/game_folder.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json meshoptimizer)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json meshoptimizer advapi32)
 
-add_executable(DeadlockSkeletonRepair src/app/main.cpp)
-target_link_libraries(DeadlockSkeletonRepair PRIVATE skeleton_repair_core shell32)
+# Opens the model tools workspace by default; command-line options run the console workflow.
+add_executable(DeadlockSkeletonRepair
+    src/app/main.cpp
+    src/app/main_window.cpp
+    src/app/app.manifest
+)
+target_link_libraries(DeadlockSkeletonRepair PRIVATE skeleton_repair_core shell32 ole32 comctl32)
 
 add_executable(skeleton_repair_tests
     tests/skeleton_tests.cpp
@@ -108,6 +114,7 @@ add_executable(skeleton_repair_tests
     tests/geometry_tests.cpp
     tests/texture_tests.cpp
     tests/animation_clip_tests.cpp
+    tests/game_folder_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
