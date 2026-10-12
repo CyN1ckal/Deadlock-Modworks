@@ -77,7 +77,7 @@ struct SlotObservation {
 
 inline constexpr const char* kUnprovenSlotHeading = "Same path, not proven related";
 
-// Content-addressed library. Open, ImportVpk, and ReadBlob are the M1 surface.
+// Content-addressed library. M1 imports blobs. M2 lists models, packs, and memberships.
 class ContentStore {
 public:
     static ContentStore Open(const std::filesystem::path& directory);
@@ -90,6 +90,10 @@ public:
 
     SnapshotId ImportVpk(const std::filesystem::path& path, CancellationToken cancellation = {});
     std::vector<uint8_t> ReadBlob(const BlobId& id) const;
+    std::vector<ModelRow> ListModels() const;
+    std::vector<PackRow> ListPacks() const;
+    std::vector<MembershipRow> Memberships(const BlobId& blob) const;
+    std::vector<ModelRow> ExactDuplicateModels() const;
 
 private:
     struct State;

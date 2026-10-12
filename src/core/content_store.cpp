@@ -216,6 +216,17 @@ public:
 
     bool ColumnNull(int index) const { return sqlite3_column_type(stmt_, index) == SQLITE_NULL; }
 
+    BlobId ColumnBlobId(int index) const {
+        const void* data = sqlite3_column_blob(stmt_, index);
+        const int size = sqlite3_column_bytes(stmt_, index);
+        if (data == nullptr || size != 32) {
+            throw InvalidData("The model library has a corrupt blob id.");
+        }
+        BlobId id;
+        std::memcpy(id.Bytes.data(), data, 32);
+        return id;
+    }
+
 private:
     sqlite3* db_ = nullptr;
     sqlite3_stmt* stmt_ = nullptr;
@@ -761,6 +772,51 @@ std::string CommitImport(sqlite3* db, const std::vector<PreparedEntry>& entries,
     }
 }
 
+void ApplyPackLabel(const std::string& snapshot_id, bool path_missing, std::string absolute_path, std::string observed_utc,
+    std::string& label, std::string& utc_out) {
+    const auto slash = absolute_path.find_last_of("/\\");
+    std::string file = slash == std::string::npos ? absolute_path : absolute_path.substr(slash + 1);
+    if (path_missing || file.empty()) {
+        label = snapshot_id;
+        utc_out.clear();
+        return;
+    }
+    label = std::move(file);
+    utc_out = std::move(observed_utc);
+}
+
+std::vector<ModelRow> LoadModelRows(sqlite3* db) {
+    Statement stmt(db, R"sql(
+SELECT
+  m.blob_sha256,
+  (
+    SELECT d.path
+    FROM memberships d
+    WHERE d.blob_sha256 = m.blob_sha256 AND d.kind = 'vmdl_c'
+    ORDER BY length(d.path), d.path
+    LIMIT 1
+  ),
+  COUNT(DISTINCT m.snapshot_id),
+  COUNT(DISTINCT m.path_key),
+  MIN(m.lineage_id)
+FROM memberships m
+WHERE m.kind = 'vmdl_c'
+GROUP BY m.blob_sha256
+ORDER BY 2, hex(m.blob_sha256)
+)sql");
+    std::vector<ModelRow> rows;
+    while (stmt.Step()) {
+        ModelRow row;
+        row.Blob = stmt.ColumnBlobId(0);
+        row.DisplayPath = stmt.ColumnText(1);
+        row.SnapshotCount = static_cast<int>(stmt.ColumnInt64(2));
+        row.PathCount = static_cast<int>(stmt.ColumnInt64(3));
+        row.LineageId = stmt.ColumnText(4);
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
 }  // namespace
 
 std::string BlobId::Hex() const { return ToLowerHex(Bytes); }
@@ -920,6 +976,86 @@ std::vector<uint8_t> ContentStore::ReadBlob(const BlobId& id) const {
         throw InvalidData("The stored model blob does not match its id.");
     }
     return bytes;
+}
+
+std::vector<ModelRow> ContentStore::ListModels() const { return LoadModelRows(state_->db); }
+
+std::vector<PackRow> ContentStore::ListPacks() const {
+    Statement stmt(state_->db, R"sql(
+SELECT
+  s.id,
+  (SELECT COUNT(*) FROM memberships m WHERE m.snapshot_id = s.id AND m.kind = 'vmdl_c'),
+  (SELECT COUNT(*) FROM observations o WHERE o.snapshot_id = s.id),
+  (
+    SELECT o.absolute_path
+    FROM observations o
+    WHERE o.snapshot_id = s.id
+    ORDER BY o.observed_utc DESC, o.absolute_path DESC
+    LIMIT 1
+  ),
+  (
+    SELECT o.observed_utc
+    FROM observations o
+    WHERE o.snapshot_id = s.id
+    ORDER BY o.observed_utc DESC, o.absolute_path DESC
+    LIMIT 1
+  )
+FROM snapshots s
+ORDER BY 5 DESC, s.id
+)sql");
+    std::vector<PackRow> rows;
+    while (stmt.Step()) {
+        PackRow row;
+        row.Snapshot.Value = stmt.ColumnText(0);
+        row.ModelCount = static_cast<int>(stmt.ColumnInt64(1));
+        row.ObservationCount = static_cast<int>(stmt.ColumnInt64(2));
+        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(3), stmt.ColumnText(3), stmt.ColumnText(4), row.Label,
+            row.ObservedUtc);
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+std::vector<MembershipRow> ContentStore::Memberships(const BlobId& blob) const {
+    Statement stmt(state_->db, R"sql(
+SELECT
+  m.snapshot_id,
+  m.path,
+  (
+    SELECT o.absolute_path
+    FROM observations o
+    WHERE o.snapshot_id = m.snapshot_id
+    ORDER BY o.observed_utc DESC, o.absolute_path DESC
+    LIMIT 1
+  ),
+  (
+    SELECT o.observed_utc
+    FROM observations o
+    WHERE o.snapshot_id = m.snapshot_id
+    ORDER BY o.observed_utc DESC, o.absolute_path DESC
+    LIMIT 1
+  )
+FROM memberships m
+WHERE m.blob_sha256 = ?
+ORDER BY m.path, m.snapshot_id
+)sql");
+    stmt.BindBlob(1, blob.Bytes);
+    std::vector<MembershipRow> rows;
+    while (stmt.Step()) {
+        MembershipRow row;
+        row.Snapshot.Value = stmt.ColumnText(0);
+        row.Path = stmt.ColumnText(1);
+        ApplyPackLabel(row.Snapshot.Value, stmt.ColumnNull(2), stmt.ColumnText(2), stmt.ColumnText(3), row.PackLabel,
+            row.ObservedUtc);
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+std::vector<ModelRow> ContentStore::ExactDuplicateModels() const {
+    std::vector<ModelRow> rows = ListModels();
+    std::erase_if(rows, [](const ModelRow& row) { return row.SnapshotCount <= 1 && row.PathCount <= 1; });
+    return rows;
 }
 
 }  // namespace skeleton_repair

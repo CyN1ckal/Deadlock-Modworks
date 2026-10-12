@@ -33,7 +33,10 @@ using skeleton_repair::InvalidOperation;
 using skeleton_repair::IoError;
 using skeleton_repair::KvDocument;
 using skeleton_repair::KvValue;
+using skeleton_repair::MembershipRow;
+using skeleton_repair::ModelRow;
 using skeleton_repair::OperationCancelled;
+using skeleton_repair::PackRow;
 using skeleton_repair::Sha256;
 using skeleton_repair::Sha256File;
 using skeleton_repair::SnapshotId;
@@ -382,6 +385,17 @@ public:
 private:
     sqlite3* db_ = nullptr;
 };
+
+const ModelRow* FindModel(const std::vector<ModelRow>& rows, const BlobId& id) {
+    for (const ModelRow& row : rows) {
+        if (row.Blob.Bytes == id.Bytes) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
+bool HasBlob(const std::vector<ModelRow>& rows, const BlobId& id) { return FindModel(rows, id) != nullptr; }
 
 std::string ManifestRow(const std::string& path, const std::vector<uint8_t>& payload, const char* kind) {
     return path + "\t" + ToLowerHex(Sha256(payload)) + "\t" + std::to_string(VpkArchive::Crc(payload)) + "\t" + kind + "\n";
@@ -830,4 +844,158 @@ TEST(Store, BrokenReferenceListStillImports) {
     EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 1);
     EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM refs"), 0);
     EXPECT_FALSE(catalog.NullWhere("SELECT data_sha256 FROM blobs WHERE sha256 = ?", IdOf(broken).Bytes));
+}
+
+TEST(Store, LibraryListsOneRowPerModelPayload) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model_a{1, 1, 1};
+    const std::vector<uint8_t> model_b{2, 2, 2};
+    const std::vector<uint8_t> model_c{3, 3, 3};
+    const std::vector<uint8_t> texture{7, 7, 7, 7};
+    const fs::path alpha = dir.Path() / "alpha.vpk";
+    const fs::path beta = dir.Path() / "beta.vpk";
+    ArchiveWith(alpha, {
+        VpkChange{"models/b.vmdl_c", model_b},
+        VpkChange{"models/a.vmdl_c", model_a},
+        VpkChange{"materials/shared.vtex_c", texture},
+    });
+    ArchiveWith(beta, {
+        VpkChange{"models/heroes/shared/a.vmdl_c", model_a},
+        VpkChange{"models/c.vmdl_c", model_c},
+        VpkChange{"materials/shared.vtex_c", texture},
+    });
+
+    ContentStore store = ContentStore::Open(store_path);
+    EXPECT_TRUE(store.ListModels().empty());
+    EXPECT_TRUE(store.ListPacks().empty());
+    EXPECT_TRUE(store.Memberships(IdOf(model_a)).empty());
+    EXPECT_TRUE(store.ExactDuplicateModels().empty());
+
+    store.ImportVpk(alpha);
+    const std::vector<ModelRow> first_models = store.ListModels();
+    const std::vector<PackRow> first_packs = store.ListPacks();
+    ASSERT_EQ(first_models.size(), 2u);
+    EXPECT_EQ(first_models[0].DisplayPath, "models/a.vmdl_c");
+    EXPECT_EQ(first_models[1].DisplayPath, "models/b.vmdl_c");
+    EXPECT_EQ(first_models[0].Blob.Bytes, IdOf(model_a).Bytes);
+    EXPECT_EQ(first_models[1].Blob.Bytes, IdOf(model_b).Bytes);
+    EXPECT_FALSE(HasBlob(first_models, IdOf(texture)));
+    ASSERT_EQ(first_packs.size(), 1u);
+    EXPECT_EQ(first_packs[0].Label, "alpha.vpk");
+    EXPECT_EQ(first_packs[0].ModelCount, 2);
+    EXPECT_EQ(first_packs[0].ObservationCount, 1);
+    EXPECT_FALSE(first_packs[0].ObservedUtc.empty());
+    EXPECT_TRUE(store.ExactDuplicateModels().empty());
+
+    store.ImportVpk(beta);
+    const std::vector<ModelRow> models = store.ListModels();
+    ASSERT_EQ(models.size(), 3u);
+    EXPECT_FALSE(HasBlob(models, IdOf(texture)));
+    const ModelRow* shared = FindModel(models, IdOf(model_a));
+    const ModelRow* once_b = FindModel(models, IdOf(model_b));
+    const ModelRow* once_c = FindModel(models, IdOf(model_c));
+    ASSERT_NE(shared, nullptr);
+    ASSERT_NE(once_b, nullptr);
+    ASSERT_NE(once_c, nullptr);
+    EXPECT_EQ(shared->DisplayPath, "models/a.vmdl_c");
+    EXPECT_EQ(shared->SnapshotCount, 2);
+    EXPECT_EQ(shared->PathCount, 2);
+    EXPECT_TRUE(IsLowerHex(shared->LineageId, 32));
+    EXPECT_EQ(once_b->SnapshotCount, 1);
+    EXPECT_EQ(once_b->PathCount, 1);
+    EXPECT_EQ(once_c->SnapshotCount, 1);
+    EXPECT_EQ(once_c->PathCount, 1);
+
+    const std::vector<ModelRow> duplicates = store.ExactDuplicateModels();
+    ASSERT_EQ(duplicates.size(), 1u);
+    EXPECT_EQ(duplicates[0].Blob.Bytes, IdOf(model_a).Bytes);
+    EXPECT_FALSE(HasBlob(duplicates, IdOf(model_b)));
+    EXPECT_FALSE(HasBlob(duplicates, IdOf(model_c)));
+
+    const std::vector<MembershipRow> memberships = store.Memberships(IdOf(model_a));
+    ASSERT_EQ(memberships.size(), 2u);
+    EXPECT_EQ(memberships[0].Path, "models/a.vmdl_c");
+    EXPECT_EQ(memberships[0].PackLabel, "alpha.vpk");
+    EXPECT_EQ(memberships[1].Path, "models/heroes/shared/a.vmdl_c");
+    EXPECT_EQ(memberships[1].PackLabel, "beta.vpk");
+    EXPECT_FALSE(memberships[0].ObservedUtc.empty());
+    EXPECT_FALSE(memberships[1].ObservedUtc.empty());
+
+    const std::vector<MembershipRow> texture_rows = store.Memberships(IdOf(texture));
+    ASSERT_EQ(texture_rows.size(), 2u);
+    EXPECT_EQ(texture_rows[0].Path, "materials/shared.vtex_c");
+    EXPECT_EQ(texture_rows[1].Path, "materials/shared.vtex_c");
+
+    const std::vector<PackRow> packs = store.ListPacks();
+    ASSERT_EQ(packs.size(), 2u);
+    EXPECT_EQ(packs[0].ModelCount, 2);
+    EXPECT_EQ(packs[1].ModelCount, 2);
+}
+
+TEST(Store, TwoPathsOfOnePayloadAreOneDuplicateRow) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> shared{4, 4, 4};
+    const std::vector<uint8_t> once{5, 5};
+    const fs::path vpk = dir.Path() / "paths.vpk";
+    ArchiveWith(vpk, {
+        VpkChange{"models/nested/longer/shared.vmdl_c", shared},
+        VpkChange{"models/z.vmdl_c", shared},
+        VpkChange{"models/once.vmdl_c", once},
+    });
+
+    ContentStore store = ContentStore::Open(store_path);
+    store.ImportVpk(vpk);
+    const std::vector<ModelRow> models = store.ListModels();
+    ASSERT_EQ(models.size(), 2u);
+    const ModelRow* duplicate = FindModel(models, IdOf(shared));
+    ASSERT_NE(duplicate, nullptr);
+    EXPECT_EQ(duplicate->DisplayPath, "models/z.vmdl_c");
+    EXPECT_EQ(duplicate->SnapshotCount, 1);
+    EXPECT_EQ(duplicate->PathCount, 2);
+
+    const std::vector<ModelRow> duplicates = store.ExactDuplicateModels();
+    ASSERT_EQ(duplicates.size(), 1u);
+    EXPECT_EQ(duplicates[0].Blob.Bytes, IdOf(shared).Bytes);
+    EXPECT_FALSE(HasBlob(duplicates, IdOf(once)));
+
+    const std::vector<PackRow> packs = store.ListPacks();
+    ASSERT_EQ(packs.size(), 1u);
+    EXPECT_EQ(packs[0].ModelCount, 3);
+    EXPECT_EQ(packs[0].Label, "paths.vpk");
+}
+
+TEST(Store, TwoObservationsAreOnePack) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model{8, 8, 8};
+    const fs::path original = dir.Path() / "original.vpk";
+    const fs::path repack = dir.Path() / "repack.vpk";
+    const std::vector<VpkChange> changes{VpkChange{"models/a.vmdl_c", model}};
+    ArchiveWith(original, changes);
+    ArchiveWith(repack, changes);
+
+    ContentStore store = ContentStore::Open(store_path);
+    store.ImportVpk(original);
+    const std::string first_seen = store.ListPacks().at(0).ObservedUtc;
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    store.ImportVpk(repack);
+    std::vector<PackRow> packs = store.ListPacks();
+    ASSERT_EQ(packs.size(), 1u);
+    if (packs[0].ObservedUtc == first_seen) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        store.ImportVpk(repack);
+        packs = store.ListPacks();
+    }
+
+    ASSERT_EQ(packs.size(), 1u);
+    EXPECT_EQ(packs[0].ObservationCount, 2);
+    EXPECT_EQ(packs[0].ModelCount, 1);
+    EXPECT_EQ(packs[0].Label, "repack.vpk");
+    EXPECT_GT(packs[0].ObservedUtc, first_seen);
+    EXPECT_EQ(store.ListModels().size(), 1u);
+    ASSERT_EQ(store.Memberships(IdOf(model)).size(), 1u);
+    EXPECT_EQ(store.Memberships(IdOf(model))[0].PackLabel, "repack.vpk");
+    EXPECT_EQ(store.Memberships(IdOf(model))[0].ObservedUtc, packs[0].ObservedUtc);
 }
