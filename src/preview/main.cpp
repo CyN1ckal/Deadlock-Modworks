@@ -14,6 +14,7 @@
 #include "model_geometry.hpp"
 #include "model_renderer.hpp"
 #include "comparison_view.hpp"
+#include "library_panel.hpp"
 #include "model_versions.hpp"
 #include "preview_panel.hpp"
 #include "strings.hpp"
@@ -284,6 +285,7 @@ const wchar_t* const kDefaultGameFolder = L"C:\\Program Files (x86)\\Steam\\stea
 struct App {
     PreviewPanel Panel;
     ComparisonView Compare;
+    LibraryPanel Library;
     std::optional<VpkArchive> Mod;
     std::string ModName;
     std::vector<const VpkEntry*> Models;
@@ -626,8 +628,14 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
                 ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
                 ImGuiID right = 0;
-                const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.28f, nullptr, &right);
-                ImGui::DockBuilderDockWindow("Browser", left);
+                const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.46f, nullptr, &right);
+                ImGuiID after_library = 0;
+                const ImGuiID library = ImGui::DockBuilderSplitNode(left, ImGuiDir_Left, 0.42f, nullptr, &after_library);
+                ImGuiID browser = 0;
+                const ImGuiID history = ImGui::DockBuilderSplitNode(after_library, ImGuiDir_Left, 0.55f, nullptr, &browser);
+                ImGui::DockBuilderDockWindow("Library", library);
+                ImGui::DockBuilderDockWindow("History", history);
+                ImGui::DockBuilderDockWindow("Browser", browser);
                 ImGui::DockBuilderDockWindow("Preview", right);
                 ImGui::DockBuilderDockWindow("Compare", right);
                 ImGui::DockBuilderFinish(dockspace);
@@ -635,6 +643,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
             }
 
             app.DrawBrowser(hwnd);
+            app.Library.Draw(hwnd);
             ImGui::Begin("Preview", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
             app.Panel.Draw();
             ImGui::End();

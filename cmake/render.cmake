@@ -59,6 +59,8 @@ add_executable(ModelPreview
     src/preview/model_viewport.cpp
     src/preview/preview_panel.cpp
     src/preview/comparison_view.cpp
+    src/preview/library_panel.cpp
+    src/preview/library_model.cpp
 )
 target_link_libraries(ModelPreview PRIVATE sr_render sr_imgui shell32 comdlg32)
 
