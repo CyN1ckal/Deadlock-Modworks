@@ -1124,6 +1124,64 @@ TEST(Store, TwoObservationsAreOnePack) {
     EXPECT_EQ(remaining[0].ObservedUtc, packs[0].ObservedUtc);
 }
 
+TEST(Store, ImportedObservationIdIsWhatDropObservationRemoves) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model{9, 9, 9};
+    const fs::path first = dir.Path() / "first.vpk";
+    const fs::path second = dir.Path() / "second.vpk";
+    const std::vector<VpkChange> changes{VpkChange{"models/a.vmdl_c", model}};
+    ArchiveWith(first, changes);
+    ArchiveWith(second, changes);
+
+    ContentStore store = ContentStore::Open(store_path);
+    store.ImportVpk(first);
+    const std::vector<PackRow> imported_packs = store.ListPacks();
+    const std::vector<MembershipRow> imported_copies = store.Memberships(IdOf(model));
+    ASSERT_EQ(imported_packs.size(), 1u);
+    ASSERT_EQ(imported_copies.size(), 1u);
+    EXPECT_FALSE(imported_packs[0].ObservationId.empty());
+    EXPECT_FALSE(imported_copies[0].ObservationId.empty());
+    EXPECT_EQ(imported_copies[0].ObservationId, imported_packs[0].ObservationId);
+
+    store.ImportVpk(second);
+    const std::vector<ModelRow> models_before = store.ListModels();
+    const std::vector<PackRow> packs_before = store.ListPacks();
+    const std::vector<MembershipRow> copies_before = store.Memberships(IdOf(model));
+    ASSERT_EQ(models_before.size(), 1u);
+    EXPECT_EQ(models_before[0].SnapshotCount, 1);
+    EXPECT_EQ(models_before[0].PathCount, 1);
+    ASSERT_EQ(packs_before.size(), 1u);
+    EXPECT_EQ(packs_before[0].ModelCount, 1);
+    EXPECT_EQ(packs_before[0].ObservationCount, 2);
+    ASSERT_EQ(copies_before.size(), 1u);
+    EXPECT_FALSE(packs_before[0].ObservationId.empty());
+    EXPECT_EQ(copies_before[0].ObservationId, packs_before[0].ObservationId);
+    EXPECT_TRUE(store.ExactDuplicateModels().empty());
+
+    const std::string dropped = packs_before[0].ObservationId;
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 2);
+    store.DropObservation(dropped);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 1);
+    EXPECT_NE(catalog.Text("SELECT id FROM observations"), dropped);
+
+    const std::vector<ModelRow> models_after = store.ListModels();
+    const std::vector<PackRow> packs_after = store.ListPacks();
+    const std::vector<MembershipRow> copies_after = store.Memberships(IdOf(model));
+    ASSERT_EQ(models_after.size(), models_before.size());
+    EXPECT_EQ(models_after[0].SnapshotCount, 1);
+    EXPECT_EQ(models_after[0].PathCount, 1);
+    ASSERT_EQ(packs_after.size(), 1u);
+    EXPECT_EQ(packs_after[0].ModelCount, 1);
+    EXPECT_EQ(packs_after[0].ObservationCount, 1);
+    ASSERT_EQ(copies_after.size(), 1u);
+    EXPECT_FALSE(packs_after[0].ObservationId.empty());
+    EXPECT_NE(packs_after[0].ObservationId, dropped);
+    EXPECT_EQ(copies_after[0].ObservationId, packs_after[0].ObservationId);
+    EXPECT_TRUE(store.ExactDuplicateModels().empty());
+}
+
 TEST(Store, RepairRewritesOneModelAndReusesTheOther) {
     const std::vector<uint8_t> game_hero = HeroModel({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Remap = {0, 1}});
     const std::vector<uint8_t> old_hero = HeroModel({.Names = {"arm", "root"}, .Parents = {1, -1}, .Remap = {0, 1}});
