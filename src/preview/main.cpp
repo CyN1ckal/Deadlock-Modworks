@@ -26,6 +26,7 @@
 #include "library_panel.hpp"
 #include "mod_store.hpp"
 #include "background.hpp"
+#include "ui.hpp"
 
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
@@ -34,6 +35,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -119,7 +121,7 @@ void SetupVulkan() {
     CheckVk(vkCreateDevice(g_device.Physical, &device, nullptr, &g_device.Device));
     vkGetDeviceQueue(g_device.Device, g_device.QueueFamily, 0, &g_device.Queue);
 
-    VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE + 128};
+    VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE + 512};
     VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pool.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     pool.maxSets = pool_size.descriptorCount;
@@ -472,6 +474,14 @@ Inspection InspectModelFile(const std::filesystem::path& path) {
 struct App {
     enum class Page { Gallery, Pack, History, Inspect, Repair };
     Page CurrentPage = Page::Gallery;
+    Page PreviousPage = Page::Gallery;
+    // Set while a page shown from code waits for its tab to become selected.
+    bool PageRequested = true;
+    bool ShowExplorer = true;
+    bool ShowStatusBar = true;
+    bool OpenShortcuts = false;
+    bool OpenAbout = false;
+    char SourceFilter[128] = {};
     std::shared_ptr<ArchiveCache> Archives = std::make_shared<ArchiveCache>();
     PreviewPanel Panel;
     ComparisonView Compare;
@@ -789,8 +799,8 @@ struct App {
         if (!incoming.Sources.empty()) StartImport(incoming, false);
         if (skeleton_repair::EqualsIgnoreCase(Narrow(paths.front().extension().wstring()), ".vmdl_c")) {
             OpenModelFile(paths.front());
-            CurrentPage = Page::Inspect;
-        } else CurrentPage = Page::Gallery;
+            ShowPage(Page::Inspect);
+        } else ShowPage(Page::Gallery);
         SyncSources();
     }
 
@@ -812,81 +822,349 @@ struct App {
         }
     }
 
-    void DrawBrowser(HWND hwnd) {
-        ImGui::Begin("Navigation", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
-        ImGui::TextColored({.47f, .85f, .77f, 1.f}, "DEADLOCK");
-        ImGui::SetWindowFontScale(1.45f);
-        ImGui::TextUnformatted("Mod Manager");
-        ImGui::SetWindowFontScale(1.f);
-        ImGui::TextDisabled("Your skins. Your loadout.");
-        ImGui::Spacing(); ImGui::Spacing();
-        const auto nav = [&](const char* label, Page page) {
-            if (ImGui::Selectable(label, CurrentPage == page, 0, {0, 36})) CurrentPage = page;
+    // The explorer and workspace are fixed panels, so their dock nodes show no tab.
+    static void DockWithoutTab() {
+        ImGuiWindowClass window_class;
+        window_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoTabBar;
+        ImGui::SetNextWindowClass(&window_class);
+    }
+
+    // Switches pages from code; the page tab bar follows on the next frame.
+    void ShowPage(Page page) {
+        if (page != CurrentPage) PreviousPage = CurrentPage;
+        CurrentPage = page;
+        PageRequested = true;
+    }
+
+    bool PackBusy() const { return Builder.Busy() || Repair.Busy() || ImportBusy(); }
+    std::filesystem::path GamePath() const { return Game ? std::filesystem::path(Widen(GameName)) : std::filesystem::path{}; }
+
+    void ChooseGame(HWND hwnd) {
+        const auto paths = AskForFiles(hwnd, L"Game archive (pak01_dir.vpk)\0pak01_dir.vpk\0VPK archives (*.vpk)\0*.vpk\0",
+            L"Select game\\citadel\\pak01_dir.vpk");
+        if (!paths.empty()) OpenGame(paths.front());
+    }
+
+    void AddLibrary(HWND hwnd) {
+        Builder.AddLibrary(hwnd, [&](const ModelLibrary& library) { StartImport(library, true); },
+            [&](const std::filesystem::path& other) { StartMerge(other); });
+        ShowPage(Page::Gallery);
+    }
+
+    void RemoveSource(const std::filesystem::path& path) {
+        std::erase(ModPaths, path);
+        if (ActiveMod == path) CloseInspection();
+        SyncSources();
+        Builder.Restore(Builder.Snapshot(ModPaths, ConfiguredGame));
+    }
+
+    void FindSkins() {
+        if (CurrentPage != Page::Gallery && CurrentPage != Page::Pack) ShowPage(Page::Gallery);
+        Builder.FocusSearch();
+    }
+
+    void HandleShortcuts(HWND hwnd) {
+        constexpr ImGuiInputFlags global = ImGuiInputFlags_RouteGlobal;
+        if (!FilesBusy() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, global)) AddMods(hwnd);
+        if (!FilesBusy() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_O, global)) AddFolder(hwnd);
+        if (!FilesBusy() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_G, global)) ChooseGame(hwnd);
+        if (!PackBusy() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_B, global)) { ShowPage(Page::Pack); Builder.BuildPack(hwnd, GamePath()); }
+        if (!PackBusy() && ImGui::Shortcut(ImGuiKey_F5, global)) Builder.Reload(ModPaths);
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_F, global)) FindSkins();
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, global)) ShowExplorer = !ShowExplorer;
+        if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_LeftArrow, global)) ShowPage(PreviousPage);
+        if (ImGui::Shortcut(ImGuiKey_F1, global)) OpenShortcuts = true;
+        const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect};
+        const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5};
+        for (size_t i = 0; i < std::size(pages); ++i) {
+            if (ImGui::Shortcut(ImGuiMod_Ctrl | keys[i], global)) ShowPage(pages[i]);
+        }
+    }
+
+    void DrawMenuBar(HWND hwnd) {
+        if (!ImGui::BeginMainMenuBar()) return;
+        HandleShortcuts(hwnd);
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Add mods...", "Ctrl+O", false, !FilesBusy())) AddMods(hwnd);
+            if (ImGui::MenuItem("Add folder...", "Ctrl+Shift+O", false, !FilesBusy())) AddFolder(hwnd);
+            ImGui::SetItemTooltip("Adds every mod VPK in a folder, such as Deadlock's addons folder. Chunk files and the game archive are skipped.");
+            ImGui::Separator();
+            if (ImGui::MenuItem("Add shared library...", nullptr, false, !FilesBusy())) AddLibrary(hwnd);
+            ImGui::SetItemTooltip("Adds the mods and pack selections of a shared .db library to yours. Nothing in your library is replaced.");
+            if (ImGui::MenuItem("Share library...", nullptr, false, !FilesBusy() && Builder.CanShare())) Builder.ShareLibrary(hwnd);
+            ImGui::SetItemTooltip("Saves your mods, pack selections and thumbnails as one .db file others can add.");
+            ImGui::Separator();
+            if (ImGui::MenuItem("Choose game archive...", "Ctrl+G", false, !FilesBusy())) ChooseGame(hwnd);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Build VPK...", "Ctrl+B", false, !PackBusy() && Builder.SelectedCount() > 0)) {
+                ShowPage(Page::Pack);
+                Builder.BuildPack(hwnd, GamePath());
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Open library folder", nullptr, false, Store.has_value())) ui::RevealInExplorer(Store->ContentDirectory());
+            ImGui::Separator();
+            if (ImGui::MenuItem("Exit", "Alt+F4")) PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Edit")) {
+            if (ImGui::MenuItem("Find skins", "Ctrl+F")) FindSkins();
+            if (ImGui::MenuItem("Show every source", nullptr, false, !Builder.SourceFilter().empty())) Builder.SetSourceFilter({});
+            ImGui::Separator();
+            if (ImGui::MenuItem("Clear pack", nullptr, false, !PackBusy() && Builder.SelectedCount() > 0)) Builder.ClearPack();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View")) {
+            const struct { const char* Label; const char* Keys; Page Value; } pages[] = {
+                {"Mod library", "Ctrl+1", Page::Gallery}, {"VPK builder", "Ctrl+2", Page::Pack}, {"Version history", "Ctrl+3", Page::History},
+                {"Skin repairs", "Ctrl+4", Page::Repair}, {"Model inspector", "Ctrl+5", Page::Inspect}};
+            for (const auto& page : pages) {
+                if (ImGui::MenuItem(page.Label, page.Keys, CurrentPage == page.Value)) ShowPage(page.Value);
+            }
+            if (ImGui::MenuItem("Back", "Alt+Left")) ShowPage(PreviousPage);
+            ImGui::Separator();
+            ImGui::MenuItem("Explorer", "Ctrl+Shift+E", &ShowExplorer);
+            ImGui::MenuItem("Status bar", nullptr, &ShowStatusBar);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Refresh library", "F5", false, !PackBusy())) Builder.Reload(ModPaths);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Tools")) {
+            const bool repair_allowed = !Builder.Busy() && !ImportBusy();
+            if (ImGui::MenuItem("Analyze mods", nullptr, false, repair_allowed && Repair.CanAnalyze())) {
+                ShowPage(Page::Repair);
+                Repair.Analyze();
+            }
+            if (ImGui::MenuItem("Repair supported mods", nullptr, false, repair_allowed && Repair.CanRepair())) {
+                ShowPage(Page::Repair);
+                Repair.Repair([&] { ReleaseArchives(); });
+            }
+            if (ImGui::MenuItem("Cancel repair", nullptr, false, Repair.Busy())) Repair.Cancel();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Cancel import", nullptr, false, ImportBusy())) ImportCancellation.Cancel();
+            if (ImGui::MenuItem("Cancel VPK build", nullptr, false, Builder.Busy())) Builder.CancelBuild();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Help")) {
+            if (ImGui::MenuItem("Keyboard shortcuts", "F1")) OpenShortcuts = true;
+            if (ImGui::MenuItem("About")) OpenAbout = true;
+            ImGui::EndMenu();
+        }
+        ImGui::EndMainMenuBar();
+    }
+
+    // Context menu items for the game connection, shared by the explorer and the status bar.
+    void GameMenuItems(HWND hwnd) {
+        if (ImGui::MenuItem("Choose game archive...", "Ctrl+G", false, !FilesBusy())) ChooseGame(hwnd);
+        if (ImGui::MenuItem("Reconnect", nullptr, false, !FilesBusy() && !ConfiguredGame.empty() && !GameLoader.Busy())) OpenGame(ConfiguredGame);
+        ImGui::Separator();
+        ui::PathMenuItems(Game ? GamePath() : GameLoading);
+    }
+
+    void GameState(ImVec4& color, const char*& label) const {
+        if (Game) { color = ui::kGood; label = "Deadlock connected"; }
+        else if (GameLoader.Busy()) { color = ui::kWarning; label = "Connecting to Deadlock..."; }
+        else if (!GameError.empty()) { color = ui::kError; label = "Deadlock not connected"; }
+        else { color = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled); label = "Deadlock not connected"; }
+    }
+
+    // The most important message for the status bar, with a way to dismiss it.
+    std::string* StatusMessage(ImVec4& color) {
+        if (!SaveError.empty()) { color = ui::kError; return &SaveError; }
+        if (!GameError.empty()) { color = ui::kError; return &GameError; }
+        if (!StoreStatus.empty() && !ImportBusy()) { color = ImGui::GetStyleColorVec4(ImGuiCol_Text); return &StoreStatus; }
+        return nullptr;
+    }
+
+    void DrawStatusBar(HWND hwnd) {
+        if (!ShowStatusBar) return;
+        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+        if (ImGui::BeginViewportSideBar("##statusbar", ImGui::GetMainViewport(), ImGuiDir_Down, ImGui::GetFrameHeight(), flags)
+            && ImGui::BeginMenuBar()) {
+            ImVec4 color;
+            const char* label = nullptr;
+            GameState(color, label);
+            ImGui::PushStyleColor(ImGuiCol_Text, color);
+            const bool open = ImGui::BeginMenu((std::string("\xE2\x97\x8F ") + label + "###game").c_str());
+            ImGui::PopStyleColor();
+            if (!open) ImGui::SetItemTooltip("%s", Game ? GameName.c_str() : GameLoading.empty() ? "Choose the game archive to connect" : Narrow(GameLoading.wstring()).c_str());
+            if (open) {
+                GameMenuItems(hwnd);
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+
+            // Background work, with its progress and a way to stop it.
+            if (ImportBusy()) {
+                const size_t done = ImportedCount.load();
+                const size_t total = ImportTotal.load();
+                ImGui::TextUnformatted(Restoring ? "Opening library" : "Importing");
+                if (total > 0) {
+                    ImGui::ProgressBar(static_cast<float>(done) / static_cast<float>(total), {90, ImGui::GetTextLineHeight() * .55f}, "");
+                    ImGui::Text("%zu / %zu", done, total);
+                }
+                if (ImGui::SmallButton("Cancel##import")) ImportCancellation.Cancel();
+                ImGui::Separator();
+            }
+            if (Builder.Busy()) {
+                ImGui::TextColored(ui::kWarning, "Working on the library...");
+                if (ImGui::SmallButton("Cancel##build")) Builder.CancelBuild();
+                ImGui::Separator();
+            }
+            if (Repair.Busy()) {
+                ImGui::TextColored(ui::kWarning, "Repairs:");
+                ui::TextEllipsis(Repair.Status(), 260);
+                if (ImGui::SmallButton("Cancel##repair")) Repair.Cancel();
+                ImGui::Separator();
+            }
+            if (History.Busy()) {
+                ImGui::TextColored(ui::kWarning, "Working on the version history...");
+                ImGui::Separator();
+            }
+            if (Builder.Scanning()) {
+                ImGui::TextDisabled("Reading %zu archives...", ModPaths.size());
+                ImGui::Separator();
+            }
+
+            char counts[160];
+            std::snprintf(counts, sizeof(counts), "%zu shown  \xC2\xB7  %zu skins  \xC2\xB7  %zu sources  \xC2\xB7  %zu in pack",
+                Builder.ShownCount(), Builder.ModelCount(), ModPaths.size(), Builder.SelectedCount());
+            const float counts_width = ImGui::CalcTextSize(counts).x + ImGui::GetStyle().ItemSpacing.x * 2;
+            ImVec4 message_color;
+            if (std::string* message = StatusMessage(message_color)) {
+                const float width = ImGui::GetContentRegionAvail().x - counts_width;
+                const auto first_line = message->substr(0, message->find('\n'));
+                if (width > 40) {
+                    ui::TextEllipsis(first_line, width, &message_color);
+                    if (first_line.size() != message->size()) ImGui::SetItemTooltip("%s", message->c_str());
+                    if (ImGui::BeginPopupContextItem("message_menu")) {
+                        ui::CopyMenuItem("Copy message", *message);
+                        if (ImGui::MenuItem("Dismiss")) message->clear();
+                        ImGui::EndPopup();
+                    }
+                }
+            }
+            ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - counts_width));
+            ImGui::TextDisabled("%s", counts);
+            ImGui::EndMenuBar();
+        }
+        ImGui::End();
+    }
+
+    void DrawExplorer(HWND hwnd) {
+        if (!ShowExplorer) return;
+        DockWithoutTab();
+        ImGui::Begin("Explorer", &ShowExplorer, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+        const auto& style = ImGui::GetStyle();
+        const auto right_aligned = [&](const char* labels) {
+            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(labels).x - style.FramePadding.x * 4 - style.ItemSpacing.x);
         };
-        nav("Mod library", Page::Gallery);
-        nav("VPK builder", Page::Pack);
-        nav("Version history", Page::History);
-        nav("Skin repairs", Page::Repair);
-        nav("Model inspector", Page::Inspect);
-        ImGui::Spacing();
-        ImGui::SeparatorText("Collection");
-        ImGui::Text("%zu source archives", ModPaths.size());
-        ImGui::Text("%zu skins in pack", Builder.SelectedCount());
-        ImGui::BeginDisabled(FilesBusy());
-        if (ImGui::Button("Add mods...", {-1, 38})) AddMods(hwnd);
-        if (ImGui::Button("Add folder...", {-1, 32})) AddFolder(hwnd);
-        ImGui::SetItemTooltip("Adds every mod VPK in a folder, such as Deadlock's addons folder. Chunk files and the game archive are skipped.");
-        if (!ModPaths.empty() && ImGui::CollapsingHeader("Manage sources")) {
-            std::optional<std::filesystem::path> remove;
-            for (const auto& path : ModPaths) {
-                const auto key = Narrow(path.wstring());
-                ImGui::PushID(key.c_str());
-                ImGui::TextWrapped("%s", Narrow(path.filename().wstring()).c_str());
-                ImGui::SetItemTooltip("%s", key.c_str());
-                if (ImGui::SmallButton("Remove from library")) remove = path;
-                ImGui::PopID();
-                ImGui::Spacing();
+
+        ui::SectionLabel("SOURCES");
+        ImGui::SameLine();
+        ImGui::TextDisabled("%zu", ModPaths.size());
+        right_aligned("AddFolder");
+        if (ui::ToolButton("Add", "Add mod VPKs or models (Ctrl+O). You can also drop files on the window.", !FilesBusy())) AddMods(hwnd);
+        ImGui::SameLine();
+        if (ui::ToolButton("Folder", "Add every mod VPK in a folder (Ctrl+Shift+O)", !FilesBusy())) AddFolder(hwnd);
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##sourcefilter", "Filter sources", SourceFilter, sizeof(SourceFilter));
+
+        const float footer = ImGui::GetFrameHeightWithSpacing() * 4 + ImGui::GetTextLineHeightWithSpacing() * 2
+            + (GameError.empty() ? 0.f : ImGui::GetTextLineHeightWithSpacing() * 2) + (SaveError.empty() ? 0.f : ImGui::GetTextLineHeightWithSpacing() * 2);
+        ImGui::BeginChild("sources", {0, std::max(ImGui::GetFrameHeight() * 3, ImGui::GetContentRegionAvail().y - footer)}, ImGuiChildFlags_Borders);
+        const ImGuiTextFilter filter(SourceFilter);
+        const auto& active = Builder.SourceFilter();
+        const auto count_column = [&](size_t count) {
+            char text[32];
+            std::snprintf(text, sizeof(text), "%zu", count);
+            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(text).x);
+            ImGui::TextDisabled("%s", text);
+        };
+        if (!ModPaths.empty() && !filter.IsActive()) {
+            if (ImGui::Selectable("All sources", active.empty() && (CurrentPage == Page::Gallery || CurrentPage == Page::Pack))) {
+                Builder.SetSourceFilter({});
+                if (CurrentPage != Page::Pack) ShowPage(Page::Gallery);
             }
-            if (remove) {
-                std::erase(ModPaths, *remove);
-                if (ActiveMod == *remove) CloseInspection();
-                SyncSources();
-                Builder.Restore(Builder.Snapshot(ModPaths, ConfiguredGame));
+            count_column(Builder.ModelCount());
+        }
+        std::optional<std::filesystem::path> remove;
+        for (const auto& path : ModPaths) {
+            const auto name = Narrow(path.filename().wstring());
+            if (!filter.PassFilter(name.c_str())) continue;
+            const auto key = Narrow(path.wstring());
+            ImGui::PushID(key.c_str());
+            if (ImGui::Selectable(name.c_str(), active == path)) {
+                Builder.SetSourceFilter(active == path ? std::filesystem::path{} : path);
+                if (CurrentPage != Page::Pack) ShowPage(Page::Gallery);
             }
+            ImGui::SetItemTooltip("%s\nClick to show its skins. Right-click for more.", key.c_str());
+            if (ImGui::BeginPopupContextItem("source_menu")) {
+                ImGui::TextDisabled("%s", name.c_str());
+                ImGui::Separator();
+                if (ImGui::MenuItem("Show skins")) { Builder.SetSourceFilter(path); ShowPage(Page::Gallery); }
+                if (ImGui::MenuItem("Include every skin in the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, true);
+                if (ImGui::MenuItem("Remove every skin from the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, false);
+                ImGui::Separator();
+                ui::PathMenuItems(path);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Remove from library", nullptr, false, !FilesBusy())) remove = path;
+                ImGui::EndPopup();
+            }
+            count_column(Builder.ModelsIn(path));
+            ImGui::PopID();
         }
-        ImGui::Spacing();
-        ImGui::SeparatorText("Deadlock connection");
-        if (Game) {
-            ImGui::TextColored({.47f, .85f, .67f, 1.f}, "Game connected");
-            ImGui::SetItemTooltip("%s", GameName.c_str());
-        } else if (GameLoader.Busy()) {
-            ImGui::TextDisabled("Connecting to Deadlock...");
-            ImGui::SetItemTooltip("%s", Narrow(GameLoading.wstring()).c_str());
-        } else {
-            ImGui::TextDisabled("Game not connected");
-            ImGui::TextWrapped("Connect Deadlock for textures, skin repairs and pack dependencies.");
+        if (ModPaths.empty()) {
+            ImGui::PushTextWrapPos();
+            ImGui::TextDisabled("No sources yet. Click Add, or drop mod VPKs on the window.");
+            ImGui::PopTextWrapPos();
         }
-        if (!GameError.empty()) ImGui::TextWrapped("%s", GameError.c_str());
-        if (ImGui::Button("Choose game archive...", {-1, 32})) {
-            const auto paths = AskForFiles(hwnd, L"Game archive (pak01_dir.vpk)\0pak01_dir.vpk\0VPK archives (*.vpk)\0*.vpk\0",
-                L"Select game\\citadel\\pak01_dir.vpk");
-            if (!paths.empty()) OpenGame(paths.front());
+        if (remove) RemoveSource(*remove);
+        ImGui::EndChild();
+
+        ui::SectionLabel("GAME");
+        ImVec4 color;
+        const char* label = nullptr;
+        GameState(color, label);
+        ImGui::TextColored(color, "\xE2\x97\x8F");
+        ImGui::SameLine(0, 4);
+        ui::TextEllipsis(label, ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("...").x - style.FramePadding.x * 2 - style.ItemSpacing.x);
+        if (ImGui::BeginPopupContextItem("game_menu")) {
+            GameMenuItems(hwnd);
+            ImGui::EndPopup();
         }
-        ImGui::EndDisabled();
+        ImGui::SetItemTooltip("%s\nRight-click for more.", Game ? GameName.c_str() : "Connect Deadlock for textures, skin repairs and pack dependencies.");
+        ImGui::SameLine();
+        if (ui::ToolButton("...", "Choose game\\citadel\\pak01_dir.vpk (Ctrl+G)", !FilesBusy())) ChooseGame(hwnd);
+        if (!GameError.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
+            ImGui::TextWrapped("%s", GameError.c_str());
+            ImGui::PopStyleColor();
+        }
+
+        ui::SectionLabel("LIBRARY");
         if (Store) {
-            ImGui::TextDisabled("Saved in your model library");
-            ImGui::SetItemTooltip("%s\nShare library saves one file others can add.", Narrow(Store->ContentDirectory().wstring()).c_str());
+            const auto folder = Store->ContentDirectory();
+            ui::TextEllipsis(Narrow(folder.wstring()), 0, &style.Colors[ImGuiCol_TextDisabled]);
+            if (ImGui::BeginPopupContextItem("library_menu")) {
+                ui::PathMenuItems(folder);
+                ImGui::EndPopup();
+            }
+            ImGui::BeginDisabled(FilesBusy());
+            ImGui::BeginDisabled(!Builder.CanShare());
+            if (ImGui::Button("Share...", {ImGui::GetContentRegionAvail().x * .5f - style.ItemSpacing.x * .5f, 0})) Builder.ShareLibrary(hwnd);
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip("Save your mods, pack selections and thumbnails as one .db file others can add.");
+            ImGui::SameLine();
+            if (ImGui::Button("Add shared...", {-1, 0})) AddLibrary(hwnd);
+            ImGui::SetItemTooltip("Add the mods and pack selections of a shared .db library to yours. Nothing in yours is replaced.");
+            ImGui::EndDisabled();
+        } else {
+            ImGui::TextDisabled("Local library storage is unavailable.");
         }
-        if (!SaveError.empty()) ImGui::TextWrapped("%s", SaveError.c_str());
-        if (ImportBusy()) {
-            if (Restoring) ImGui::TextDisabled("%s", StoreStatus.c_str());
-            if (ImportTotal > 0) ImGui::Text(Restoring ? "Preparing %zu / %zu" : "Importing %zu / %zu", ImportedCount.load(), ImportTotal.load());
-            if (ImGui::Button("Cancel import")) ImportCancellation.Cancel();
-        } else if (!StoreStatus.empty()) ImGui::TextWrapped("%s", StoreStatus.c_str());
-        if (Repair.Busy() || Builder.Busy() || History.Busy()) {
-            ImGui::Spacing();
-            ImGui::TextColored({1.f, .76f, .43f, 1.f}, Repair.Busy() ? "Checking / repairing skins..." : Builder.Busy() ? "Building your VPK..."
-                : "Working on your version history...");
+        if (!SaveError.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
+            ImGui::TextWrapped("%s", SaveError.c_str());
+            ImGui::PopStyleColor();
         }
         ImGui::End();
     }
@@ -900,19 +1178,51 @@ struct App {
         Compare.ShowError("", "");
     }
 
+    // The page tabs. A tab the user clicks becomes the page; a page shown from code selects its tab.
+    void DrawPageTabs() {
+        if (!ImGui::BeginTabBar("pages", ImGuiTabBarFlags_FittingPolicyScroll)) return;
+        char pack_label[48];
+        std::snprintf(pack_label, sizeof(pack_label), "VPK builder (%zu)###pack", Builder.SelectedCount());
+        const std::string inspect_label = (ModName.empty() ? std::string("Model inspector") : "Inspect: " + ModName) + "###inspect";
+        const struct { const char* Label; const char* Tooltip; Page Value; } tabs[] = {
+            {"Mod library###gallery", "Browse every skin in your library (Ctrl+1)", Page::Gallery},
+            {pack_label, "Choose skins and export them as one VPK (Ctrl+2)", Page::Pack},
+            {"Version history###history", "Every stored copy of each model, and how repairs changed it (Ctrl+3)", Page::History},
+            {"Skin repairs###repair", "Check and repair your mods after game updates (Ctrl+4)", Page::Repair},
+            {inspect_label.c_str(), "Textures, animations and skeleton of one model (Ctrl+5)", Page::Inspect},
+        };
+        Page visible = CurrentPage;
+        for (const auto& tab : tabs) {
+            const ImGuiTabItemFlags flags = PageRequested && tab.Value == CurrentPage ? ImGuiTabItemFlags_SetSelected : 0;
+            const bool open = ImGui::BeginTabItem(tab.Label, nullptr, flags);
+            ImGui::SetItemTooltip("%s", tab.Tooltip);
+            if (open) {
+                visible = tab.Value;
+                ImGui::EndTabItem();
+            }
+        }
+        ImGui::EndTabBar();
+        if (PageRequested) {
+            if (visible == CurrentPage) PageRequested = false;
+        } else if (visible != CurrentPage) {
+            PreviousPage = CurrentPage;
+            CurrentPage = visible;
+        }
+    }
+
     void DrawWorkspace(HWND hwnd) {
+        DockWithoutTab();
         ImGui::Begin("Workspace", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
+        DrawPageTabs();
         if (CurrentPage == Page::Gallery || CurrentPage == Page::Pack) {
-            Builder.Draw(hwnd, ModPaths, Game ? std::filesystem::path(Widen(GameName)) : std::filesystem::path{},
+            Builder.Draw(hwnd, ModPaths, GamePath(),
                 // Thumbnails wait for a connecting game, which supplies most textures, instead of loading twice.
                 Repair.Busy() || ImportBusy(), Repair.Busy() || GameLoader.Busy(), CurrentPage == Page::Pack, [&] { AddMods(hwnd); },
-                [&](const ModelLibrary& library) {
-                    StartImport(library, true);
-                },
+                [&](const ModelLibrary& library) { StartImport(library, true); },
                 [&](const std::filesystem::path& other) { StartMerge(other); },
-                [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); CurrentPage = Page::Inspect; });
+                [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); ShowPage(Page::Inspect); });
         } else if (CurrentPage == Page::History) {
-            const std::string game_directory = Game ? Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring()) : std::string();
+            const std::string game_directory = Game ? Narrow(GamePath().parent_path().wstring()) : std::string();
             History.Draw(hwnd, Panel, [game = Game](const std::string& path) { return game ? game->Read(path) : std::nullopt; }, GameClips,
                 Compare, game_directory, Repair.Busy() || Builder.Busy() || ImportBusy(),
                 [&](bool compare) {
@@ -922,18 +1232,29 @@ struct App {
                     StandaloneModel = true;
                     ModName = "Version history";
                     FocusCompare = compare;
-                    CurrentPage = Page::Inspect;
+                    ShowPage(Page::Inspect);
                 },
                 [&] { ReleaseArchives(); });
         } else if (CurrentPage == Page::Inspect) {
-            if (ImGui::Button("< Back to library")) CurrentPage = Page::Gallery;
-            ImGui::SameLine(); ImGui::TextDisabled("%s", ModName.c_str());
-            ImGui::SeparatorText("Model inspector");
+            if (ui::ToolButton("<", "Back to the previous page (Alt+Left)")) ShowPage(PreviousPage == Page::Inspect ? Page::Gallery : PreviousPage);
+            ImGui::SameLine();
+            const std::string location = Selected.empty() ? ModName : ModName + "  /  " + Selected;
+            ui::TextEllipsis(location);
+            if (ImGui::BeginPopupContextItem("location_menu")) {
+                ui::CopyMenuItem("Copy model path", Selected);
+                if (!ActiveMod.empty()) {
+                    ui::CopyMenuItem("Copy source path", Narrow(ActiveMod.wstring()));
+                    if (ImGui::MenuItem("Reveal source in Explorer")) ui::RevealInExplorer(ActiveMod);
+                    if (ImGui::MenuItem("Show source in library")) { Builder.SetSourceFilter(ActiveMod); ShowPage(Page::Gallery); }
+                }
+                ImGui::EndPopup();
+            }
             if (Inspector.Busy()) {
                 ImGui::TextDisabled("Loading %s...", Selected.empty() ? ModName.c_str() : Selected.c_str());
             } else if (Selected.empty() && !StandaloneModel) {
-                ImGui::TextWrapped("Choose Inspect on a skin in the gallery to view its textures, animations and skeleton, or compare it with the installed game.");
-                if (ImGui::Button("Browse skins", {150, 36})) CurrentPage = Page::Gallery;
+                ImGui::TextDisabled("Double-click a skin in the library, or right-click it and choose Inspect, to view its textures, "
+                    "animations and skeleton or compare it with the installed game.");
+                if (ImGui::SmallButton("Browse skins")) ShowPage(Page::Gallery);
             } else if (ImGui::BeginTabBar("inspection")) {
                 if (ImGui::BeginTabItem("Preview")) { Panel.Draw(); ImGui::EndTabItem(); }
                 if (ImGui::BeginTabItem("Compare versions", nullptr, std::exchange(FocusCompare, false) ? ImGuiTabItemFlags_SetSelected : 0)) {
@@ -943,52 +1264,146 @@ struct App {
                 ImGui::EndTabBar();
             }
         } else {
-            ImGui::TextColored({.47f, .85f, .77f, 1.f}, "COLLECTION TOOLS");
-            ImGui::SetWindowFontScale(1.6f); ImGui::TextUnformatted("Skin repairs"); ImGui::SetWindowFontScale(1.f);
-            ImGui::TextDisabled("Keep your collection compatible with game updates.");
-            ImGui::Spacing();
             ImGui::BeginDisabled(Builder.Busy() || ImportBusy());
             Repair.Draw(hwnd, [&] { ReleaseArchives(); });
             ImGui::EndDisabled();
         }
         ImGui::End();
     }
+
+    void DrawDialogs() {
+        if (std::exchange(OpenShortcuts, false)) ImGui::OpenPopup("Keyboard shortcuts");
+        if (std::exchange(OpenAbout, false)) ImGui::OpenPopup("About");
+        const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
+        if (ImGui::BeginPopupModal("Keyboard shortcuts", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            static const char* const kShortcuts[][2] = {
+                {"Ctrl+O", "Add mods"}, {"Ctrl+Shift+O", "Add every mod in a folder"}, {"Ctrl+G", "Choose the game archive"},
+                {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins"}, {"F5", "Reopen every source and reload thumbnails"},
+                {"Ctrl+1 ... Ctrl+5", "Library, builder, history, repairs, inspector"}, {"Alt+Left", "Back to the previous page"},
+                {"Ctrl+Shift+E", "Show or hide the explorer"}, {"Double-click", "Inspect a skin, view a version"},
+                {"Enter / Space", "Inspect the clicked skin / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
+                {"Drag / right-drag / wheel", "Orbit / pan / zoom a viewport"}, {"F", "Frame the model in the hovered viewport"},
+                {"Right-click", "More actions on skins, sources, versions, results and viewports"}, {"F1", "This list"},
+            };
+            if (ImGui::BeginTable("shortcuts", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit)) {
+                for (const auto& [keys, action] : kShortcuts) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextColored(ui::kAccent, "%s", keys);
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(action);
+                }
+                ImGui::EndTable();
+            }
+            if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
+        if (ImGui::BeginPopupModal("About", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted("Deadlock Mod Manager");
+            ImGui::TextDisabled("Browse skins, build packs, inspect models and repair skeleton changes.");
+            ImGui::TextDisabled("Dear ImGui %s, Vulkan 1.3", ImGui::GetVersion());
+            if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    }
 };
+
+// A compact dark theme in the style of a desktop IDE: neutral greys, one blue accent, thin borders and tight spacing.
 void ApplyTheme(float scale) {
     ImGui::StyleColorsDark();
     auto& style = ImGui::GetStyle();
-    style.WindowPadding = {18, 16};
-    style.FramePadding = {10, 7};
-    style.ItemSpacing = {10, 9};
+    style.WindowPadding = {6, 6};
+    style.FramePadding = {6, 3};
+    style.CellPadding = {4, 2};
+    style.ItemSpacing = {6, 4};
+    style.ItemInnerSpacing = {4, 4};
+    style.TouchExtraPadding = {0, 0};
+    style.IndentSpacing = 14;
+    style.ScrollbarSize = 10;
+    style.GrabMinSize = 8;
     style.WindowRounding = 0;
-    style.ChildRounding = 8;
-    style.FrameRounding = 6;
-    style.PopupRounding = 8;
-    style.TabRounding = 6;
-    style.ScrollbarSize = 12;
+    style.ChildRounding = 2;
+    style.FrameRounding = 2;
+    style.PopupRounding = 3;
+    style.ScrollbarRounding = 3;
+    style.GrabRounding = 2;
+    style.TabRounding = 2;
     style.WindowBorderSize = 0;
+    style.ChildBorderSize = 1;
+    style.PopupBorderSize = 1;
     style.FrameBorderSize = 0;
+    style.TabBorderSize = 0;
+    style.TabBarBorderSize = 1;
+    style.TabBarOverlineSize = 2;
+    style.SeparatorTextBorderSize = 1;
+    style.SeparatorTextPadding = {8, 2};
+    style.DockingSeparatorSize = 1;
+    style.WindowMenuButtonPosition = ImGuiDir_None;
+    style.SelectableTextAlign = {0, .5f};
+    style.HoverDelayShort = .25f;
+    style.HoverDelayNormal = .5f;
+
+    const ImVec4 background{.118f, .122f, .133f, 1.f};
+    const ImVec4 panel{.153f, .157f, .169f, 1.f};
+    const ImVec4 raised{.200f, .208f, .224f, 1.f};
+    const ImVec4 hover{.255f, .263f, .282f, 1.f};
+    const ImVec4 line{.235f, .243f, .259f, 1.f};
+    const ImVec4 accent = ui::kAccent;
+    const ImVec4 selection{.176f, .247f, .345f, 1.f};
     auto* colors = style.Colors;
-    colors[ImGuiCol_WindowBg] = {.075f, .09f, .12f, 1.f};
-    colors[ImGuiCol_ChildBg] = {.06f, .075f, .10f, 1.f};
-    colors[ImGuiCol_Text] = {.90f, .93f, .96f, 1.f};
-    colors[ImGuiCol_TextDisabled] = {.53f, .61f, .69f, 1.f};
-    colors[ImGuiCol_Border] = {.18f, .23f, .29f, 1.f};
-    colors[ImGuiCol_FrameBg] = {.12f, .16f, .21f, 1.f};
-    colors[ImGuiCol_FrameBgHovered] = {.17f, .25f, .31f, 1.f};
-    colors[ImGuiCol_FrameBgActive] = {.19f, .31f, .38f, 1.f};
-    colors[ImGuiCol_Button] = {.13f, .32f, .40f, 1.f};
-    colors[ImGuiCol_ButtonHovered] = {.18f, .45f, .54f, 1.f};
-    colors[ImGuiCol_ButtonActive] = {.21f, .53f, .61f, 1.f};
-    colors[ImGuiCol_Header] = {.14f, .27f, .34f, 1.f};
-    colors[ImGuiCol_HeaderHovered] = {.19f, .37f, .44f, 1.f};
-    colors[ImGuiCol_HeaderActive] = {.21f, .45f, .52f, 1.f};
-    colors[ImGuiCol_Tab] = {.10f, .14f, .19f, 1.f};
-    colors[ImGuiCol_TabSelected] = {.16f, .32f, .39f, 1.f};
-    colors[ImGuiCol_TabHovered] = {.20f, .42f, .50f, 1.f};
-    colors[ImGuiCol_CheckMark] = {.45f, .81f, .91f, 1.f};
-    colors[ImGuiCol_SliderGrab] = colors[ImGuiCol_CheckMark];
-    colors[ImGuiCol_Separator] = {.18f, .23f, .29f, 1.f};
+    colors[ImGuiCol_Text] = {.874f, .882f, .898f, 1.f};
+    colors[ImGuiCol_TextDisabled] = {.525f, .541f, .569f, 1.f};
+    colors[ImGuiCol_WindowBg] = background;
+    colors[ImGuiCol_ChildBg] = {0, 0, 0, 0};
+    colors[ImGuiCol_PopupBg] = {.168f, .173f, .184f, .98f};
+    colors[ImGuiCol_Border] = line;
+    colors[ImGuiCol_BorderShadow] = {0, 0, 0, 0};
+    colors[ImGuiCol_FrameBg] = panel;
+    colors[ImGuiCol_FrameBgHovered] = raised;
+    colors[ImGuiCol_FrameBgActive] = hover;
+    colors[ImGuiCol_TitleBg] = panel;
+    colors[ImGuiCol_TitleBgActive] = panel;
+    colors[ImGuiCol_TitleBgCollapsed] = panel;
+    colors[ImGuiCol_MenuBarBg] = panel;
+    colors[ImGuiCol_ScrollbarBg] = {0, 0, 0, 0};
+    colors[ImGuiCol_ScrollbarGrab] = {.30f, .31f, .33f, 1.f};
+    colors[ImGuiCol_ScrollbarGrabHovered] = {.38f, .39f, .41f, 1.f};
+    colors[ImGuiCol_ScrollbarGrabActive] = {.45f, .46f, .48f, 1.f};
+    colors[ImGuiCol_CheckMark] = accent;
+    colors[ImGuiCol_SliderGrab] = {accent.x, accent.y, accent.z, .8f};
+    colors[ImGuiCol_SliderGrabActive] = accent;
+    colors[ImGuiCol_Button] = raised;
+    colors[ImGuiCol_ButtonHovered] = hover;
+    colors[ImGuiCol_ButtonActive] = selection;
+    // Shared by selected rows and collapsing headers, so it stays muted.
+    colors[ImGuiCol_Header] = selection;
+    colors[ImGuiCol_HeaderHovered] = {.22f, .23f, .25f, 1.f};
+    colors[ImGuiCol_HeaderActive] = {.21f, .30f, .43f, 1.f};
+    colors[ImGuiCol_Separator] = line;
+    colors[ImGuiCol_SeparatorHovered] = accent;
+    colors[ImGuiCol_SeparatorActive] = accent;
+    colors[ImGuiCol_ResizeGrip] = {0, 0, 0, 0};
+    colors[ImGuiCol_ResizeGripHovered] = {accent.x, accent.y, accent.z, .5f};
+    colors[ImGuiCol_ResizeGripActive] = accent;
+    colors[ImGuiCol_Tab] = panel;
+    colors[ImGuiCol_TabHovered] = raised;
+    colors[ImGuiCol_TabSelected] = background;
+    colors[ImGuiCol_TabSelectedOverline] = accent;
+    colors[ImGuiCol_TabDimmed] = panel;
+    colors[ImGuiCol_TabDimmedSelected] = background;
+    colors[ImGuiCol_TabDimmedSelectedOverline] = line;
+    colors[ImGuiCol_DockingPreview] = {accent.x, accent.y, accent.z, .4f};
+    colors[ImGuiCol_DockingEmptyBg] = background;
+    colors[ImGuiCol_TableHeaderBg] = panel;
+    colors[ImGuiCol_TableBorderStrong] = line;
+    colors[ImGuiCol_TableBorderLight] = {.19f, .196f, .21f, 1.f};
+    colors[ImGuiCol_TableRowBg] = {0, 0, 0, 0};
+    colors[ImGuiCol_TableRowBgAlt] = {1, 1, 1, .02f};
+    colors[ImGuiCol_TextSelectedBg] = {accent.x, accent.y, accent.z, .35f};
+    colors[ImGuiCol_NavCursor] = accent;
+    colors[ImGuiCol_ModalWindowDimBg] = {0, 0, 0, .45f};
     style.ScaleAllSizes(scale);
 }
 
@@ -1021,7 +1436,17 @@ int Run(const std::vector<std::filesystem::path>& args) {
     wchar_t windows_folder[MAX_PATH]{};
     GetWindowsDirectoryW(windows_folder, MAX_PATH);
     const auto font = std::filesystem::path(windows_folder) / L"Fonts" / L"segoeui.ttf";
-    if (std::filesystem::exists(font)) io.Fonts->AddFontFromFileTTF(Narrow(font.wstring()).c_str(), 17.f * scale);
+    const float font_size = std::round(15.f * scale);
+    if (std::filesystem::exists(font)) io.Fonts->AddFontFromFileTTF(Narrow(font.wstring()).c_str(), font_size);
+    else io.Fonts->AddFontDefault();
+    // Status dots, arrows and check marks come from Segoe UI Symbol.
+    const auto symbols = std::filesystem::path(windows_folder) / L"Fonts" / L"seguisym.ttf";
+    if (std::filesystem::exists(symbols)) {
+        static const ImWchar kSymbolRanges[] = {0x2022, 0x2026, 0x2190, 0x21FF, 0x2300, 0x23FF, 0x25A0, 0x25FF, 0x2600, 0x27BF, 0};
+        ImFontConfig merge;
+        merge.MergeMode = true;
+        io.Fonts->AddFontFromFileTTF(Narrow(symbols.wstring()).c_str(), font_size, &merge, kSymbolRanges);
+    }
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplVulkan_InitInfo init{};
     init.ApiVersion = VK_API_VERSION_1_3;
@@ -1069,7 +1494,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
             if (positional.size() > 1 && EndsWith(Narrow(positional[0].wstring()), ".vpk") && EndsWith(Narrow(positional[1].wstring()), ".vmdl_c")) {
                 app.PendingClip = clip;
                 app.OpenArchiveModel(positional[0], VpkArchive::Normalize(Narrow(positional[1].wstring())));
-                app.CurrentPage = App::Page::Inspect;
+                app.ShowPage(App::Page::Inspect);
             } else {
                 app.AddPaths(positional);
             }
@@ -1130,28 +1555,32 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 g_dropped.clear();
             }
 
-            const ImGuiID dockspace = ImGui::DockSpaceOverViewport();
+            // The menu and status bars take their rows before the dockspace fills the rest of the window.
+            app.DrawMenuBar(hwnd);
+            app.DrawStatusBar(hwnd);
+            const ImGuiID dockspace = ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_NoWindowMenuButton);
             if (first_frame) {
-                // Collection navigation on the left, thumbnail gallery filling the workspace.
+                // Explorer on the left, pages filling the workspace. Neither shows a dock tab, since the pages have their own.
                 ImGui::DockBuilderRemoveNode(dockspace);
                 ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
                 ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
                 ImGuiID right = 0;
-                const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.19f, nullptr, &right);
-                ImGui::DockBuilderDockWindow("Navigation", left);
+                const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.17f, nullptr, &right);
+                ImGui::DockBuilderDockWindow("Explorer", left);
                 ImGui::DockBuilderDockWindow("Workspace", right);
                 ImGui::DockBuilderFinish(dockspace);
                 first_frame = false;
             }
 
-            app.DrawBrowser(hwnd);
+            app.DrawExplorer(hwnd);
             app.DrawWorkspace(hwnd);
+            app.DrawDialogs();
             app.Persist();
 
             ImGui::Render();
             ImDrawData* draw_data = ImGui::GetDrawData();
             if (draw_data->DisplaySize.x > 0 && draw_data->DisplaySize.y > 0) {
-                g_window.ClearValue.color = {{0.06f, 0.06f, 0.07f, 1.0f}};
+                g_window.ClearValue.color = {{0.118f, 0.122f, 0.133f, 1.0f}};
                 FrameRender(draw_data, [&](VkCommandBuffer command_buffer) {
                     app.Panel.Record(command_buffer);
                     app.Compare.Record(command_buffer);

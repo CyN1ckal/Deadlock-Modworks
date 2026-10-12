@@ -26,6 +26,9 @@ public:
     void Record(VkCommandBuffer command_buffer);
 
 private:
+    // The side pane: statistics, mesh visibility and material notes.
+    void DrawDetails();
+
     ModelViewport viewport_;
     AnimationPlayer player_;
     ResourceReader read_;

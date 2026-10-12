@@ -11,32 +11,38 @@
 
 namespace skeleton_repair {
 
+namespace {
+struct ColorModeOption {
+    const char* Label;
+    ColorMode Value;
+};
+constexpr ColorModeOption kColorModes[] = {{"Textured", ColorMode::Textured}, {"Clay", ColorMode::Clay},
+    {"Material colors", ColorMode::Material}, {"Bone colors", ColorMode::Bone}};
+}  // namespace
+
 bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame) {
+    const float scale = ImGui::GetFontSize() / 15.0f;
     bool lod_changed = false;
     if (lod_count > 1) {
-        ImGui::SetNextItemWidth(90);
-        lod_changed = ImGui::SliderInt("LOD", &settings.Lod, 0, lod_count - 1);
+        ImGui::SetNextItemWidth(64 * scale);
+        lod_changed = ImGui::SliderInt("##lod", &settings.Lod, 0, lod_count - 1, "LOD %d");
+        ImGui::SetItemTooltip("Level of detail. 0 is the full-quality mesh.");
         ImGui::SameLine();
     }
-    ImGui::Checkbox("Skeleton", &settings.ShowSkeleton);
+    ImGui::Checkbox("Bones", &settings.ShowSkeleton);
+    ImGui::SetItemTooltip("Draw the skeleton over the model");
     ImGui::SameLine();
     ImGui::Checkbox("Grid", &settings.ShowGrid);
     ImGui::SameLine();
-    struct Mode {
-        const char* Label;
-        ColorMode Value;
-    };
-    static const Mode kModes[] = {{"Textured", ColorMode::Textured}, {"Clay", ColorMode::Clay},
-        {"Material colors", ColorMode::Material}, {"Bone colors", ColorMode::Bone}};
-    const char* current = kModes[0].Label;
-    for (const Mode& mode : kModes) {
+    const char* current = kColorModes[0].Label;
+    for (const ColorModeOption& mode : kColorModes) {
         if (mode.Value == settings.Coloring) {
             current = mode.Label;
         }
     }
-    ImGui::SetNextItemWidth(130);
+    ImGui::SetNextItemWidth(118 * scale);
     if (ImGui::BeginCombo("##coloring", current)) {
-        for (const Mode& mode : kModes) {
+        for (const ColorModeOption& mode : kColorModes) {
             if (ImGui::Selectable(mode.Label, mode.Value == settings.Coloring)) {
                 settings.Coloring = mode.Value;
             }
@@ -45,7 +51,32 @@ bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame) {
     }
     ImGui::SetItemTooltip("Textured: material color maps. Bone colors: each vertex takes the color of the bone that moves it most.");
     ImGui::SameLine();
-    frame = ImGui::Button("Frame");
+    frame = ImGui::SmallButton("Frame");
+    ImGui::SetItemTooltip("Fit the model in view (F over the viewport)");
+    return lod_changed;
+}
+
+bool DrawViewMenu(ViewSettings& settings, int lod_count, bool& frame) {
+    bool lod_changed = false;
+    frame = ImGui::MenuItem("Frame model", "F");
+    ImGui::Separator();
+    ImGui::MenuItem("Show bones", nullptr, &settings.ShowSkeleton);
+    ImGui::MenuItem("Show grid", nullptr, &settings.ShowGrid);
+    ImGui::Separator();
+    for (const ColorModeOption& mode : kColorModes) {
+        if (ImGui::MenuItem(mode.Label, nullptr, mode.Value == settings.Coloring)) {
+            settings.Coloring = mode.Value;
+        }
+    }
+    if (lod_count > 1 && ImGui::BeginMenu("Level of detail")) {
+        for (int lod = 0; lod < lod_count; ++lod) {
+            if (ImGui::MenuItem(("LOD " + std::to_string(lod)).c_str(), nullptr, settings.Lod == lod)) {
+                lod_changed = settings.Lod != lod;
+                settings.Lod = lod;
+            }
+        }
+        ImGui::EndMenu();
+    }
     return lod_changed;
 }
 
@@ -73,7 +104,8 @@ void AnimationPlayer::SetClips(const std::vector<std::string>& paths) {
 
 bool AnimationPlayer::Draw(const ResourceReader& read) {
     bool changed = Poll();
-    ImGui::SetNextItemWidth(260);
+    const float scale = ImGui::GetFontSize() / 15.0f;
+    ImGui::SetNextItemWidth(220 * scale);
     const char* preview = selected_ >= 0 ? clips_[static_cast<size_t>(selected_)].Label.c_str() : "Bind pose";
     if (ImGui::BeginCombo("##clip", clips_.empty() ? "No animation clips" : preview, ImGuiComboFlags_HeightLarge)) {
         ImGui::SetNextItemWidth(-1);
@@ -99,21 +131,23 @@ bool AnimationPlayer::Draw(const ResourceReader& read) {
         }
         ImGui::EndCombo();
     }
+    ImGui::SetItemTooltip("Animation clip. Type in the list to filter it.");
     ImGui::SameLine();
-    if (ImGui::Button(playing_ ? "Pause" : "Play")) {
+    if (ImGui::SmallButton(playing_ ? "Pause" : "Play")) {
         playing_ = !playing_;
     }
     if (clip_) {
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(180);
+        ImGui::SetNextItemWidth(150 * scale);
         float shown = clip_->Duration > 0 ? std::fmod(time_, clip_->Duration) : 0;
         if (ImGui::SliderFloat("##time", &shown, 0, std::max(clip_->Duration, 0.001f), "%.2f s")) {
             time_ = shown;
             playing_ = false;
         }
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(90);
-        ImGui::SliderFloat("Speed", &speed_, 0.1f, 2.0f, "%.1fx");
+        ImGui::SetNextItemWidth(70 * scale);
+        ImGui::SliderFloat("##speed", &speed_, 0.1f, 2.0f, "%.1fx");
+        ImGui::SetItemTooltip("Playback speed");
         ImGui::SameLine();
         ImGui::TextDisabled("%u frames%s", clip_->FrameCount, clip_->Additive ? ", additive" : "");
     }
@@ -331,10 +365,19 @@ bool ModelViewport::Draw(const char* id, ImVec2 size, OrbitCamera& camera, bool 
             camera = OrbitCamera::Framing(scene_.Min, scene_.Max);
             moved = true;
         }
-        ImGui::SetItemTooltip("Left drag: orbit   Right/middle drag: pan   Wheel: zoom   F: frame");
+        // A right drag pans, so only a click opens the menu.
+        const float threshold = io.MouseDragThreshold;
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < threshold * threshold) {
+            context_requested_ = true;
+        }
     }
-    ImGui::GetWindowDrawList()->AddImage(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture_)), origin,
-        ImVec2(origin.x + size.x, origin.y + size.y));
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddImage(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture_)), origin, ImVec2(origin.x + size.x, origin.y + size.y));
+    if (ImGui::IsItemHovered()) {
+        constexpr const char* kHint = "Drag: orbit   Right/middle drag: pan   Wheel: zoom   F: frame   Right-click: options";
+        const float line = ImGui::GetTextLineHeight();
+        draw->AddText({origin.x + 6, origin.y + size.y - line - 4}, ImGui::GetColorU32(ImGuiCol_TextDisabled), kHint);
+    }
     drawn_ = true;
     return moved;
 }

@@ -13,11 +13,13 @@
 #include "preview_panel.hpp"
 #include "store_reader.hpp"
 #include "strings.hpp"
+#include "ui.hpp"
 #include "updater.hpp"
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <exception>
 #include <utility>
 
@@ -640,96 +642,217 @@ void HistoryPanel::CompareWithGame(ComparisonView& compare, const Shown& focus_c
     }
 }
 
+void HistoryPanel::SelectModel(const BlobId& blob) {
+    if (running_) {
+        return;
+    }
+    if (!selected_ || !SameBlob(*selected_, blob)) {
+        selected_version_.reset();
+        compare_version_.reset();
+    }
+    selected_ = blob;
+    selected_copy_.reset();
+    LoadSelection();
+}
+
 void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameReader& read_game,
     const std::vector<std::string>& game_clip_paths, ComparisonView& compare, const std::string& game_directory,
     bool files_busy, const Shown& shown, const std::function<void()>& before_repair) {
     JoinFinishedWork();
     const HWND owner = static_cast<HWND>(owner_window);
-
-    ImGui::TextColored({.47f, .85f, .77f, 1.f}, "YOUR COLLECTION");
-    ImGui::SetWindowFontScale(1.6f);
-    ImGui::TextUnformatted("Version history");
-    ImGui::SetWindowFontScale(1.f);
-    ImGui::TextDisabled("Every copy of each model you have added, and how repairs changed it.");
-    ImGui::Spacing();
     if (!store_) {
         ImGui::TextWrapped("%s", open_error_.empty() ? "The model library is unavailable." : open_error_.c_str());
         return;
     }
+
+    // Toolbar: every action on the selected model, with the reason in the tooltip when one is unavailable.
+    const bool two_versions = selected_version_ && compare_version_ && *selected_version_ != *compare_version_
+        && *selected_version_ < history_.Versions.size() && *compare_version_ < history_.Versions.size();
+    if (ui::ToolButton("View", selected_version_ ? "Open the selected version (A) in the inspector. Double-click a version also opens it."
+        : "Select a model and a version first.", !running_ && selected_version_.has_value())) {
+        ViewSelected(preview, read_game, game_clip_paths, shown);
+    }
+    ImGui::SameLine();
+    if (ui::ToolButton("Compare A/B", two_versions ? "Compare versions A and B side by side."
+        : "Click two versions: the last one clicked is A, the one before it B.", !running_ && two_versions)) {
+        CompareSelected(compare, shown, read_game, game_clip_paths);
+    }
+    ImGui::SameLine();
+    if (ui::ToolButton("Compare with game", game_directory.empty() ? kCompareNeedsGameFolder : "Compare version A with the installed game.",
+        !running_ && selected_version_.has_value() && !game_directory.empty())) {
+        CompareWithGame(compare, shown, read_game, game_clip_paths);
+    }
+    ui::ToolSeparator();
+    const std::optional<std::string> pack_path = selected_ ? SelectedPackPath() : std::nullopt;
+    const bool pack_file = pack_path && ObservationFileExists(*pack_path);
+    const RepairGate repair_gate = pack_path ? RepairGateFor(pack_file, !game_directory.empty()) : RepairGate{};
+    const char* repair_tooltip = repair_gate.Message != nullptr ? repair_gate.Message
+        : pack_path ? "Repair the pack of the selected copy. The repaired pack is saved as a new version; this one is kept."
+        : "Select a copy or a pack to repair.";
+    if (ui::ToolButton("Repair", repair_tooltip, !running_ && !files_busy && repair_gate.Enabled) && pack_path && pack_file) {
+        // The pack may be open for previews or thumbnails, and the repair replaces it.
+        if (before_repair) {
+            before_repair();
+        }
+        StartRepair(*pack_path, game_directory);
+    }
+    ImGui::SameLine();
+    const std::optional<SnapshotId> assembly = AssemblySnapshot();
+    if (ui::ToolButton("Assemble...", assembly ? "Write a new VPK from the selected copy's pack with this model."
+        : "Select a copy or a pack to assemble from.", !running_ && assembly.has_value()) && assembly) {
+        if (const std::optional<std::filesystem::path> path = AskForSaveVpk(owner)) {
+            StartAssemble(*assembly, *path);
+        }
+    }
+    ui::ToolSeparator();
+    if (ui::ToolButton("Refresh", "Read the model and pack lists again", !running_)) {
+        Refresh();
+    }
     if (running_) {
-        ImGui::TextWrapped("%s %s", job_ == Job::Repair ? "Repairing" : "Assembling", importing_name_.c_str());
-        if (ImGui::Button("Cancel")) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s %s...", job_ == Job::Repair ? "Repairing" : "Assembling", importing_name_.c_str());
+        ImGui::SameLine();
+        if (ui::ToolButton("Cancel")) {
             cancel_.Cancel();
         }
     }
     if (!status_.empty()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", status_.c_str());
+        ui::TextEllipsis(status_, 0, &ui::kError);
+        if (ImGui::BeginPopupContextItem("status_menu")) {
+            ui::CopyMenuItem("Copy message", status_);
+            if (ImGui::MenuItem("Dismiss")) {
+                status_.clear();
+            }
+            ImGui::EndPopup();
+        }
     }
-    ImGui::Separator();
 
-    if (!ImGui::BeginTable("history-columns", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV)) {
+    if (!ImGui::BeginTable("history-columns", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoPadOuterX)) {
         return;
     }
     ImGui::TableSetupColumn("Library", ImGuiTableColumnFlags_WidthStretch, 0.42f);
     ImGui::TableSetupColumn("History", ImGuiTableColumnFlags_WidthStretch, 0.58f);
     ImGui::TableNextColumn();
-    ImGui::BeginChild("library-column");
+    // Cell padding is added below the row, so the columns leave room for it.
+    const float height = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().CellPadding.y;
+    ImGui::BeginChild("library-column", {0, height});
     if (ImGui::BeginTabBar("library-tabs")) {
-        if (ImGui::BeginTabItem("Models")) {
+        char label[64];
+        std::snprintf(label, sizeof(label), "Models (%zu)###models", models_.size());
+        if (ImGui::BeginTabItem(label)) {
             ImGui::SetNextItemWidth(-1.0f);
-            ImGui::InputTextWithHint("##model-filter", "Filter", filter_, sizeof(filter_));
-            const std::vector<ModelRow> rows = FilterModels(models_, filter_);
-            if (ImGui::BeginChild("model-list")) {
-                for (const ModelRow& row : rows) {
-                    std::string label = FormatModelRow(row);
-                    label += "##";
-                    label += row.Blob.Hex();
-                    const bool chosen = selected_ && SameBlob(*selected_, row.Blob);
-                    if (ImGui::Selectable(label.c_str(), chosen) && !running_) {
-                        if (!selected_ || !SameBlob(*selected_, row.Blob)) {
-                            selected_version_.reset();
-                            compare_version_.reset();
+            ImGui::InputTextWithHint("##model-filter", "Filter models by path", filter_, sizeof(filter_));
+            std::vector<ModelRow> rows = FilterModels(models_, filter_);
+            const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable
+                | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Sortable | ImGuiTableFlags_Hideable | ImGuiTableFlags_SizingFixedFit;
+            if (ImGui::BeginTable("model-list", 3, flags)) {
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableSetupColumn("Model", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_DefaultSort);
+                ImGui::TableSetupColumn("Packs", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableSetupColumn("Hash", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableHeadersRow();
+                if (const ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs(); specs != nullptr && specs->SpecsCount > 0) {
+                    const ImGuiTableColumnSortSpecs& spec = specs->Specs[0];
+                    const bool descending = spec.SortDirection == ImGuiSortDirection_Descending;
+                    std::stable_sort(rows.begin(), rows.end(), [&](const ModelRow& a, const ModelRow& b) {
+                        const ModelRow& first = descending ? b : a;
+                        const ModelRow& second = descending ? a : b;
+                        if (spec.ColumnIndex == 1) return first.SnapshotCount < second.SnapshotCount;
+                        if (spec.ColumnIndex == 2) return first.Blob.Bytes < second.Blob.Bytes;
+                        return first.DisplayPath < second.DisplayPath;
+                    });
+                }
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(rows.size()));
+                while (clipper.Step()) {
+                    for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                        const ModelRow& row = rows[static_cast<size_t>(i)];
+                        const std::string hex = row.Blob.Hex();
+                        ImGui::PushID(hex.c_str());
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        const bool chosen = selected_ && SameBlob(*selected_, row.Blob);
+                        if (ImGui::Selectable(row.DisplayPath.c_str(), chosen, ImGuiSelectableFlags_SpanAllColumns)) {
+                            SelectModel(row.Blob);
                         }
-                        selected_ = row.Blob;
-                        selected_copy_.reset();
-                        LoadSelection();
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                            ViewSelected(preview, read_game, game_clip_paths, shown);
+                        }
+                        ImGui::SetItemTooltip("%s\n%s\nIn %d packs under %d paths", row.DisplayPath.c_str(), hex.c_str(), row.SnapshotCount, row.PathCount);
+                        if (ImGui::BeginPopupContextItem("model_menu")) {
+                            if (ImGui::MenuItem("View", nullptr, false, !running_)) {
+                                SelectModel(row.Blob);
+                                ViewSelected(preview, read_game, game_clip_paths, shown);
+                            }
+                            if (ImGui::MenuItem("Compare with game", nullptr, false, !running_ && !game_directory.empty())) {
+                                SelectModel(row.Blob);
+                                CompareWithGame(compare, shown, read_game, game_clip_paths);
+                            }
+                            ImGui::Separator();
+                            ui::CopyMenuItem("Copy path", row.DisplayPath);
+                            ui::CopyMenuItem("Copy hash", hex);
+                            ImGui::EndPopup();
+                        }
+                        ImGui::TableNextColumn();
+                        ImGui::TextDisabled("%d", row.SnapshotCount);
+                        ImGui::TableNextColumn();
+                        ImGui::TextDisabled("%s", hex.substr(0, 12).c_str());
+                        ImGui::PopID();
                     }
                 }
+                ImGui::EndTable();
             }
-            ImGui::EndChild();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Packs")) {
-            std::string pack_observation_id;
-            if (selected_pack_) {
+        std::snprintf(label, sizeof(label), "Packs (%zu)###packs", packs_.size());
+        if (ImGui::BeginTabItem(label)) {
+            const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable
+                | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Hideable | ImGuiTableFlags_SizingFixedFit;
+            if (ImGui::BeginTable("pack-list", 4, flags)) {
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableSetupColumn("Pack", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Models", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableSetupColumn("Seen", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableSetupColumn("Observed", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableHeadersRow();
+                std::optional<std::string> hide;
                 for (const PackRow& pack : packs_) {
-                    if (pack.Snapshot.Value == *selected_pack_) {
-                        pack_observation_id = pack.ObservationId;
-                        break;
-                    }
-                }
-            }
-            const bool hide_pack_disabled = running_ || pack_observation_id.empty();
-            if (hide_pack_disabled) {
-                ImGui::BeginDisabled();
-            }
-            if (ImGui::Button("Hide this copy##pack")) {
-                HideObservation(pack_observation_id);
-            }
-            if (hide_pack_disabled) {
-                ImGui::EndDisabled();
-            }
-            if (ImGui::BeginChild("pack-list")) {
-                for (const PackRow& pack : packs_) {
-                    std::string line = pack.Label + "  " + std::to_string(pack.ModelCount) + " models  "
-                        + std::to_string(pack.ObservationCount) + " observations##" + pack.Snapshot.Value;
+                    ImGui::PushID(pack.Snapshot.Value.c_str());
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
                     const bool chosen = selected_pack_ && *selected_pack_ == pack.Snapshot.Value;
-                    if (ImGui::Selectable(line.c_str(), chosen) && !running_) {
+                    if (ImGui::Selectable(pack.Label.c_str(), chosen, ImGuiSelectableFlags_SpanAllColumns) && !running_) {
                         selected_pack_ = pack.Snapshot.Value;
                     }
+                    if (!pack.ObservationPath.empty()) {
+                        ImGui::SetItemTooltip("%s", pack.ObservationPath.c_str());
+                    }
+                    if (ImGui::BeginPopupContextItem("pack_menu")) {
+                        if (ImGui::MenuItem("Select", nullptr, chosen, !running_)) {
+                            selected_pack_ = pack.Snapshot.Value;
+                        }
+                        if (ImGui::MenuItem("Hide this copy", nullptr, false, !running_ && !pack.ObservationId.empty())) {
+                            hide = pack.ObservationId;
+                        }
+                        ImGui::Separator();
+                        const std::filesystem::path path(Widen(pack.ObservationPath));
+                        ui::PathMenuItems(path);
+                        ui::CopyMenuItem("Copy snapshot id", pack.Snapshot.Value);
+                        ImGui::EndPopup();
+                    }
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%d", pack.ModelCount);
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%d", pack.ObservationCount);
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", pack.ObservedUtc.c_str());
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+                if (hide) {
+                    HideObservation(*hide);
                 }
             }
-            ImGui::EndChild();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -737,14 +860,41 @@ void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameRea
     ImGui::EndChild();
 
     ImGui::TableNextColumn();
-    ImGui::BeginChild("history-column");
+    ImGui::BeginChild("history-column", {0, height});
     if (!selected_) {
-        ImGui::TextDisabled("Select a model.");
-    } else {
+        ImGui::TextDisabled("Select a model to see its versions and copies.");
+        ImGui::EndChild();
+        ImGui::EndTable();
+        return;
+    }
+    ui::SectionLabel("VERSIONS");
+    ImGui::SameLine();
+    ui::HelpMarker("Click a version to make it A; the version clicked before it becomes B. View opens A; Compare A/B opens both. "
+        "Double-click a version to view it, or right-click it for more.");
+    // As tall as its rows, up to half the column; the copies take the rest.
+    const float row_height = ImGui::GetTextLineHeight() + ImGui::GetStyle().CellPadding.y * 2;
+    const float versions_height = std::min(row_height * static_cast<float>(history_lines_.size() + 1) + ImGui::GetStyle().CellPadding.y * 2 + 2,
+        ImGui::GetContentRegionAvail().y * 0.5f);
+    const ImGuiTableFlags list_flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable
+        | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit;
+    if (ImGui::BeginTable("versions", 2, list_flags, {0, versions_height})) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("##role", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize, ImGui::CalcTextSize("A").x * 2);
+        ImGui::TableSetupColumn("Version", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
         for (size_t i = 0; i < history_lines_.size() && i < history_.Versions.size(); ++i) {
-            std::string label = history_lines_[i] + "##version" + std::to_string(i);
-            const bool chosen = (selected_version_ && *selected_version_ == i) || (compare_version_ && *compare_version_ == i);
-            if (ImGui::Selectable(label.c_str(), chosen) && !running_) {
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            const bool primary = selected_version_ && *selected_version_ == i;
+            const bool secondary = compare_version_ && *compare_version_ == i;
+            if (primary) {
+                ImGui::TextColored(ui::kAccent, "A");
+            } else if (secondary) {
+                ImGui::TextColored(ui::kWarning, "B");
+            }
+            ImGui::TableNextColumn();
+            if (ImGui::Selectable(history_lines_[i].c_str(), primary || secondary, ImGuiSelectableFlags_SpanAllColumns) && !running_) {
                 if (selected_version_ && *selected_version_ != i) {
                     compare_version_ = selected_version_;
                 }
@@ -753,111 +903,95 @@ void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameRea
                     compare_version_.reset();
                 }
             }
-        }
-        const bool two_versions = selected_version_ && compare_version_ && *selected_version_ != *compare_version_
-            && *selected_version_ < history_.Versions.size() && *compare_version_ < history_.Versions.size();
-        const bool view_disabled = running_ || !selected_version_;
-        if (view_disabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("View")) {
-            ViewSelected(preview, read_game, game_clip_paths, shown);
-        }
-        if (view_disabled) {
-            ImGui::EndDisabled();
-        }
-        ImGui::SameLine();
-        const bool compare_disabled = running_ || !two_versions;
-        if (compare_disabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Compare")) {
-            CompareSelected(compare, shown, read_game, game_clip_paths);
-        }
-        if (compare_disabled) {
-            ImGui::EndDisabled();
-        }
-        ImGui::SameLine();
-        const std::optional<std::string> pack_path = SelectedPackPath();
-        const bool pack_file = pack_path && ObservationFileExists(*pack_path);
-        const RepairGate repair_gate = pack_path ? RepairGateFor(pack_file, !game_directory.empty()) : RepairGate{};
-        const bool repair_disabled = running_ || files_busy || !repair_gate.Enabled;
-        if (repair_disabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Repair") && pack_path && pack_file) {
-            // The pack may be open for previews or thumbnails, and the repair replaces it.
-            if (before_repair) {
-                before_repair();
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !running_) {
+                selected_version_ = i;
+                ViewSelected(preview, read_game, game_clip_paths, shown);
             }
-            StartRepair(*pack_path, game_directory);
-        }
-        if (repair_disabled) {
-            ImGui::EndDisabled();
-        }
-        ImGui::SameLine();
-        const std::optional<SnapshotId> assembly = AssemblySnapshot();
-        const bool assemble_disabled = running_ || !assembly;
-        if (assemble_disabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Assemble") && assembly) {
-            if (const std::optional<std::filesystem::path> path = AskForSaveVpk(owner)) {
-                StartAssemble(*assembly, *path);
+            if (ImGui::BeginPopupContextItem("version_menu")) {
+                if (ImGui::MenuItem("View", nullptr, false, !running_)) {
+                    selected_version_ = i;
+                    ViewSelected(preview, read_game, game_clip_paths, shown);
+                }
+                const bool can_compare = selected_version_ && *selected_version_ != i;
+                if (ImGui::MenuItem("Compare with A", nullptr, false, !running_ && can_compare)) {
+                    compare_version_ = i;
+                    CompareSelected(compare, shown, read_game, game_clip_paths);
+                }
+                if (ImGui::MenuItem("Compare with game", nullptr, false, !running_ && !game_directory.empty())) {
+                    selected_version_ = i;
+                    CompareWithGame(compare, shown, read_game, game_clip_paths);
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Set as A", nullptr, primary, !running_)) {
+                    selected_version_ = i;
+                    if (secondary) compare_version_.reset();
+                }
+                if (ImGui::MenuItem("Set as B", nullptr, secondary, !running_ && !primary)) {
+                    compare_version_ = i;
+                }
+                ImGui::Separator();
+                ui::CopyMenuItem("Copy hash", history_.Versions[i].Blob.Hex());
+                ui::CopyMenuItem("Copy line", history_lines_[i]);
+                ImGui::EndPopup();
             }
+            ImGui::PopID();
         }
-        if (assemble_disabled) {
-            ImGui::EndDisabled();
-        }
-        ImGui::SameLine();
-        const bool compare_game_disabled = running_ || !selected_version_ || game_directory.empty();
-        if (compare_game_disabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Compare with game")) {
-            CompareWithGame(compare, shown, read_game, game_clip_paths);
-        }
-        if (compare_game_disabled) {
-            ImGui::EndDisabled();
-        }
-        if (repair_gate.Message != nullptr) {
-            ImGui::TextDisabled("%s", repair_gate.Message);
-        }
-        if (game_directory.empty()) {
-            ImGui::TextDisabled("%s", kCompareNeedsGameFolder);
-        }
-        ImGui::SeparatorText("Copies");
+        ImGui::EndTable();
+    }
+
+    ui::SectionLabel("COPIES");
+    ImGui::SameLine();
+    const std::string membership_observation_id = selected_copy_ && *selected_copy_ < memberships_.size()
+        ? memberships_[*selected_copy_].ObservationId
+        : std::string();
+    std::optional<std::string> hide;
+    if (ui::ToolButton("Hide", "Hide the selected copy from the history. The pack file is not changed.",
+        !running_ && !membership_observation_id.empty())) {
+        hide = membership_observation_id;
+    }
+    const float copies_height = unproven_.empty() ? 0.0f : std::max(ImGui::GetTextLineHeightWithSpacing() * 4,
+        ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing());
+    if (ImGui::BeginTable("copies", 3, list_flags, {0, copies_height})) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Pack", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+        ImGui::TableSetupColumn("Observed", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableHeadersRow();
         for (size_t i = 0; i < memberships_.size(); ++i) {
             const MembershipRow& membership = memberships_[i];
-            std::string label = membership.PackLabel.empty() ? membership.Snapshot.Value : membership.PackLabel;
-            label += "  ";
-            label += membership.Path;
-            label += "##";
-            label += membership.Snapshot.Value;
-            label += "/";
-            label += std::to_string(i);
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            const std::string& pack = membership.PackLabel.empty() ? membership.Snapshot.Value : membership.PackLabel;
             const bool chosen = selected_copy_ && *selected_copy_ == i;
-            if (ImGui::Selectable(label.c_str(), chosen) && !running_) {
+            if (ImGui::Selectable(pack.c_str(), chosen, ImGuiSelectableFlags_SpanAllColumns) && !running_) {
                 selected_copy_ = i;
             }
+            if (ImGui::BeginPopupContextItem("copy_menu")) {
+                if (ImGui::MenuItem("Select", nullptr, chosen, !running_)) {
+                    selected_copy_ = i;
+                }
+                if (ImGui::MenuItem("Hide this copy", nullptr, false, !running_ && !membership.ObservationId.empty())) {
+                    hide = membership.ObservationId;
+                }
+                ImGui::Separator();
+                ui::CopyMenuItem("Copy path", membership.Path);
+                ui::CopyMenuItem("Copy pack name", pack);
+                ImGui::EndPopup();
+            }
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(membership.Path.c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%s", membership.ObservedUtc.c_str());
+            ImGui::PopID();
         }
-        const std::string membership_observation_id = selected_copy_ && *selected_copy_ < memberships_.size()
-            ? memberships_[*selected_copy_].ObservationId
-            : std::string();
-        const bool hide_disabled = running_ || membership_observation_id.empty();
-        if (hide_disabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Hide this copy")) {
-            HideObservation(membership_observation_id);
-        }
-        if (hide_disabled) {
-            ImGui::EndDisabled();
-        }
-        if (!unproven_.empty()) {
-            ImGui::Separator();
-            ImGui::TextWrapped("%s", unproven_text_.c_str());
-        }
+        ImGui::EndTable();
+    }
+    if (hide) {
+        HideObservation(*hide);
+    }
+    if (!unproven_.empty() && ImGui::CollapsingHeader("Unproven matches")) {
+        ImGui::TextWrapped("%s", unproven_text_.c_str());
     }
     ImGui::EndChild();
     ImGui::EndTable();

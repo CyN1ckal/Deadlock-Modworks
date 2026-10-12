@@ -14,6 +14,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace skeleton_repair {
@@ -29,6 +30,8 @@ struct ViewSettings {
 // Draws the LOD, overlay and coloring controls on one line. Returns true when the LOD changed.
 // Sets `frame` when the Frame button was pressed.
 bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame);
+// The same settings as menu items, for a viewport's context menu. Returns true when the LOD changed.
+bool DrawViewMenu(ViewSettings& settings, int lod_count, bool& frame);
 
 // The CPU side of a viewport model: the scene and decoded color maps, ready to upload.
 struct PreparedModel {
@@ -112,6 +115,8 @@ public:
     // Shows the image at the cursor and applies mouse input to `camera`. Returns true while the user moves the camera.
     // Non-interactive images leave scrolling and mouse input to the containing library.
     bool Draw(const char* id, ImVec2 size, OrbitCamera& camera, bool interactive = true);
+    // True once after a right click on the image that did not pan, to open a context menu.
+    bool TakeContextMenu() { return std::exchange(context_requested_, false); }
     // Records the offscreen pass if Draw ran this frame. Call before the ImGui render pass.
     void Record(VkCommandBuffer command_buffer, const OrbitCamera& camera, const ViewSettings& settings);
 
@@ -131,6 +136,7 @@ private:
     std::vector<std::string> material_notes_;
     VkDescriptorSet texture_ = VK_NULL_HANDLE;
     bool drawn_ = false;
+    bool context_requested_ = false;
 };
 
 }  // namespace skeleton_repair

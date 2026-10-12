@@ -27,6 +27,29 @@ public:
     void StopLoading();
     size_t SelectedCount() const { return selected_.size(); }
     size_t ModelCount() const { return models_.size(); }
+    // Skins the gallery showed on the last frame it was drawn, after search and filters.
+    size_t ShownCount() const { return shown_count_; }
+    // Models the last scan found in one source archive.
+    size_t ModelsIn(const std::filesystem::path& source) const;
+    const std::string& Status() const { return status_; }
+    // Shows only the skins of one source archive in the gallery. Empty shows every source.
+    void SetSourceFilter(std::filesystem::path source) { source_filter_ = std::move(source); }
+    const std::filesystem::path& SourceFilter() const { return source_filter_; }
+    // Adds or removes every skin of one source archive in the pack.
+    void IncludeSource(const std::filesystem::path& source, bool include);
+    void FocusSearch() { focus_search_ = true; }
+    // Asks for a shared .db library to merge, or a library list from an earlier release to load.
+    void AddLibrary(void* owner, const std::function<void(const ModelLibrary&)>& load,
+        const std::function<void(const std::filesystem::path&)>& merge);
+    // Asks where to write a copy of the whole library database.
+    void ShareLibrary(void* owner);
+    bool CanShare() const { return store_.has_value() && !Busy(); }
+    // Asks where to export the pack, then builds it in the background.
+    void BuildPack(void* owner, const std::filesystem::path& game);
+    void ClearPack();
+    void CancelBuild() { cancellation_.Cancel(); }
+    // Reopens every source archive and loads thumbnails again.
+    void Reload(const std::vector<std::filesystem::path>& sources);
     void Restore(const ModelLibrary& library);
     ModelLibrary Snapshot(const std::vector<std::filesystem::path>& sources, const std::filesystem::path& game) const;
     // `pause_loading` stops new thumbnail loads, for example while a repair replaces archives.
@@ -66,7 +89,19 @@ private:
         std::vector<LibraryModel> Models;
         std::vector<std::string> Errors;
     };
-    void DrawThumbnail(size_t index, const std::filesystem::path& game, float size, size_t cache_limit, bool pause_loading);
+    // Draws the thumbnail into the window's draw list at `origin`, without adding an item. Returns why it has no image, if it failed.
+    const std::string* DrawThumbnail(size_t index, const std::filesystem::path& game, ImVec2 origin, float size, size_t cache_limit,
+        bool pause_loading);
+    void DrawModelMenu(size_t index, const std::vector<size_t>& shown, const std::function<void(const LibraryModel&)>& preview);
+    void DrawGrid(const std::vector<size_t>& shown, const std::filesystem::path& game, bool pause_loading,
+        const std::function<void(const LibraryModel&)>& preview);
+    void DrawList(const std::vector<size_t>& shown, const std::filesystem::path& game, bool pause_loading,
+        const std::function<void(const LibraryModel&)>& preview);
+    // Handles clicks, keys and the context menu of the item just drawn for one model.
+    void ModelItemInput(size_t index, const std::vector<size_t>& shown, const std::function<void(const LibraryModel&)>& preview);
+    bool InPack(size_t index);
+    void SetInPack(size_t index, bool include);
+    void SortModels(int column, bool descending);
     void Evict(std::map<size_t, Thumbnail>::iterator thumbnail);
     void UploadThumbnails();
     void RunThumbnailWorker();
@@ -104,6 +139,20 @@ private:
     char filter_[256] = {};
     std::filesystem::path source_filter_;
     bool selected_only_ = false;
+    bool list_view_ = false;
+    bool focus_search_ = false;
+    // Edge of a gallery thumbnail at a 15 px font.
+    float thumbnail_size_ = 128;
+    size_t shown_count_ = 0;
+    // The model last clicked, which Enter and Space act on.
+    std::optional<size_t> current_;
+    std::map<std::filesystem::path, size_t> source_counts_;
+    // Indexes of models_ in display order, and whether each model is in the pack. Rebuilt when marked stale.
+    std::vector<size_t> order_;
+    std::vector<uint8_t> in_pack_;
+    bool pack_stale_ = true;
+    int sort_column_ = 0;
+    bool sort_descending_ = false;
     std::future<std::string> worker_;
     CancellationSource cancellation_;
     LatestTask<ScanResult> scan_;

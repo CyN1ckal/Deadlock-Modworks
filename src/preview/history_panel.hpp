@@ -47,6 +47,8 @@ private:
     enum class Job { Repair, Assemble };
 
     void LoadSelection();
+    // Shows the history of one stored model, keeping the chosen versions when it is already shown.
+    void SelectModel(const BlobId& blob);
     void StartRepair(const std::string& vpk_path, const std::string& game_directory);
     void StartAssemble(const SnapshotId& snapshot, const std::filesystem::path& destination);
     std::optional<SnapshotId> AssemblySnapshot() const;
