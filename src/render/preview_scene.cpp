@@ -143,6 +143,10 @@ PreviewScene BuildPreviewScene(const ModelGeometry& geometry) {
                 vertex.TexCoord = v < buffer.TexCoords.size() ? buffer.TexCoords[v] : Vec2{};
                 if (v < buffer.BoneIndices.size()) {
                     const auto& weights = buffer.BoneWeights[v];
+                    for (size_t slot = 0; slot < 4; ++slot) {
+                        vertex.BoneIndices[slot] = buffer.BoneIndices[v][slot];
+                        vertex.BoneWeights[slot] = static_cast<uint8_t>(std::lround(std::clamp(weights[slot], 0.0f, 1.0f) * 255.0f));
+                    }
                     const size_t strongest = static_cast<size_t>(std::max_element(weights.begin(), weights.end()) - weights.begin());
                     const size_t bone = buffer.BoneIndices[v][strongest];
                     if (weights[strongest] > 0 && bone < geometry.Bones.size()) {

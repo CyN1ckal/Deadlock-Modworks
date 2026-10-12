@@ -42,6 +42,6 @@ void main() {
     vec3 linear = base * (fill + 0.75 * key) + rim;
 
     // The target is UNORM and ImGui shows it as-is, so encode for display here.
-    // Alpha only matters for translucent materials, which use the blending pipeline.
+    // Alpha drives blending for translucent materials; the solid pipeline does not write it.
     out_color = vec4(pow(clamp(linear, 0.0, 1.0), vec3(1.0 / 2.2)), push.mode == 2u ? texel.a : 1.0);
 }

@@ -89,6 +89,7 @@ add_library(skeleton_repair_core STATIC
     src/core/command_line.cpp
     src/core/model_geometry.cpp
     src/core/texture.cpp
+    src/core/animation_clip.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
 target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static nlohmann_json::nlohmann_json meshoptimizer)
@@ -106,6 +107,7 @@ add_executable(skeleton_repair_tests
     tests/updater_tests.cpp
     tests/geometry_tests.cpp
     tests/texture_tests.cpp
+    tests/animation_clip_tests.cpp
 )
 target_link_libraries(skeleton_repair_tests PRIVATE skeleton_repair_core GTest::gtest_main bcrypt)
 target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

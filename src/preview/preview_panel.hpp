@@ -13,8 +13,11 @@ class PreviewPanel {
 public:
     explicit PreviewPanel(const VulkanDevice& device);
 
-    void Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read = nullptr);
+    // `animation_skeleton` and `clips` enable playback; `read` also loads the clips.
+    void Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read = nullptr,
+        const std::vector<GeometryBone>* animation_skeleton = nullptr, const std::vector<std::string>& clips = {});
     void ShowError(std::string title, std::string message);
+    void PlayClip(const std::string& path);
 
     // Draws the controls and viewport into the current ImGui window.
     void Draw();
@@ -23,6 +26,9 @@ public:
 
 private:
     ModelViewport viewport_;
+    AnimationPlayer player_;
+    ResourceReader read_;
+    std::string animation_warning_;
     std::string title_;
     std::string error_;
     OrbitCamera camera_;

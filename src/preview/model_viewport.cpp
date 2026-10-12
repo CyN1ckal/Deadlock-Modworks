@@ -3,7 +3,10 @@
 #include <imgui_impl_vulkan.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <exception>
+#include <string_view>
 
 namespace skeleton_repair {
 
@@ -45,6 +48,109 @@ bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame) {
     return lod_changed;
 }
 
+void AnimationPlayer::SetClips(const std::vector<std::string>& paths) {
+    constexpr std::string_view kTwin = ".vnmclip+non_additive.vnmclip_c";
+    constexpr std::string_view kClip = ".vnmclip_c";
+    std::vector<std::string> sorted = paths;
+    std::sort(sorted.begin(), sorted.end());
+    clips_.clear();
+    for (const std::string& path : sorted) {
+        const bool twin = path.size() > kTwin.size() && path.compare(path.size() - kTwin.size(), kTwin.size(), kTwin) == 0;
+        std::string base = twin ? path.substr(0, path.size() - kTwin.size()) : path.substr(0, path.size() - kClip.size());
+        if (!twin && std::binary_search(sorted.begin(), sorted.end(), base + std::string(kTwin))) {
+            continue;
+        }
+        const size_t slash = base.rfind('/');
+        clips_.push_back({path, slash == std::string::npos ? base : base.substr(slash + 1)});
+    }
+    selected_ = -1;
+    clip_.reset();
+    error_.clear();
+    time_ = 0;
+}
+
+bool AnimationPlayer::Draw(const ResourceReader& read) {
+    bool changed = false;
+    ImGui::SetNextItemWidth(260);
+    const char* preview = selected_ >= 0 ? clips_[static_cast<size_t>(selected_)].Label.c_str() : "Bind pose";
+    if (ImGui::BeginCombo("##clip", clips_.empty() ? "No animation clips" : preview, ImGuiComboFlags_HeightLarge)) {
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::InputTextWithHint("##clip_filter", "Filter", filter_, sizeof(filter_));
+        if (ImGui::Selectable("Bind pose", selected_ < 0)) {
+            selected_ = -1;
+            clip_.reset();
+            error_.clear();
+            changed = true;
+        }
+        for (size_t i = 0; i < clips_.size(); ++i) {
+            if (filter_[0] != '\0' && clips_[i].Label.find(filter_) == std::string::npos) {
+                continue;
+            }
+            if (ImGui::Selectable(clips_[i].Label.c_str(), static_cast<int>(i) == selected_)) {
+                Select(clips_[i].Path, read);
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(playing_ ? "Pause" : "Play")) {
+        playing_ = !playing_;
+    }
+    if (clip_) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(180);
+        float shown = clip_->Duration > 0 ? std::fmod(time_, clip_->Duration) : 0;
+        if (ImGui::SliderFloat("##time", &shown, 0, std::max(clip_->Duration, 0.001f), "%.2f s")) {
+            time_ = shown;
+            playing_ = false;
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90);
+        ImGui::SliderFloat("Speed", &speed_, 0.1f, 2.0f, "%.1fx");
+        ImGui::SameLine();
+        ImGui::TextDisabled("%u frames%s", clip_->FrameCount, clip_->Additive ? ", additive" : "");
+    }
+    if (!error_.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", error_.c_str());
+    }
+    return changed;
+}
+
+bool AnimationPlayer::Select(const std::string& path, const ResourceReader& read) {
+    const auto found = std::find_if(clips_.begin(), clips_.end(), [&](const Entry& entry) { return entry.Path == path; });
+    if (found == clips_.end()) {
+        return false;
+    }
+    selected_ = static_cast<int>(found - clips_.begin());
+    clip_.reset();
+    error_.clear();
+    try {
+        if (const auto bytes = read(path)) {
+            clip_ = DecodeAnimationClip(*bytes);
+        } else {
+            error_ = "Clip is missing.";
+        }
+    } catch (const std::exception& error) {
+        error_ = error.what();
+    }
+    time_ = 0;
+    playing_ = true;
+    return true;
+}
+
+void AnimationPlayer::Advance(float seconds) {
+    if (playing_ && clip_) {
+        time_ += seconds * speed_;
+        if (clip_->Duration > 0) {
+            time_ = std::fmod(time_, clip_->Duration);
+        }
+    }
+}
+
 ModelViewport::ModelViewport(const VulkanDevice& device) : renderer_(device) {}
 
 ModelViewport::~ModelViewport() {
@@ -57,12 +163,18 @@ void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const Resou
     textured_materials_ = 0;
     material_count_ = 0;
     material_notes_.clear();
+    poser_.reset();
+    posed_.reset();
+    overlay_colors_.clear();
+    overlay_animation_ = false;
     if (geometry == nullptr) {
         renderer_.ClearScene();
         scene_ = {};
+        model_bones_.clear();
         visible_.clear();
         return;
     }
+    model_bones_ = geometry->Bones;
     scene_ = BuildPreviewScene(*geometry);
     renderer_.SetScene(scene_);
     SetLod(lod);
@@ -80,9 +192,46 @@ void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const Resou
     }
 }
 
-void ModelViewport::SetSkeleton(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors) {
+void ModelViewport::SetSkeleton(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors, bool animation) {
+    overlay_colors_.assign(colors.begin(), colors.end());
+    overlay_animation_ = animation;
     scene_.Skeleton = SkeletonLines(bones, colors);
     renderer_.SetSkeleton(scene_.Skeleton);
+}
+
+void ModelViewport::SetAnimationSkeleton(const std::vector<GeometryBone>* bones) {
+    posed_.reset();
+    if (bones == nullptr || bones->empty() || model_bones_.empty()) {
+        poser_.reset();
+        return;
+    }
+    poser_.emplace(model_bones_, *bones);
+}
+
+std::string ModelViewport::Animate(const AnimationClip* clip, float seconds) {
+    if (clip == nullptr || !poser_) {
+        posed_.reset();
+        return {};
+    }
+    local_ = poser_->ReferencePose();
+    std::string warning;
+    if (clip->Tracks.size() != local_.size()) {
+        // The game samples tracks by index too, so a stale skeleton is posed the same wrong way.
+        warning = "The clip has " + std::to_string(clip->Tracks.size()) + " tracks but this animation skeleton has "
+            + std::to_string(local_.size()) + " bones, so bones are driven by the wrong tracks.";
+    }
+    if (clip->Additive) {
+        std::vector<BoneTransform> delta(local_.size());
+        clip->Sample(seconds, delta);
+        for (size_t i = 0; i < std::min(local_.size(), clip->Tracks.size()); ++i) {
+            local_[i] = ApplyAdditive(local_[i], delta[i]);
+        }
+    } else {
+        clip->Sample(seconds, local_);
+    }
+    posed_ = poser_->Pose(local_);
+    posed_lines_ = SkeletonLines(overlay_animation_ ? posed_->AnimationBones : posed_->Bones, overlay_colors_);
+    return warning;
 }
 
 void ModelViewport::SetLod(int lod) {
@@ -140,6 +289,12 @@ void ModelViewport::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
     options.ShowSkeleton = settings.ShowSkeleton;
     options.ShowGrid = settings.ShowGrid;
     options.Coloring = settings.Coloring;
+    FramePose pose;
+    if (posed_) {
+        pose.Skinning = posed_->Skinning;
+        pose.Skeleton = posed_lines_;
+        options.Pose = &pose;
+    }
     renderer_.Record(command_buffer, camera, options);
     drawn_ = false;
 }

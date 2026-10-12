@@ -9,9 +9,14 @@ namespace skeleton_repair {
 
 PreviewPanel::PreviewPanel(const VulkanDevice& device) : viewport_(device) {}
 
-void PreviewPanel::Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read) {
+void PreviewPanel::Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read,
+    const std::vector<GeometryBone>* animation_skeleton, const std::vector<std::string>& clips) {
     settings_.Lod = 0;
     viewport_.SetModel(&geometry, settings_.Lod, read);
+    viewport_.SetAnimationSkeleton(animation_skeleton);
+    read_ = read != nullptr ? *read : ResourceReader{};
+    player_.SetClips(viewport_.CanAnimate() && read_ ? clips : std::vector<std::string>{});
+    animation_warning_.clear();
     title_ = std::move(title);
     error_.clear();
     const OrbitCamera framed = OrbitCamera::Framing(viewport_.Scene().Min, viewport_.Scene().Max);
@@ -19,8 +24,15 @@ void PreviewPanel::Load(const ModelGeometry& geometry, std::string title, const 
     camera_.Distance = framed.Distance;
 }
 
+void PreviewPanel::PlayClip(const std::string& path) {
+    if (read_) {
+        player_.Select(path, read_);
+    }
+}
+
 void PreviewPanel::ShowError(std::string title, std::string message) {
     viewport_.SetModel(nullptr, 0);
+    player_.SetClips({});
     title_ = std::move(title);
     error_ = std::move(message);
 }
@@ -74,6 +86,17 @@ void PreviewPanel::Draw() {
                 visible[i] = shown ? 1 : 0;
             }
         }
+    }
+
+    if (viewport_.CanAnimate() && read_) {
+        player_.Draw(read_);
+        player_.Advance(ImGui::GetIO().DeltaTime);
+        animation_warning_ = viewport_.Animate(player_.Clip(), player_.Time());
+        if (!animation_warning_.empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f), "%s", animation_warning_.c_str());
+        }
+    } else {
+        ImGui::TextDisabled("No animation skeleton, so clips cannot play.");
     }
 
     viewport_.Draw("viewport", ImGui::GetContentRegionAvail(), camera_);

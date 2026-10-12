@@ -27,8 +27,9 @@ public:
     // Reads a compiled resource as a given version sees it: the mod archive first for Mod and Repaired, the game for Game.
     using VersionReader = std::function<std::optional<std::vector<uint8_t>>(ModelVersion version, const std::string& path)>;
 
-    void Load(ModelVersions versions, VersionReader read = {});
+    void Load(ModelVersions versions, VersionReader read = {}, std::vector<std::string> clips = {});
     void ShowError(std::string title, std::string message);
+    void PlayClip(const std::string& path);
     bool Loaded() const { return loaded_; }
 
     void Draw();
@@ -57,6 +58,10 @@ private:
     ViewSettings settings_;
     ModelViewport left_view_;
     ModelViewport right_view_;
+    AnimationPlayer player_;
+    std::vector<std::string> clips_;
+    std::string left_warning_;
+    std::string right_warning_;
     OrbitCamera left_camera_;
     OrbitCamera right_camera_;
     SkeletonDiff skeleton_diff_;

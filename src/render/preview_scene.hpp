@@ -35,8 +35,11 @@ struct PreviewVertex {
     // Color of the bone with the largest weight, or kUnskinnedColor.
     uint32_t BoneColor = kUnskinnedColor;
     Vec2 TexCoord;
+    // Model skeleton bones and weights (out of 255). All-zero weights mean the vertex is not skinned.
+    std::array<uint16_t, 4> BoneIndices{};
+    std::array<uint8_t, 4> BoneWeights{};
 };
-static_assert(sizeof(PreviewVertex) == 36);
+static_assert(sizeof(PreviewVertex) == 48);
 
 struct LineVertex {
     Vec3 Position;

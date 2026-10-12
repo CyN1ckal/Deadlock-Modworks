@@ -48,6 +48,7 @@ add_library(sr_render STATIC
     src/render/model_comparison.cpp
     src/render/model_versions.cpp
     src/render/preview_materials.cpp
+    src/render/skeleton_pose.cpp
     ${SR_SHADER_OUTPUTS}
 )
 target_include_directories(sr_render PUBLIC src/render PRIVATE ${SR_SHADER_DIR})
@@ -65,6 +66,7 @@ add_executable(render_tests
     tests/preview_scene_tests.cpp
     tests/render_tests.cpp
     tests/comparison_tests.cpp
+    tests/skeleton_pose_tests.cpp
 )
 target_link_libraries(render_tests PRIVATE sr_render GTest::gtest_main)
 

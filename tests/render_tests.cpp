@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -353,6 +354,22 @@ TEST_F(RendererTest, TranslucentMaterialsBlendOverTheBackground) {
     EXPECT_LT(center.R, 240);
 }
 
+// ImGui shows the image with alpha blending, so every pixel must stay opaque even when a color map's alpha is 0.
+TEST_F(RendererTest, ImageStaysOpaqueWhateverTheTextureAlpha) {
+    renderer_->SetScene(scene_);
+    options_.Coloring = skeleton_repair::ColorMode::Textured;
+    const skeleton_repair::PreviewMaterial solid[] = {SolidMaterial("models/test/body.vmat", 200, 100, 50, 0)};
+    renderer_->SetMaterials(solid);
+    const Pixel center = At(Render(), kWidth / 2, kHeight / 2);
+    EXPECT_GT(center.R, 100);
+    EXPECT_EQ(center.A, 255);
+
+    skeleton_repair::PreviewMaterial glass = SolidMaterial("models/test/body.vmat", 255, 255, 255, 64);
+    glass.Translucent = true;
+    renderer_->SetMaterials(std::span(&glass, 1));
+    EXPECT_EQ(At(Render(), kWidth / 2, kHeight / 2).A, 255);
+}
+
 TEST_F(RendererTest, ReplacingMaterialsKeepsRendering) {
     renderer_->SetScene(scene_);
     options_.Coloring = skeleton_repair::ColorMode::Textured;
@@ -364,6 +381,67 @@ TEST_F(RendererTest, ReplacingMaterialsKeepsRendering) {
     const Pixel center = At(Render(), kWidth / 2, kHeight / 2);
     EXPECT_GT(center.B, 150);
     EXPECT_LT(center.R, 60);
+}
+
+// The LOD 0 quad fully bound to bone 0.
+PreviewScene SkinnedScene() {
+    auto geometry = preview_test::TwoLodModel();
+    auto& vb = geometry.Meshes[0].VertexBuffers[0];
+    vb.BoneIndices.assign(4, {0, 0, 0, 0});
+    vb.BoneWeights.assign(4, {1, 0, 0, 0});
+    return BuildPreviewScene(geometry);
+}
+
+skeleton_repair::Mat34 Translation(float x, float y, float z) {
+    return {1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z};
+}
+
+TEST_F(RendererTest, SkinningMovesTheMeshWithItsBone) {
+    scene_ = SkinnedScene();
+    renderer_->SetScene(scene_);
+    EXPECT_FALSE(IsBackground(At(Render(), kWidth / 2, kHeight / 2)));
+
+    // Push the quad far to the model's left, which is screen right from the front.
+    const skeleton_repair::Mat34 skinning[] = {Translation(0, 200, 0), Translation(0, 0, 0)};
+    skeleton_repair::FramePose pose{skinning, {}};
+    options_.Pose = &pose;
+    const auto moved = Render();
+    EXPECT_TRUE(IsBackground(At(moved, kWidth / 2, kHeight / 2)));
+
+    // Back to the bind pose without re-uploading anything.
+    options_.Pose = nullptr;
+    EXPECT_FALSE(IsBackground(At(Render(), kWidth / 2, kHeight / 2)));
+}
+
+TEST_F(RendererTest, PosesForAnotherSkeletonAreIgnored) {
+    scene_ = SkinnedScene();
+    renderer_->SetScene(scene_);
+    const skeleton_repair::Mat34 skinning[] = {Translation(0, 200, 0)};
+    skeleton_repair::FramePose pose{skinning, {}};
+    options_.Pose = &pose;
+    EXPECT_FALSE(IsBackground(At(Render(), kWidth / 2, kHeight / 2)));
+}
+
+TEST_F(RendererTest, PosedSkeletonLinesAreDrawnWhereThePosePutsThem) {
+    renderer_->SetScene(scene_);
+    visible_ = {0, 0};
+    options_.VisibleMeshes = visible_;
+    options_.ShowSkeleton = true;
+    // Only the skeleton is drawn, so anything that is not background is a bone line.
+    auto drawn = [&](const std::vector<Pixel>& pixels) {
+        return std::count_if(pixels.begin(), pixels.end(), [&](Pixel p) { return !IsBackground(p); });
+    };
+    EXPECT_GT(drawn(Render()), 10);
+
+    // Same line count, moved out of view.
+    std::vector<skeleton_repair::LineVertex> lines = scene_.Skeleton;
+    for (auto& vertex : lines) {
+        vertex.Position.Y += 500;
+    }
+    const std::vector<skeleton_repair::Mat34> skinning(scene_.BoneCount, Translation(0, 0, 0));
+    skeleton_repair::FramePose pose{skinning, lines};
+    options_.Pose = &pose;
+    EXPECT_EQ(drawn(Render()), 0);
 }
 
 TEST(PreviewMaterials, ReportsMissingFilesInsteadOfThrowing) {

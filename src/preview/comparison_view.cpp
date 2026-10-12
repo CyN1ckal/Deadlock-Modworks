@@ -72,9 +72,11 @@ void DrawEdit(const char* what, const MigrationEdit& edit) {
 
 ComparisonView::ComparisonView(const VulkanDevice& device) : left_view_(device), right_view_(device) {}
 
-void ComparisonView::Load(ModelVersions versions, VersionReader read) {
+void ComparisonView::Load(ModelVersions versions, VersionReader read, std::vector<std::string> clips) {
     versions_ = std::move(versions);
     read_ = std::move(read);
+    clips_ = std::move(clips);
+    player_.SetClips(read_ ? clips_ : std::vector<std::string>{});
     left_shown_.reset();
     right_shown_.reset();
     loaded_ = true;
@@ -92,6 +94,12 @@ void ComparisonView::Load(ModelVersions versions, VersionReader read) {
     kind_ = versions_.Get(ModelVersion::Mod).AnimationSkeleton ? SkeletonKind::Animation : SkeletonKind::Render;
     settings_.Lod = 0;
     Refresh(true);
+}
+
+void ComparisonView::PlayClip(const std::string& path) {
+    if (read_) {
+        player_.Select(path, [this](const std::string& resource) { return read_(ModelVersion::Mod, resource); });
+    }
 }
 
 void ComparisonView::ShowError(std::string title, std::string message) {
@@ -145,14 +153,20 @@ void ComparisonView::Refresh(bool reframe) {
     const std::vector<GeometryBone>* right_bones = Skeleton(right_);
     static const std::vector<GeometryBone> kNone;
     skeleton_diff_ = left_bones && right_bones ? CompareSkeletons(*left_bones, *right_bones) : SkeletonDiff{};
+    const bool animation = kind_ == SkeletonKind::Animation;
     if (left_model || left_bones) {
         const auto& bones = left_bones ? *left_bones : kNone;
-        left_view_.SetSkeleton(bones, right_bones ? DiffColors(bones, skeleton_diff_, true) : std::vector<uint32_t>{});
+        left_view_.SetSkeleton(bones, right_bones ? DiffColors(bones, skeleton_diff_, true) : std::vector<uint32_t>{}, animation);
     }
     if (right_model || right_bones) {
         const auto& bones = right_bones ? *right_bones : kNone;
-        right_view_.SetSkeleton(bones, left_bones ? DiffColors(bones, skeleton_diff_, false) : std::vector<uint32_t>{});
+        right_view_.SetSkeleton(bones, left_bones ? DiffColors(bones, skeleton_diff_, false) : std::vector<uint32_t>{}, animation);
     }
+    // Each side plays clips on the animation skeleton the game would use for that version.
+    const auto& left_animation = versions_.Get(left_).AnimationSkeleton;
+    const auto& right_animation = versions_.Get(right_).AnimationSkeleton;
+    left_view_.SetAnimationSkeleton(left_animation ? &*left_animation : nullptr);
+    right_view_.SetAnimationSkeleton(right_animation ? &*right_animation : nullptr);
 
     if (left_model && right_model) {
         binding_diff_ = CompareBindings(*left_model, *right_model);
@@ -332,15 +346,27 @@ void ComparisonView::Draw() {
         right_camera_ = left_camera_;
     }
 
+    if (read_ && (left_view_.CanAnimate() || right_view_.CanAnimate())) {
+        player_.Draw([this](const std::string& path) { return read_(ModelVersion::Mod, path); });
+        player_.Advance(ImGui::GetIO().DeltaTime);
+        left_warning_ = left_view_.Animate(player_.Clip(), player_.Time());
+        right_warning_ = right_view_.Animate(player_.Clip(), player_.Time());
+    }
+
     DrawReport();
     DrawDiff();
 
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const ImVec2 size{(available.x - spacing) * 0.5f, available.y - ImGui::GetTextLineHeightWithSpacing()};
-    auto column = [&](const char* id, ModelVersion version, ModelViewport& view, OrbitCamera& camera) {
+    auto column = [&](const char* id, ModelVersion version, ModelViewport& view, OrbitCamera& camera, const std::string& warning) {
         ImGui::BeginGroup();
         ImGui::TextUnformatted(ModelVersionName(version));
+        if (!warning.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f), "(clip mismatch)");
+            ImGui::SetItemTooltip("%s", warning.c_str());
+        }
         if (view.Empty()) {
             ImGui::Dummy(size);
         } else if (view.Draw(id, size, camera) && link_cameras_) {
@@ -350,9 +376,9 @@ void ComparisonView::Draw() {
         }
         ImGui::EndGroup();
     };
-    column("left_viewport", left_, left_view_, left_camera_);
+    column("left_viewport", left_, left_view_, left_camera_, left_warning_);
     ImGui::SameLine();
-    column("right_viewport", right_, right_view_, right_camera_);
+    column("right_viewport", right_, right_view_, right_camera_, right_warning_);
 }
 
 void ComparisonView::Record(VkCommandBuffer command_buffer) {

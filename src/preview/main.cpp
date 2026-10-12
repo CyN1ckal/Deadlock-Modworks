@@ -363,6 +363,26 @@ struct App {
         return ReadFrom(Game, path);
     }
 
+    // Clips in the model's folder (".../clips/", ".../clip/"), from the mod and the game.
+    std::vector<std::string> ClipsFor(const std::string& model_path) const {
+        const size_t slash = model_path.rfind('/');
+        const std::string folder = slash == std::string::npos ? std::string() : model_path.substr(0, slash + 1);
+        std::vector<std::string> clips;
+        for (const std::optional<VpkArchive>* archive : {&Mod, &Game}) {
+            if (!*archive) {
+                continue;
+            }
+            for (const VpkEntry& entry : (*archive)->Entries()) {
+                if (entry.FullPath.size() > folder.size() && entry.FullPath.compare(0, folder.size(), folder) == 0
+                    && EndsWith(entry.FullPath, ".vnmclip_c")
+                    && std::find(clips.begin(), clips.end(), entry.FullPath) == clips.end()) {
+                    clips.push_back(entry.FullPath);
+                }
+            }
+        }
+        return clips;
+    }
+
     void Select(const std::string& path) {
         Selected = path;
         const VpkEntry* entry = Mod ? FindEntry(*Mod, path) : nullptr;
@@ -373,7 +393,18 @@ struct App {
         try {
             bytes = Mod->Read(*entry);
             const ResourceReader read = [this](const std::string& resource) { return ReadModThenGame(resource); };
-            Panel.Load(DecodeModelGeometry(bytes), path, &read);
+            const ModelGeometry geometry = DecodeModelGeometry(bytes);
+            std::optional<std::vector<GeometryBone>> animation;
+            if (const std::optional<std::string> skeleton = AnimationSkeletonPath(geometry)) {
+                if (const auto skeleton_bytes = ReadModThenGame(*skeleton)) {
+                    try {
+                        animation = DecodeAnimationSkeleton(*skeleton_bytes);
+                    } catch (const std::exception&) {
+                        // Shown as "no animation skeleton"; the comparison view reports the decode error.
+                    }
+                }
+            }
+            Panel.Load(geometry, path, &read, animation ? &*animation : nullptr, ClipsFor(path));
         } catch (const std::exception& error) {
             Panel.ShowError(path, error.what());
         }
@@ -382,9 +413,12 @@ struct App {
             return;
         }
         try {
-            Compare.Load(BuildModelVersions(Sources(path, std::move(bytes))), [this](ModelVersion version, const std::string& resource) {
-                return version == ModelVersion::Game ? ReadFrom(Game, resource) : ReadModThenGame(resource);
-            });
+            Compare.Load(
+                BuildModelVersions(Sources(path, std::move(bytes))),
+                [this](ModelVersion version, const std::string& resource) {
+                    return version == ModelVersion::Game ? ReadFrom(Game, resource) : ReadModThenGame(resource);
+                },
+                ClipsFor(path));
             FocusCompare = true;
         } catch (const std::exception& error) {
             Compare.ShowError(path, error.what());
@@ -523,10 +557,13 @@ int Run(const std::vector<std::filesystem::path>& args) {
     {
         App app(g_device);
         std::optional<std::filesystem::path> game_folder;
+        std::optional<std::string> clip;
         std::vector<std::filesystem::path> positional;
         for (size_t i = 0; i < args.size(); ++i) {
             if (args[i] == L"--game" && i + 1 < args.size()) {
                 game_folder = args[++i];
+            } else if (args[i] == L"--clip" && i + 1 < args.size()) {
+                clip = VpkArchive::Normalize(Narrow(args[++i].wstring()));
             } else {
                 positional.push_back(args[i]);
             }
@@ -541,6 +578,10 @@ int Run(const std::vector<std::filesystem::path>& args) {
             app.OpenPath(positional[0]);
             if (positional.size() > 1 && app.Mod) {
                 app.Select(VpkArchive::Normalize(Narrow(positional[1].wstring())));
+                if (clip) {
+                    app.Panel.PlayClip(*clip);
+                    app.Compare.PlayClip(*clip);
+                }
             }
         }
 

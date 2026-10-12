@@ -1,12 +1,15 @@
 #pragma once
 
+#include "animation_clip.hpp"
 #include "model_renderer.hpp"
 #include "preview_materials.hpp"
 #include "preview_scene.hpp"
+#include "skeleton_pose.hpp"
 
 #include <imgui.h>
 #include <vulkan/vulkan.h>
 
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -25,6 +28,36 @@ struct ViewSettings {
 // Sets `frame` when the Frame button was pressed.
 bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame);
 
+// Picks and plays an animation clip for one or more viewports.
+class AnimationPlayer {
+public:
+    // Clip resources (.vnmclip_c). Additive clips with a "+non_additive" twin are hidden in favour of the twin.
+    void SetClips(const std::vector<std::string>& paths);
+    // Draws the clip picker and transport controls, loading a picked clip through `read`. Returns true when the clip changed.
+    bool Draw(const ResourceReader& read);
+    // Loads and plays a listed clip by path. Returns false when it is not in the list.
+    bool Select(const std::string& path, const ResourceReader& read);
+    void Advance(float seconds);
+
+    // Null for the bind pose.
+    const AnimationClip* Clip() const { return clip_ ? &*clip_ : nullptr; }
+    float Time() const { return time_; }
+
+private:
+    struct Entry {
+        std::string Path;
+        std::string Label;
+    };
+    std::vector<Entry> clips_;
+    int selected_ = -1;
+    std::optional<AnimationClip> clip_;
+    std::string error_;
+    float time_ = 0;
+    float speed_ = 1;
+    bool playing_ = true;
+    char filter_[96] = {};
+};
+
 // One model drawn into an ImGui image with orbit-camera input. Owns its renderer and texture.
 // Requires imgui_impl_vulkan to be initialized.
 class ModelViewport {
@@ -36,7 +69,14 @@ public:
 
     // Null clears the viewport. With a reader, materials and color maps are loaded for Textured mode.
     void SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read = nullptr);
-    void SetSkeleton(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors);
+    // The skeleton drawn as lines. `animation` says whether it is the animation skeleton (else the render skeleton),
+    // which decides which posed bones replace it while a clip plays.
+    void SetSkeleton(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors, bool animation = false);
+    // The animation skeleton clips play on. Null disables animation.
+    void SetAnimationSkeleton(const std::vector<GeometryBone>* bones);
+    // Poses the model for this frame. Null clip returns to the bind pose. Returns a warning when the clip does not fit the skeleton.
+    std::string Animate(const AnimationClip* clip, float seconds);
+    bool CanAnimate() const { return poser_.has_value(); }
     void SetLod(int lod);
 
     bool Empty() const { return scene_.Meshes.empty() && scene_.Skeleton.empty(); }
@@ -55,7 +95,14 @@ public:
 private:
     ModelRenderer renderer_;
     PreviewScene scene_;
+    std::vector<GeometryBone> model_bones_;
     std::vector<uint8_t> visible_;
+    std::optional<SkeletonPoser> poser_;
+    std::vector<uint32_t> overlay_colors_;
+    bool overlay_animation_ = false;
+    std::optional<PosedSkeleton> posed_;
+    std::vector<LineVertex> posed_lines_;
+    std::vector<BoneTransform> local_;
     size_t textured_materials_ = 0;
     size_t material_count_ = 0;
     std::vector<std::string> material_notes_;

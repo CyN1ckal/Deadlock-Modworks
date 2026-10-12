@@ -36,9 +36,11 @@ struct MeshPush {
     std::array<float, 4> Color;
     // 0: Color, 1: bone color, 2: color map.
     uint32_t Mode;
-    // Bit 0: alpha test.
+    // Bit 0: alpha test. Bit 1: skin with the bone buffer.
     uint32_t Flags;
 };
+
+constexpr uint32_t kSkinnedFlag = 2;
 
 std::optional<VkFormat> VulkanFormat(TextureFormat format) {
     switch (format) {
@@ -137,6 +139,21 @@ ModelRenderer::ModelRenderer(const VulkanDevice& device) : device_(device) {
         set_layout.pBindings = &binding;
         Check(vkCreateDescriptorSetLayout(device_.Device, &set_layout, nullptr, &set_layout_), "vkCreateDescriptorSetLayout");
 
+        VkDescriptorSetLayoutBinding bones{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
+        set_layout.pBindings = &bones;
+        Check(vkCreateDescriptorSetLayout(device_.Device, &set_layout, nullptr, &bone_layout_), "vkCreateDescriptorSetLayout");
+        VkDescriptorPoolSize bone_pool_size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
+        VkDescriptorPoolCreateInfo bone_pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        bone_pool.maxSets = 1;
+        bone_pool.poolSizeCount = 1;
+        bone_pool.pPoolSizes = &bone_pool_size;
+        Check(vkCreateDescriptorPool(device_.Device, &bone_pool, nullptr, &bone_pool_), "vkCreateDescriptorPool");
+        VkDescriptorSetAllocateInfo bone_set{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        bone_set.descriptorPool = bone_pool_;
+        bone_set.descriptorSetCount = 1;
+        bone_set.pSetLayouts = &bone_layout_;
+        Check(vkAllocateDescriptorSets(device_.Device, &bone_set, &bone_set_), "vkAllocateDescriptorSets");
+
         CreatePipelines();
 
         // A white texel keeps the sampler bound for draws without a color map.
@@ -167,6 +184,11 @@ void ModelRenderer::Release() {
     Destroy(fallback_.Pixels);
     vkDestroyDescriptorPool(device_.Device, descriptor_pool_, nullptr);
     vkDestroyDescriptorSetLayout(device_.Device, set_layout_, nullptr);
+    vkDestroyDescriptorPool(device_.Device, bone_pool_, nullptr);
+    vkDestroyDescriptorSetLayout(device_.Device, bone_layout_, nullptr);
+    bone_pool_ = VK_NULL_HANDLE;
+    bone_layout_ = VK_NULL_HANDLE;
+    bone_set_ = VK_NULL_HANDLE;
     vkDestroySampler(device_.Device, texture_sampler_, nullptr);
     descriptor_pool_ = VK_NULL_HANDLE;
     set_layout_ = VK_NULL_HANDLE;
@@ -279,8 +301,9 @@ void ModelRenderer::DestroyTargets() {
 void ModelRenderer::CreatePipelines() {
     VkPushConstantRange mesh_push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MeshPush)};
     VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    layout.setLayoutCount = 1;
-    layout.pSetLayouts = &set_layout_;
+    const VkDescriptorSetLayout mesh_sets[] = {set_layout_, bone_layout_};
+    layout.setLayoutCount = 2;
+    layout.pSetLayouts = mesh_sets;
     layout.pushConstantRangeCount = 1;
     layout.pPushConstantRanges = &mesh_push;
     Check(vkCreatePipelineLayout(device_.Device, &layout, nullptr, &mesh_layout_), "vkCreatePipelineLayout");
@@ -310,17 +333,19 @@ void ModelRenderer::CreatePipelines() {
 
         const VkVertexInputBindingDescription binding{0, lines ? static_cast<uint32_t>(sizeof(LineVertex)) : static_cast<uint32_t>(sizeof(PreviewVertex)),
             VK_VERTEX_INPUT_RATE_VERTEX};
-        const VkVertexInputAttributeDescription attributes[4] = {
+        const VkVertexInputAttributeDescription attributes[6] = {
             {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
             lines ? VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(LineVertex, Color)}
                   : VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(PreviewVertex, Normal)},
             {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(PreviewVertex, BoneColor)},
             {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(PreviewVertex, TexCoord)},
+            {4, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(PreviewVertex, BoneIndices)},
+            {5, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(PreviewVertex, BoneWeights)},
         };
         VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         input.vertexBindingDescriptionCount = 1;
         input.pVertexBindingDescriptions = &binding;
-        input.vertexAttributeDescriptionCount = lines ? 2 : 4;
+        input.vertexAttributeDescriptionCount = lines ? 2 : 6;
         input.pVertexAttributeDescriptions = attributes;
 
         VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -341,7 +366,10 @@ void ModelRenderer::CreatePipelines() {
         depth.depthWriteEnable = lines || blended ? VK_FALSE : VK_TRUE;
         depth.depthCompareOp = lines ? VK_COMPARE_OP_LESS_OR_EQUAL : VK_COMPARE_OP_LESS;
         VkPipelineColorBlendAttachmentState blend_attachment{};
-        blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        // The image is shown with alpha blending, so it must stay opaque. Solid draws leave the cleared alpha of 1;
+        // blended draws compute a + (1 - a) * 1, which is also 1.
+        blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT
+            | (lines || blended ? VK_COLOR_COMPONENT_A_BIT : 0);
         if (blended) {
             blend_attachment.blendEnable = VK_TRUE;
             blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -458,6 +486,18 @@ void ModelRenderer::SetScene(const PreviewScene& scene) {
         index_count_ = static_cast<uint32_t>(scene.Indices.size());
         draws_ = scene.Draws;
         draw_materials_.assign(draws_.size(), DrawMaterial{});
+
+        // Contents are written by Record before any skinned draw reads them.
+        bone_count_ = static_cast<uint32_t>(scene.BoneCount);
+        bones_ = CreateBuffer(std::max<VkDeviceSize>(bone_count_, 1) * sizeof(Mat34),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VkDescriptorBufferInfo buffer{bones_.Handle, 0, VK_WHOLE_SIZE};
+        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.dstSet = bone_set_;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo = &buffer;
+        vkUpdateDescriptorSets(device_.Device, 1, &write, 0, nullptr);
     }
 
     grid_ = scene.Grid;
@@ -480,6 +520,35 @@ void ModelRenderer::UploadLines(std::span<const LineVertex> skeleton) {
     skeleton_count_ = static_cast<uint32_t>(skeleton.size());
 }
 
+void ModelRenderer::UpdateBuffer(VkCommandBuffer command_buffer, VkBuffer buffer, VkDeviceSize offset, std::span<const uint8_t> bytes,
+    VkPipelineStageFlags2 reader_stage, VkAccessFlags2 reader_access) {
+    VkBufferMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = buffer;
+    barrier.offset = offset;
+    barrier.size = bytes.size();
+    VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dependency.bufferMemoryBarrierCount = 1;
+    dependency.pBufferMemoryBarriers = &barrier;
+
+    // Earlier frames may still be reading the old contents.
+    barrier.srcStageMask = reader_stage;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier2(command_buffer, &dependency);
+    // vkCmdUpdateBuffer takes at most 64 KiB per call.
+    for (size_t at = 0; at < bytes.size(); at += 65536) {
+        const size_t size = std::min<size_t>(65536, bytes.size() - at);
+        vkCmdUpdateBuffer(command_buffer, buffer, offset + at, size, bytes.data() + at);
+    }
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    barrier.dstStageMask = reader_stage;
+    barrier.dstAccessMask = reader_access;
+    vkCmdPipelineBarrier2(command_buffer, &dependency);
+}
+
 void ModelRenderer::SetSkeleton(std::span<const LineVertex> skeleton) {
     if (lines_.Handle != VK_NULL_HANDLE) {
         Check(vkDeviceWaitIdle(device_.Device), "vkDeviceWaitIdle");
@@ -491,6 +560,8 @@ void ModelRenderer::ClearScene() {
     Destroy(vertices_);
     Destroy(indices_);
     Destroy(lines_);
+    Destroy(bones_);
+    bone_count_ = 0;
     DestroyTextures();
     index_count_ = line_count_ = 0;
     grid_first_ = grid_count_ = skeleton_first_ = skeleton_count_ = 0;
@@ -704,6 +775,19 @@ void ModelRenderer::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
     }
     const bool msaa = samples_ != VK_SAMPLE_COUNT_1_BIT;
 
+    // Animated frames: bone matrices and posed skeleton lines go in before the pass that reads them.
+    const bool skinned = options.Pose != nullptr && bone_count_ > 0 && options.Pose->Skinning.size() == bone_count_;
+    if (skinned) {
+        UpdateBuffer(command_buffer, bones_.Handle, 0,
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(options.Pose->Skinning.data()), options.Pose->Skinning.size_bytes()),
+            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+    }
+    if (options.Pose != nullptr && skeleton_count_ > 0 && options.Pose->Skeleton.size() == skeleton_count_) {
+        UpdateBuffer(command_buffer, lines_.Handle, static_cast<VkDeviceSize>(skeleton_first_) * sizeof(LineVertex),
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(options.Pose->Skeleton.data()), options.Pose->Skeleton.size_bytes()),
+            VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT);
+    }
+
     // Previous contents are discarded. The source scopes cover last frame's sampling, attachment writes and depth use.
     Barrier(command_buffer, resolve_.Handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0,
@@ -759,6 +843,7 @@ void ModelRenderer::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
         const Vec3 eye = camera.Eye();
         constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         const bool textured = options.Coloring == ColorMode::Textured;
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh_layout_, 1, 1, &bone_set_, 0, nullptr);
 
         // Opaque and alpha-tested draws first, then translucent ones over them.
         for (const bool translucent_pass : {false, true}) {
@@ -776,7 +861,7 @@ void ModelRenderer::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
                 if (textured && material.Translucent != translucent_pass) {
                     continue;
                 }
-                MeshPush push{view_projection, {eye.X, eye.Y, eye.Z, 1}, {kClay[0], kClay[1], kClay[2], 1}, 0, 0};
+                MeshPush push{view_projection, {eye.X, eye.Y, eye.Z, 1}, {kClay[0], kClay[1], kClay[2], 1}, 0, skinned ? kSkinnedFlag : 0u};
                 VkDescriptorSet set = fallback_.Set;
                 if (options.Coloring == ColorMode::Material) {
                     push.Color = {draw.MaterialColor[0], draw.MaterialColor[1], draw.MaterialColor[2], 1};
@@ -784,7 +869,7 @@ void ModelRenderer::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
                     push.Mode = 1;
                 } else if (textured && material.Texture >= 0) {
                     push.Mode = 2;
-                    push.Flags = material.AlphaTest ? 1u : 0u;
+                    push.Flags |= material.AlphaTest ? 1u : 0u;
                     set = textures_[static_cast<size_t>(material.Texture)].Set;
                 }
                 if (set != bound) {

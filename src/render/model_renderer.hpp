@@ -2,6 +2,7 @@
 
 #include "preview_materials.hpp"
 #include "preview_scene.hpp"
+#include "skeleton_pose.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -38,6 +39,13 @@ enum class ColorMode {
     Textured,
 };
 
+// One animation frame: skinning matrices for every model bone and, optionally, the posed skeleton lines.
+struct FramePose {
+    std::span<const Mat34> Skinning;
+    // Same line count as the scene's skeleton; ignored otherwise.
+    std::span<const LineVertex> Skeleton;
+};
+
 struct RenderOptions {
     // One byte per scene mesh. Missing entries are hidden.
     std::span<const uint8_t> VisibleMeshes;
@@ -46,6 +54,8 @@ struct RenderOptions {
     ColorMode Coloring = ColorMode::Clay;
     // Display-encoded RGB.
     std::array<float, 3> Background{0.11f, 0.12f, 0.14f};
+    // Bind pose when null.
+    const FramePose* Pose = nullptr;
 };
 
 // Draws a PreviewScene into its own offscreen image for an ImGui panel (or a screenshot).
@@ -118,6 +128,9 @@ private:
     void Submit(Fn&& record);
     Buffer Upload(const void* data, VkDeviceSize size, VkBufferUsageFlags usage);
     void UploadLines(std::span<const LineVertex> skeleton);
+    // Writes `bytes` into `buffer` inside the command buffer, ordered after earlier reads in `reader_stage`.
+    static void UpdateBuffer(VkCommandBuffer command_buffer, VkBuffer buffer, VkDeviceSize offset, std::span<const uint8_t> bytes,
+        VkPipelineStageFlags2 reader_stage, VkAccessFlags2 reader_access);
 
     VulkanDevice device_;
     VkPhysicalDeviceMemoryProperties memory_{};
@@ -131,6 +144,10 @@ private:
     VkPipeline line_pipeline_ = VK_NULL_HANDLE;
     VkSampler texture_sampler_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
+    // Set 1: the bone matrix storage buffer, rewritten by Record for animated frames.
+    VkDescriptorSetLayout bone_layout_ = VK_NULL_HANDLE;
+    VkDescriptorPool bone_pool_ = VK_NULL_HANDLE;
+    VkDescriptorSet bone_set_ = VK_NULL_HANDLE;
     // Holds the fallback set and the current textures; recreated by SetMaterials.
     VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
     Texture fallback_;
@@ -145,6 +162,8 @@ private:
     Buffer vertices_;
     Buffer indices_;
     Buffer lines_;
+    Buffer bones_;
+    uint32_t bone_count_ = 0;
     uint32_t index_count_ = 0;
     uint32_t line_count_ = 0;
     uint32_t grid_first_ = 0;
