@@ -11,8 +11,10 @@ class CancellationToken {
 public:
     CancellationToken() = default;
 
+    bool IsCancelled() const { return flag_ && flag_->load(std::memory_order_relaxed); }
+
     void ThrowIfCancelled() const {
-        if (flag_ && flag_->load(std::memory_order_relaxed)) {
+        if (IsCancelled()) {
             throw OperationCancelled();
         }
     }

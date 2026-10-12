@@ -34,6 +34,7 @@ public:
         const std::filesystem::path& game, bool repair_busy, bool pause_loading, bool pack_view,
         const std::function<void()>& add,
         const std::function<void(const ModelLibrary&)>& load,
+        const std::function<void(const std::filesystem::path&)>& merge,
         const std::function<void(const LibraryModel&)>& preview);
 private:
     struct Thumbnail {
@@ -48,17 +49,17 @@ private:
         LibraryModel Model;
         std::filesystem::path Game;
         CancellationToken Cancellation;
-        // Set for jobs that only write a rendered thumbnail to `SavePath`.
+        // Set for jobs that only store a rendered thumbnail under `SaveKey`.
         std::optional<ThumbnailPixels> Save;
-        std::filesystem::path SavePath;
+        std::string SaveKey;
     };
     struct ThumbnailResult {
         uint64_t Generation = 0;
         size_t Index = 0;
-        // The cached image, when one exists. Otherwise `Model` is rendered once and saved to `CachePath`.
+        // The cached image, when one exists. Otherwise `Model` is rendered once and stored under `CacheKey`.
         std::optional<ThumbnailPixels> Pixels;
         std::optional<PreparedModel> Model;
-        std::filesystem::path CachePath;
+        std::string CacheKey;
         std::string Error;
     };
     struct ScanResult {
@@ -78,7 +79,9 @@ private:
     std::vector<std::unique_ptr<ThumbnailImage>> retired_;
     // Renders thumbnails that are not cached yet. Created on first use.
     std::unique_ptr<ModelRenderer> renderer_;
-    std::filesystem::path cache_folder_;
+    // Thumbnails are kept in the library database. Unset when local app data is unavailable.
+    std::optional<LocalModStore> store_;
+    std::filesystem::path legacy_thumbnails_;
     std::deque<ThumbnailResult> ready_;
     uint64_t generation_ = 0;
     std::filesystem::path thumbnail_game_;

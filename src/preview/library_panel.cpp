@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <thread>
 
 namespace skeleton_repair {
@@ -16,22 +17,28 @@ namespace {
 bool Same(const LibraryModel& a, const LibraryModel& b) {
     return EqualsIgnoreCase(Narrow(a.Archive.wstring()), Narrow(b.Archive.wstring())) && EqualsIgnoreCase(a.Model, b.Model);
 }
-std::filesystem::path Dialog(void* owner, bool save, bool vpk) {
+enum class FileKind { Pack, Library, SharedLibrary };
+std::filesystem::path Dialog(void* owner, FileKind kind) {
+    const bool save = kind != FileKind::Library;
     wchar_t buffer[32768] = {};
     OPENFILENAMEW dialog{sizeof(dialog)};
     dialog.hwndOwner = static_cast<HWND>(owner);
     dialog.lpstrFile = buffer;
     dialog.nMaxFile = static_cast<DWORD>(std::size(buffer));
-    dialog.lpstrFilter = vpk ? L"VPK archive\0*.vpk\0" : L"Model library (*.json)\0*.json\0";
-    dialog.lpstrDefExt = vpk ? L"vpk" : L"json";
-    dialog.lpstrTitle = vpk ? L"Export combined model VPK (choose a new filename)" : save ? L"Save model library" : L"Open model library";
+    dialog.lpstrFilter = kind == FileKind::Pack ? L"VPK archive\0*.vpk\0"
+        : kind == FileKind::SharedLibrary ? L"Mod library (*.db)\0*.db\0"
+        : L"Mod libraries (*.db;*.json)\0*.db;*.json\0";
+    dialog.lpstrDefExt = kind == FileKind::Pack ? L"vpk" : L"db";
+    dialog.lpstrTitle = kind == FileKind::Pack ? L"Export combined model VPK (choose a new filename)"
+        : kind == FileKind::SharedLibrary ? L"Share your mod library" : L"Add a shared mod library";
     dialog.Flags = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
     if (!(save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))) return {};
     return buffer;
 }
 }
 LibraryPanel::LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives)
-    : device_(device), archives_(std::move(archives)), cache_folder_(ThumbnailCacheFolder()) {
+    : device_(device), archives_(std::move(archives)), legacy_thumbnails_(LegacyThumbnailFolder()) {
+    try { store_.emplace(LocalModStore::DefaultRoot()); } catch (const std::exception&) {}
     const unsigned count = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
     for (unsigned i = 0; i < count; ++i) workers_.emplace_back([this] { RunThumbnailWorker(); });
 }
@@ -50,7 +57,7 @@ LibraryPanel::~LibraryPanel() {
     InvalidateThumbnails();
 }
 void LibraryPanel::RunThumbnailWorker() {
-    // Thumbnail files are read and written with WIC.
+    // Thumbnail images are encoded and decoded with WIC.
     const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
     std::unique_lock lock(queue_mutex_);
     while (true) {
@@ -63,7 +70,7 @@ void LibraryPanel::RunThumbnailWorker() {
         std::optional<ThumbnailResult> result;
         if (job.Save) {
             // A failed save only means the thumbnail is rendered again next time.
-            try { SaveThumbnailImage(job.SavePath, *job.Save); } catch (const std::exception&) {}
+            try { store_->SaveThumbnail(job.SaveKey, EncodeThumbnail(*job.Save)); } catch (const std::exception&) {}
         } else {
             result = LoadThumbnail(job);
         }
@@ -79,9 +86,23 @@ LibraryPanel::ThumbnailResult LibraryPanel::LoadThumbnail(const ThumbnailJob& jo
     ThumbnailResult result{job.Generation, job.Index};
     try {
         job.Cancellation.ThrowIfCancelled();
-        if (!cache_folder_.empty()) {
-            result.CachePath = ThumbnailCachePath(cache_folder_, job.Model, job.Game);
-            if ((result.Pixels = LoadThumbnailImage(result.CachePath))) return result;
+        if (store_) {
+            result.CacheKey = ThumbnailKey(&*store_, job.Model, job.Game);
+            // An unavailable database only means the thumbnail is rendered.
+            try {
+                if (const auto png = store_->Thumbnail(result.CacheKey))
+                    if ((result.Pixels = DecodeThumbnail(*png))) return result;
+                // Copies a thumbnail an earlier release rendered for the same stored mod. The old file is kept.
+                if (!legacy_thumbnails_.empty()) for (const auto& legacy : store_->LegacyPaths(job.Model.Archive)) {
+                    std::ifstream in(LegacyThumbnailPath(legacy_thumbnails_, {legacy, job.Model.Model}, job.Game), std::ios::binary);
+                    if (!in) continue;
+                    const std::vector<uint8_t> png(std::istreambuf_iterator<char>(in), {});
+                    if ((result.Pixels = DecodeThumbnail(png))) {
+                        store_->SaveThumbnail(result.CacheKey, png);
+                        return result;
+                    }
+                }
+            } catch (const std::exception&) {}
         }
         const auto archive = archives_->Get(job.Model.Archive);
         const auto lease = archive->Archive().LockSources();
@@ -177,12 +198,12 @@ void LibraryPanel::UploadThumbnails() {
                 // Render once; later loads read the saved image instead of the model.
                 result.Pixels = RenderThumbnail(*result.Model);
                 result.Model.reset();
-                if (!result.CachePath.empty()) {
+                if (store_ && !result.CacheKey.empty()) {
                     {
                         std::lock_guard lock(queue_mutex_);
                         ThumbnailJob save{generation_, SIZE_MAX};
                         save.Save = *result.Pixels;
-                        save.SavePath = result.CachePath;
+                        save.SaveKey = result.CacheKey;
                         jobs_.push_back(std::move(save));
                     }
                     queue_changed_.notify_one();
@@ -290,7 +311,8 @@ void LibraryPanel::Refresh(const std::vector<std::filesystem::path>& sources) {
 }
 void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& sources,
     const std::filesystem::path& game, bool repair_busy, bool pause_loading, bool pack_view, const std::function<void()>& add,
-    const std::function<void(const ModelLibrary&)>& load, const std::function<void(const LibraryModel&)>& preview) {
+    const std::function<void(const ModelLibrary&)>& load, const std::function<void(const std::filesystem::path&)>& merge,
+    const std::function<void(const LibraryModel&)>& preview) {
     Poll();
     if (thumbnail_game_ != game) { InvalidateThumbnails(); thumbnail_game_ = game; }
     if (!Busy() && !repair_busy && sources_ != sources) Refresh(sources);
@@ -306,20 +328,35 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         if (ImGui::Button("Add mods...", {140, 36})) add();
         ImGui::SameLine();
     }
-    if (ImGui::Button("Open library...")) {
-        const auto path = Dialog(owner, false, false);
+    if (ImGui::Button("Add library...")) {
+        const auto path = Dialog(owner, FileKind::Library);
         if (!path.empty()) try {
-            const auto library = ModelLibrary::Load(path);
-            load(library);
-            source_filter_.clear(); status_ = "Restoring library...";
+            source_filter_.clear();
+            if (EqualsIgnoreCase(Narrow(path.extension().wstring()), ".db")) {
+                merge(path);
+                status_ = "Adding the shared library to yours...";
+            } else {
+                // Library lists from earlier releases name their VPKs, which are imported again.
+                load(ModelLibrary::Load(path));
+                status_ = "Restoring library...";
+            }
         } catch (const std::exception& error) { status_ = error.what(); }
     }
+    ImGui::SetItemTooltip("Adds the mods and pack selections of a shared .db library to yours. Nothing in your library is replaced.");
     ImGui::SameLine();
-    if (ImGui::Button("Save library...")) {
-        const auto path = Dialog(owner, true, false);
-        if (!path.empty()) try { Snapshot(sources, game).Save(path); status_ = "Library saved."; }
-        catch (const std::exception& error) { status_ = error.what(); }
+    ImGui::BeginDisabled(!store_);
+    if (ImGui::Button("Share library...")) {
+        const auto path = Dialog(owner, FileKind::SharedLibrary);
+        if (!path.empty()) {
+            status_ = "Writing a copy of your library...";
+            worker_ = std::async(std::launch::async, [store = *store_, path] {
+                try { store.Export(path); return "Saved your whole library to " + Narrow(path.wstring()) + ". Others can add it with Add library."; }
+                catch (const std::exception& error) { return std::string(error.what()); }
+            });
+        }
     }
+    ImGui::SetItemTooltip("Saves your mods, pack selections and thumbnails as one .db file.");
+    ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Refresh")) { archives_->Clear(); InvalidateThumbnails(); Refresh(sources); }
     ImGui::EndDisabled();
@@ -330,7 +367,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         ImGui::TextWrapped("Dependencies are included automatically. Shared files are deduplicated; conflicting assets and missing dependencies block export.");
         ImGui::BeginDisabled(locked || selected_.empty());
         if (ImGui::Button("Build VPK...", {180, 38})) {
-            const auto path = Dialog(owner, true, true);
+            const auto path = Dialog(owner, FileKind::Pack);
             if (!path.empty()) {
                 cancellation_ = CancellationSource{};
                 status_ = "Collecting dependencies and validating your pack...";

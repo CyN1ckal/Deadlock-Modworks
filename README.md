@@ -90,7 +90,20 @@ Choose **Inspect** on a gallery card to open the **Model inspector**. Its **Prev
 
 Export follows external resource references and supported KV3 resource/skeleton references recursively. It includes selected models and reachable overrides from each model's own source archive; base-game dependencies stay in the game. Identical files at the same internal path are deduplicated. Different contents at the same path block export and identify both sources: deselect one of the conflicting models. A missing dependency also blocks export. Dependencies supplied only by another reference VPK are not resolved automatically.
 
-Use **Save library...** to save your source paths and checked models to a JSON library file, and **Open library...** to restore them later. Keep the original source VPKs and any chunk files at their saved locations. **Refresh** rescans changed archives; missing checked models are shown so you can remove them explicitly. Sources are read again when exporting.
+### Your library file
+
+Everything the manager keeps is saved in one SQLite file, `%LOCALAPPDATA%\DeadlockModManager\library.db`: every imported mod, your collection, pack selections, the connected game, and gallery thumbnails. Imported mods no longer depend on their original VPKs or chunk files, which can be moved or deleted.
+
+- Each file inside a mod is stored once per SHA-256 checksum. Importing the same mod again, even renamed or from another folder, reuses it, and files that several mods share are stored once.
+- A changed original, or a repaired mod, is stored as a new version. Earlier versions stay in the library.
+- **Remove from library** only takes a mod out of your collection; it stays stored.
+- Mods you open are rebuilt from the database into the `cache` folder next to it. That folder can be deleted at any time and is rebuilt when needed.
+
+Use **Share library...** to save a copy of your whole library as one `.db` file. **Add library...** adds a shared `.db` library's mods, pack selections and thumbnails to yours; nothing already in your library is replaced. Each shared mod is checked against its checksums first. A game location from another computer is used only if it exists on yours. **Add library...** also opens JSON library lists from earlier releases and imports the VPKs they name.
+
+On first start, the manager adds the mods, collection and thumbnails from earlier releases (`library.json`, `mods`, `thumbnails`) to the database. Those files are only read and are left in place.
+
+**Refresh** rescans changed archives; missing checked models are shown so you can remove them explicitly.
 
 Only reachable resource overrides are included. Unreferenced scripts, sounds, addon metadata, or other extras bundled by a mod author are not automatically copied. Test the exported pack in Deadlock; packaging does not repair models or guarantee in-game compatibility.
 

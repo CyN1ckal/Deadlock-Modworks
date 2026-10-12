@@ -46,6 +46,7 @@
 #include <future>
 #include <atomic>
 #include <chrono>
+#include <utility>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
 
@@ -477,7 +478,14 @@ struct App {
     bool StandaloneModel = false;
     std::optional<LocalModStore> Store;
     std::filesystem::path ConfiguredGame;
+    // Set when the game was chosen on the command line, so the saved game does not replace it.
+    bool KeepGame = false;
     std::optional<ModelLibrary> SavedState;
+    // Set once the saved library is restored, so a failed or cancelled restore never overwrites it.
+    bool CanPersist = false;
+    bool Restoring = false;
+    // Imports requested while the library was being restored.
+    ModelLibrary QueuedImports;
     std::string StoreStatus;
     std::string SaveError;
     double LastSaveAttempt = -10;
@@ -486,11 +494,13 @@ struct App {
         std::string Errors;
         // Each source with its stored copy.
         std::vector<std::pair<std::filesystem::path, std::filesystem::path>> Imported;
+        // The library was read back from the database, which now matches it.
+        bool Restored = false;
     };
     std::future<ImportResult> ImportWorker;
     CancellationSource ImportCancellation;
     std::atomic<size_t> ImportedCount = 0;
-    size_t ImportTotal = 0;
+    std::atomic<size_t> ImportTotal = 0;
 
     bool ImportBusy() const { return ImportWorker.valid(); }
     bool FilesBusy() const { return Repair.Busy() || Builder.Busy() || ImportBusy(); }
@@ -505,12 +515,12 @@ struct App {
         ModPaths = library.Sources;
         CloseInspection();
         Builder.Restore(library);
-        if (!library.GameArchive.empty() && library.GameArchive != ConfiguredGame) OpenGame(library.GameArchive);
+        if (!KeepGame && !library.GameArchive.empty() && library.GameArchive != ConfiguredGame) OpenGame(library.GameArchive);
         SyncSources();
     }
 
     void Persist(bool force = false) {
-        if (!Store || ImportBusy()) return;
+        if (!Store || ImportBusy() || !CanPersist) return;
         const auto current = Builder.Snapshot(ModPaths, ConfiguredGame);
         if (SavedState && *SavedState == current) return;
         if (!force && !SaveError.empty() && ImGui::GetTime() - LastSaveAttempt < 5) return;
@@ -519,7 +529,48 @@ struct App {
         catch (const std::exception& error) { SaveError = error.what(); }
     }
 
+    // Reads the saved library from the database, merging the folder-based store of earlier releases on first use.
+    void StartRestore() {
+        Restoring = true;
+        ImportCancellation = CancellationSource{};
+        ImportedCount = 0; ImportTotal = 0;
+        StoreStatus = "Opening your library...";
+        ImportWorker = std::async(std::launch::async, [root = Store->Root(), token = ImportCancellation.Token(),
+            completed = &ImportedCount, total = &ImportTotal] {
+            ImportResult result;
+            result.Library = LocalModStore(root).Load(token, [=](size_t done, size_t all) { *completed = done; *total = all; }, &result.Errors);
+            result.Restored = true;
+            return result;
+        });
+    }
+
+    // Adds a shared library database's mods and selections to this library.
+    void StartMerge(const std::filesystem::path& other) {
+        if (FilesBusy() || !Store) return;
+        if (!CanPersist) { StoreStatus = "Your library has not been opened, so nothing can be added to it yet. " + SaveError; return; }
+        // The merge appends to the saved collection, so it must match what is on screen.
+        Persist(true);
+        if (!SaveError.empty()) { StoreStatus = "Could not save your library before adding another: " + SaveError; return; }
+        ImportCancellation = CancellationSource{};
+        ImportedCount = 0; ImportTotal = 0;
+        StoreStatus = "Adding " + Narrow(other.filename().wstring()) + " to your library...";
+        ImportWorker = std::async(std::launch::async, [root = Store->Root(), other, token = ImportCancellation.Token(),
+            completed = &ImportedCount, total = &ImportTotal] {
+            ImportResult result;
+            const LocalModStore store(root);
+            store.Merge(other, token);
+            result.Library = store.Load(token, [=](size_t done, size_t all) { *completed = done; *total = all; }, &result.Errors);
+            result.Restored = true;
+            return result;
+        });
+    }
+
     void StartImport(const ModelLibrary& incoming, bool replace) {
+        if (Restoring) {
+            // Started after the restore, so these are added to the restored collection.
+            for (const auto& source : incoming.Sources) QueuedImports.Sources.push_back(source);
+            return;
+        }
         if (FilesBusy()) return;
         if (!Store) { StoreStatus = "Local mod storage is unavailable. " + SaveError; return; }
         ImportCancellation = CancellationSource{};
@@ -528,23 +579,32 @@ struct App {
         auto starting = replace ? incoming : Builder.Snapshot(ModPaths, ConfiguredGame);
         if (replace) starting.Sources.clear();
         ImportWorker = std::async(std::launch::async, [root = Store->Root(), incoming, starting = std::move(starting),
-            token = ImportCancellation.Token(), completed = &ImportedCount]() mutable {
+            token = ImportCancellation.Token(), completed = &ImportedCount, checkpoints = CanPersist]() mutable {
             ImportResult result{std::move(starting), {}, {}};
             LocalModStore store(root);
             for (const auto& source : incoming.Sources) {
                 try {
                     const auto cached = store.Import(source, token);
                     result.Imported.emplace_back(source, cached);
-                    if (std::none_of(result.Library.Sources.begin(), result.Library.Sources.end(), [&](const auto& other) {
-                        return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(cached.wstring()));
-                    })) result.Library.Sources.push_back(cached);
+                    const auto same = [](const std::filesystem::path& a, const std::filesystem::path& b) {
+                        return skeleton_repair::EqualsIgnoreCase(Narrow(std::filesystem::absolute(a).lexically_normal().wstring()),
+                            Narrow(std::filesystem::absolute(b).lexically_normal().wstring()));
+                    };
+                    auto& sources = result.Library.Sources;
+                    const bool stored = std::any_of(sources.begin(), sources.end(), [&](const auto& other) { return same(other, cached); });
+                    const auto previous = std::find_if(sources.begin(), sources.end(), [&](const auto& other) { return same(other, source); });
+                    // A changed copy, such as a repaired one, is stored as a new version that takes its place.
+                    if (previous != sources.end() && !same(source, cached)) {
+                        if (stored) sources.erase(previous);
+                        else *previous = cached;
+                    } else if (!stored) sources.push_back(cached);
                     for (auto& model : result.Library.Selected) if (skeleton_repair::EqualsIgnoreCase(
                         Narrow(std::filesystem::absolute(model.Archive).lexically_normal().wstring()),
                         Narrow(std::filesystem::absolute(source).lexically_normal().wstring()))) model.Archive = cached;
                     auto checkpoint = result.Library;
                     std::erase_if(checkpoint.Selected, [&](const auto& model) { return std::none_of(checkpoint.Sources.begin(), checkpoint.Sources.end(),
                         [&](const auto& path) { return skeleton_repair::EqualsIgnoreCase(Narrow(path.wstring()), Narrow(model.Archive.wstring())); }); });
-                    store.Save(checkpoint);
+                    if (checkpoints) store.Save(checkpoint);
                 } catch (const OperationCancelled&) { result.Errors += "Import cancelled. Completed imports were kept.\n"; break; }
                 catch (const std::exception& error) { result.Errors += Narrow(source.filename().wstring()) + ": " + error.what() + "\n"; }
                 ++*completed;
@@ -560,15 +620,26 @@ struct App {
         try {
             const auto result = ImportWorker.get();
             ApplyLibrary(result.Library);
-            StoreStatus = result.Errors.empty() ? "Imports saved locally. Your collection will reopen automatically." : result.Errors;
+            if (result.Restored) { SavedState = result.Library; CanPersist = true; }
+            StoreStatus = !result.Errors.empty() ? result.Errors
+                : Restoring ? "" : "Saved in your library. Your collection will reopen automatically.";
             Persist(true);
-            if (InspectAfterImport) {
+            if (InspectAfterImport && !Restoring) {
                 for (const auto& [source, cached] : result.Imported) {
                     if (source == InspectAfterImport->first) StartInspect(cached, InspectAfterImport->second);
                 }
+                InspectAfterImport.reset();
             }
-        } catch (const std::exception& error) { StoreStatus = error.what(); }
-        InspectAfterImport.reset();
+        } catch (const std::exception& error) {
+            StoreStatus = error.what();
+            if (!Restoring) InspectAfterImport.reset();
+        }
+        if (Restoring) {
+            Restoring = false;
+            // Imports requested during a failed restore still need storage, but are not saved over the library.
+            if (!QueuedImports.Sources.empty()) StartImport(std::exchange(QueuedImports, {}), false);
+            else InspectAfterImport.reset();
+        }
     }
 
     void SyncSources() {
@@ -580,12 +651,9 @@ struct App {
     explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device, Archives) {
         try {
             Store.emplace(LocalModStore::DefaultRoot());
-            const auto library = Store->Load();
-            ApplyLibrary(library);
-            SavedState = library;
+            StartRestore();
         } catch (const std::exception& error) {
             SaveError = error.what();
-            SavedState = Builder.Snapshot(ModPaths, ConfiguredGame);
         }
     }
     ~App() {
@@ -758,12 +826,13 @@ struct App {
         }
         ImGui::EndDisabled();
         if (Store) {
-            ImGui::TextDisabled("Stored on this computer");
-            ImGui::SetItemTooltip("%s", Narrow(Store->Root().wstring()).c_str());
+            ImGui::TextDisabled("Saved in one library file");
+            ImGui::SetItemTooltip("%s\nShare library saves a copy others can add.", Narrow(Store->Database().wstring()).c_str());
         }
         if (!SaveError.empty()) ImGui::TextWrapped("%s", SaveError.c_str());
         if (ImportBusy()) {
-            ImGui::Text("Importing %zu / %zu", ImportedCount.load(), ImportTotal);
+            if (Restoring) ImGui::TextDisabled("%s", StoreStatus.c_str());
+            if (ImportTotal > 0) ImGui::Text(Restoring ? "Preparing %zu / %zu" : "Importing %zu / %zu", ImportedCount.load(), ImportTotal.load());
             if (ImGui::Button("Cancel import")) ImportCancellation.Cancel();
         } else if (!StoreStatus.empty()) ImGui::TextWrapped("%s", StoreStatus.c_str());
         if (Repair.Busy() || Builder.Busy()) {
@@ -782,6 +851,7 @@ struct App {
                 [&](const ModelLibrary& library) {
                     StartImport(library, true);
                 },
+                [&](const std::filesystem::path& other) { StartMerge(other); },
                 [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); CurrentPage = Page::Inspect; });
         } else if (CurrentPage == Page::Inspect) {
             if (ImGui::Button("< Back to library")) CurrentPage = Page::Gallery;
@@ -924,6 +994,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
             }
         }
         if (game_folder) {
+            app.KeepGame = true;
             app.OpenGame(*game_folder);
         }
         if (!positional.empty()) {
@@ -981,6 +1052,8 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 // Repaired archives were replaced on disk, so reopen them.
                 app.Archives->Remove(app.ModPaths);
                 app.Builder.InvalidateThumbnails();
+                // Stores each repaired copy as a new version; the version before the repair stays in the library.
+                if (app.Store) app.StartImport(app.Builder.Snapshot(app.ModPaths, app.ConfiguredGame), false);
             }
             if (repaired && !app.ActiveMod.empty()) app.StartInspect(app.ActiveMod, app.Selected);
             if (!g_dropped.empty()) {

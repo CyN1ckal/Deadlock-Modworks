@@ -43,7 +43,7 @@ void RepairPanel::SetSources(std::string game, std::vector<std::string> mods) {
     reports_.clear();
     export_status_.clear();
     progress_ = {};
-    status_ = "Ready to analyze. Repairs keep an original backup beside each VPK.";
+    status_ = "Ready to analyze. Repairs save a new version in your library and keep the original.";
 }
 
 void RepairPanel::Start(bool repair) {
@@ -122,7 +122,7 @@ bool RepairPanel::Poll() {
 
 void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) {
     ImGui::SeparatorText("Check skin compatibility");
-    ImGui::TextWrapped("Check hero models and animation skeletons against your installed game. Repair rechecks the files and keeps a .bak backup. Archives needing review are left untouched.");
+    ImGui::TextWrapped("Check hero models and animation skeletons against your installed game. Repair rechecks the files and saves a new version in your library; the original version is kept. Archives needing review are left untouched.");
     ImGui::TextDisabled("Close Deadlock and wait for Steam updates to finish before repairing.");
     ImGui::Spacing();
     ImGui::BeginDisabled(busy_ || game_.empty() || mods_.empty());

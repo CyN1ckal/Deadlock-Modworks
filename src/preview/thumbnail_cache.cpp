@@ -9,6 +9,7 @@
 #include <wrl/client.h>
 #include <imgui_impl_vulkan.h>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <system_error>
 
@@ -17,7 +18,9 @@ namespace {
 namespace fs = std::filesystem;
 using Microsoft::WRL::ComPtr;
 // Bump to discard every cached thumbnail, for example after the renderer's look changes.
-constexpr char kCacheVersion[] = "thumbnail-v1";
+constexpr char kCacheVersion[] = "thumbnail-v2";
+// The version used by the image files of earlier releases, which are still read once and copied into the library.
+constexpr char kLegacyCacheVersion[] = "thumbnail-v1";
 
 void Hash(uint64_t& hash, std::string_view text) {
     for (const unsigned char c : text) { hash ^= c; hash *= 0x100000001b3ull; }
@@ -33,6 +36,16 @@ void HashFile(uint64_t& hash, const fs::path& path) {
     Hash(hash, error ? "?" : std::to_string(size));
     const auto stamp = fs::last_write_time(path, error);
     Hash(hash, error ? "?" : std::to_string(stamp.time_since_epoch().count()));
+}
+std::string Lower(std::string text) {
+    for (auto& c : text) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    return text;
+}
+std::string Hex64(uint64_t hash) {
+    constexpr char digits[] = "0123456789abcdef";
+    std::string text(16, '0');
+    for (int i = 15; i >= 0; --i, hash >>= 4) text[static_cast<size_t>(i)] = digits[hash & 15];
+    return text;
 }
 void Check(HRESULT result, const char* call) {
     if (FAILED(result)) throw IoError(std::string(call) + " failed with HRESULT " + std::to_string(static_cast<unsigned long>(result)));
@@ -54,35 +67,45 @@ uint32_t MemoryType(VkPhysicalDevice physical, uint32_t type_bits, VkMemoryPrope
 }
 }
 
-fs::path ThumbnailCacheFolder() {
+fs::path LegacyThumbnailFolder() {
     try { return LocalModStore::DefaultRoot() / L"thumbnails"; }
     catch (const std::exception&) { return {}; }
 }
 
-fs::path ThumbnailCachePath(const fs::path& folder, const LibraryModel& model, const fs::path& game) {
+fs::path LegacyThumbnailPath(const fs::path& folder, const LibraryModel& model, const fs::path& game) {
     uint64_t hash = 0xcbf29ce484222325ull;
-    Hash(hash, kCacheVersion);
+    Hash(hash, kLegacyCacheVersion);
     Hash(hash, std::to_string(kThumbnailSize));
     HashFile(hash, model.Archive);
-    std::string name = model.Model;
-    for (auto& c : name) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    Hash(hash, name);
+    Hash(hash, Lower(model.Model));
     // Base game materials show through in the render, so a game update renders the thumbnail again.
     if (game.empty()) Hash(hash, "");
     else HashFile(hash, game);
-    constexpr char digits[] = "0123456789abcdef";
-    std::string file(16, '0');
-    for (int i = 15; i >= 0; --i, hash >>= 4) file[static_cast<size_t>(i)] = digits[hash & 15];
-    return folder / (file + ".png");
+    return folder / (Hex64(hash) + ".png");
 }
 
-std::optional<ThumbnailPixels> LoadThumbnailImage(const fs::path& path) {
-    std::error_code error;
-    if (!fs::is_regular_file(path, error)) return std::nullopt;
+std::string ThumbnailKey(const LocalModStore* store, const LibraryModel& model, const fs::path& game) {
+    uint64_t hash = 0xcbf29ce484222325ull;
+    Hash(hash, kCacheVersion);
+    Hash(hash, std::to_string(kThumbnailSize));
+    // Stored mods are identified by content, so their thumbnails survive moving or sharing the library.
+    if (const auto content = store ? store->ContentId(model.Archive) : std::nullopt) Hash(hash, *content);
+    else HashFile(hash, model.Archive);
+    Hash(hash, Lower(model.Model));
+    if (game.empty()) Hash(hash, "");
+    else HashFile(hash, game);
+    return Hex64(hash);
+}
+
+std::optional<ThumbnailPixels> DecodeThumbnail(const std::vector<uint8_t>& png) {
+    if (png.empty()) return std::nullopt;
     try {
         const auto factory = Factory();
+        ComPtr<IWICStream> stream;
+        Check(factory->CreateStream(&stream), "CreateStream");
+        Check(stream->InitializeFromMemory(const_cast<BYTE*>(png.data()), static_cast<DWORD>(png.size())), "InitializeFromMemory");
         ComPtr<IWICBitmapDecoder> decoder;
-        Check(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder), "CreateDecoderFromFilename");
+        Check(factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder), "CreateDecoderFromStream");
         ComPtr<IWICBitmapFrameDecode> frame;
         Check(decoder->GetFrame(0, &frame), "GetFrame");
         ComPtr<IWICFormatConverter> converter;
@@ -95,42 +118,46 @@ std::optional<ThumbnailPixels> LoadThumbnailImage(const fs::path& path) {
         Check(converter->CopyPixels(nullptr, pixels.Width * 4, static_cast<UINT>(pixels.Rgba.size()), pixels.Rgba.data()), "CopyPixels");
         return pixels;
     } catch (const std::exception&) {
-        // A damaged cache file is rendered again.
-        fs::remove(path, error);
+        // A damaged image is rendered again.
         return std::nullopt;
     }
 }
 
-void SaveThumbnailImage(const fs::path& path, const ThumbnailPixels& pixels) {
-    fs::create_directories(path.parent_path());
-    const fs::path temp = fs::path(path).concat(L".tmp" + std::to_wstring(GetCurrentThreadId()));
-    {
-        const auto factory = Factory();
-        ComPtr<IWICBitmap> bitmap;
-        Check(factory->CreateBitmapFromMemory(pixels.Width, pixels.Height, GUID_WICPixelFormat32bppRGBA, pixels.Width * 4,
-            static_cast<UINT>(pixels.Rgba.size()), const_cast<BYTE*>(pixels.Rgba.data()), &bitmap), "CreateBitmapFromMemory");
-        ComPtr<IWICStream> stream;
-        Check(factory->CreateStream(&stream), "CreateStream");
-        Check(stream->InitializeFromFilename(temp.c_str(), GENERIC_WRITE), "InitializeFromFilename");
-        ComPtr<IWICBitmapEncoder> encoder;
-        Check(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder), "CreateEncoder");
-        Check(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache), "IWICBitmapEncoder::Initialize");
-        ComPtr<IWICBitmapFrameEncode> frame;
-        Check(encoder->CreateNewFrame(&frame, nullptr), "CreateNewFrame");
-        Check(frame->Initialize(nullptr), "IWICBitmapFrameEncode::Initialize");
-        Check(frame->SetSize(pixels.Width, pixels.Height), "SetSize");
-        // Renders are opaque, so the alpha channel is dropped to keep files small.
-        WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
-        Check(frame->SetPixelFormat(&format), "SetPixelFormat");
-        Check(frame->WriteSource(bitmap.Get(), nullptr), "WriteSource");
-        Check(frame->Commit(), "IWICBitmapFrameEncode::Commit");
-        Check(encoder->Commit(), "IWICBitmapEncoder::Commit");
-    }
-    if (!MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-        std::error_code error;
-        fs::remove(temp, error);
-        throw IoError("Could not save a thumbnail. Windows error " + std::to_string(GetLastError()));
-    }
+std::optional<ThumbnailPixels> LoadThumbnailImage(const fs::path& path) {
+    std::error_code error;
+    if (!fs::is_regular_file(path, error)) return std::nullopt;
+    std::ifstream in(path, std::ios::binary);
+    return DecodeThumbnail(std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {}));
+}
+
+std::vector<uint8_t> EncodeThumbnail(const ThumbnailPixels& pixels) {
+    const auto factory = Factory();
+    ComPtr<IWICBitmap> bitmap;
+    Check(factory->CreateBitmapFromMemory(pixels.Width, pixels.Height, GUID_WICPixelFormat32bppRGBA, pixels.Width * 4,
+        static_cast<UINT>(pixels.Rgba.size()), const_cast<BYTE*>(pixels.Rgba.data()), &bitmap), "CreateBitmapFromMemory");
+    ComPtr<IStream> stream;
+    Check(CreateStreamOnHGlobal(nullptr, TRUE, &stream), "CreateStreamOnHGlobal");
+    ComPtr<IWICBitmapEncoder> encoder;
+    Check(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder), "CreateEncoder");
+    Check(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache), "IWICBitmapEncoder::Initialize");
+    ComPtr<IWICBitmapFrameEncode> frame;
+    Check(encoder->CreateNewFrame(&frame, nullptr), "CreateNewFrame");
+    Check(frame->Initialize(nullptr), "IWICBitmapFrameEncode::Initialize");
+    Check(frame->SetSize(pixels.Width, pixels.Height), "SetSize");
+    // Renders are opaque, so the alpha channel is dropped to keep images small.
+    WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
+    Check(frame->SetPixelFormat(&format), "SetPixelFormat");
+    Check(frame->WriteSource(bitmap.Get(), nullptr), "WriteSource");
+    Check(frame->Commit(), "IWICBitmapFrameEncode::Commit");
+    Check(encoder->Commit(), "IWICBitmapEncoder::Commit");
+    STATSTG stat{};
+    Check(stream->Stat(&stat, STATFLAG_NONAME), "IStream::Stat");
+    std::vector<uint8_t> png(static_cast<size_t>(stat.cbSize.QuadPart));
+    Check(stream->Seek({}, STREAM_SEEK_SET, nullptr), "IStream::Seek");
+    ULONG read = 0;
+    Check(stream->Read(png.data(), static_cast<ULONG>(png.size()), &read), "IStream::Read");
+    png.resize(read);
+    return png;
 }
 
 ThumbnailImage::ThumbnailImage(const VulkanDevice& device, const ThumbnailPixels& pixels) : device_(device) {

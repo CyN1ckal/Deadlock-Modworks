@@ -26,34 +26,54 @@ protected:
     void Write(const fs::path& path, const std::string& text) { std::ofstream(path, std::ios::binary) << text; }
 };
 
-TEST_F(ThumbnailCacheTest, SavedImageLoadsBackOpaque) {
+TEST_F(ThumbnailCacheTest, EncodedImageDecodesBackOpaque) {
     ThumbnailPixels pixels{3, 2, {}};
     for (uint8_t i = 0; i < 6; ++i) pixels.Rgba.insert(pixels.Rgba.end(), {static_cast<uint8_t>(i * 40), 20, static_cast<uint8_t>(250 - i), 255});
-    const auto path = dir / "nested" / "thumb.png";
-    SaveThumbnailImage(path, pixels);
-    const auto loaded = LoadThumbnailImage(path);
+    const auto loaded = DecodeThumbnail(EncodeThumbnail(pixels));
     ASSERT_TRUE(loaded);
     EXPECT_EQ(loaded->Width, 3u);
     EXPECT_EQ(loaded->Height, 2u);
     EXPECT_EQ(loaded->Rgba, pixels.Rgba);
 }
 
-TEST_F(ThumbnailCacheTest, MissingOrDamagedImageIsNotLoaded) {
+TEST_F(ThumbnailCacheTest, MissingOrDamagedImageIsNotLoadedOrRemoved) {
     EXPECT_FALSE(LoadThumbnailImage(dir / "missing.png"));
+    EXPECT_FALSE(DecodeThumbnail({}));
     const auto damaged = dir / "damaged.png";
     Write(damaged, "not a png");
     EXPECT_FALSE(LoadThumbnailImage(damaged));
-    EXPECT_FALSE(fs::exists(damaged));
+    EXPECT_TRUE(fs::exists(damaged));
 }
 
-TEST_F(ThumbnailCacheTest, PathChangesWithTheArchive) {
+TEST_F(ThumbnailCacheTest, KeyChangesWithTheArchive) {
     const auto archive = dir / "mod.vpk";
     Write(archive, "one");
     const LibraryModel model{archive, "models/heroes/hero.vmdl_c"};
-    const auto first = ThumbnailCachePath(dir, model, {});
-    EXPECT_EQ(first, ThumbnailCachePath(dir, {archive, "Models/Heroes/Hero.vmdl_c"}, {}));
-    EXPECT_NE(first, ThumbnailCachePath(dir, {archive, "models/heroes/other.vmdl_c"}, {}));
+    const auto first = ThumbnailKey(nullptr, model, {});
+    EXPECT_EQ(first, ThumbnailKey(nullptr, {archive, "Models/Heroes/Hero.vmdl_c"}, {}));
+    EXPECT_NE(first, ThumbnailKey(nullptr, {archive, "models/heroes/other.vmdl_c"}, {}));
     Write(archive, "changed");
-    EXPECT_NE(first, ThumbnailCachePath(dir, model, {}));
+    EXPECT_NE(first, ThumbnailKey(nullptr, model, {}));
+}
+
+TEST_F(ThumbnailCacheTest, StoredModKeyFollowsContentNotLocation) {
+    const LocalModStore store(dir / "store");
+    const auto hash = std::string(64, 'a');
+    const auto cached = store.Root() / "cache" / hash / "mod.vpk";
+    const auto moved = dir / "elsewhere" / "cache" / hash / "mod.vpk";
+    fs::create_directories(cached.parent_path());
+    Write(cached, "one");
+    const auto key = ThumbnailKey(&store, {cached, "models/a.vmdl_c"}, {});
+    Write(cached, "touched");
+    EXPECT_EQ(ThumbnailKey(&store, {cached, "models/a.vmdl_c"}, {}), key);
+    EXPECT_NE(ThumbnailKey(&store, {moved, "models/a.vmdl_c"}, {}), key);
+}
+
+TEST_F(ThumbnailCacheTest, LegacyPathMatchesEarlierReleases) {
+    const auto archive = dir / "mod.vpk";
+    Write(archive, "one");
+    const LibraryModel model{archive, "models/heroes/hero.vmdl_c"};
+    EXPECT_EQ(LegacyThumbnailPath(dir, model, {}).parent_path(), dir);
+    EXPECT_EQ(LegacyThumbnailPath(dir, model, {}), LegacyThumbnailPath(dir, {archive, "MODELS/heroes/hero.vmdl_c"}, {}));
 }
 }
