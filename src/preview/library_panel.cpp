@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <thread>
 
 namespace skeleton_repair {
 namespace {
@@ -28,15 +29,91 @@ std::filesystem::path Dialog(void* owner, bool save, bool vpk) {
     return buffer;
 }
 }
+LibraryPanel::LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives)
+    : device_(device), archives_(std::move(archives)) {
+    const unsigned count = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
+    for (unsigned i = 0; i < count; ++i) workers_.emplace_back([this] { RunThumbnailWorker(); });
+}
 LibraryPanel::~LibraryPanel() {
     cancellation_.Cancel();
     if (worker_.valid()) worker_.wait();
+    {
+        std::lock_guard lock(queue_mutex_);
+        stopping_ = true;
+        jobs_.clear();
+        thumbnail_cancellation_.Cancel();
+    }
+    queue_changed_.notify_all();
+    for (auto& thread : workers_) thread.join();
     InvalidateThumbnails();
 }
+void LibraryPanel::RunThumbnailWorker() {
+    std::unique_lock lock(queue_mutex_);
+    while (true) {
+        queue_changed_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
+        if (stopping_) return;
+        const ThumbnailJob job = std::move(jobs_.front());
+        jobs_.pop_front();
+        ++active_jobs_;
+        lock.unlock();
+        ThumbnailResult result = LoadThumbnail(job);
+        lock.lock();
+        --active_jobs_;
+        results_.push_back(std::move(result));
+        queue_idle_.notify_all();
+    }
+}
+LibraryPanel::ThumbnailResult LibraryPanel::LoadThumbnail(const ThumbnailJob& job) {
+    ThumbnailResult result{job.Generation, job.Index, std::nullopt, {}};
+    try {
+        job.Cancellation.ThrowIfCancelled();
+        const auto archive = archives_->Get(job.Model.Archive);
+        const auto lease = archive->Archive().LockSources();
+        const auto base = job.Game.empty() ? nullptr : archives_->Get(job.Game);
+        const IndexedArchive* resource_sources[] = {archive.get(), base.get()};
+        const ResourceReader read = [&](const std::string& path) -> std::optional<std::vector<uint8_t>> {
+            for (const auto* source : resource_sources) {
+                if (!source) continue;
+                if (auto bytes = source->Read(path, job.Cancellation)) return bytes;
+            }
+            return std::nullopt;
+        };
+        const auto bytes = read(job.Model.Model);
+        if (!bytes) throw InvalidData("Model is no longer present. Refresh the library.");
+        const auto geometry = DecodeModelGeometry(*bytes);
+        job.Cancellation.ThrowIfCancelled();
+        result.Model = PrepareModel(geometry, &read, 128);
+        if (result.Model->Scene.Meshes.empty()) throw InvalidData("No renderable meshes in this model.");
+    } catch (const std::exception& error) {
+        result.Model.reset();
+        result.Error = error.what();
+    }
+    return result;
+}
+void LibraryPanel::StopLoading() {
+    std::unique_lock lock(queue_mutex_);
+    jobs_.clear();
+    thumbnail_cancellation_.Cancel();
+    thumbnail_cancellation_ = CancellationSource{};
+    queue_idle_.wait(lock, [this] { return active_jobs_ == 0; });
+    lock.unlock();
+    scan_.Cancel(true);
+    // Cancelled loads come back as errors and the scan was dropped; request both again afterwards.
+    InvalidateThumbnails();
+    sources_.clear();
+}
 void LibraryPanel::InvalidateThumbnails() {
-    if (!thumbnails_.empty()) {
+    ++generation_;
+    {
+        std::lock_guard lock(queue_mutex_);
+        jobs_.clear();
+        results_.clear();
+    }
+    ready_.clear();
+    if (!thumbnails_.empty() || !retired_.empty()) {
         vkDeviceWaitIdle(device_.Device);
         thumbnails_.clear();
+        retired_.clear();
     }
 }
 void LibraryPanel::Record(VkCommandBuffer command_buffer) {
@@ -46,49 +123,58 @@ void LibraryPanel::Record(VkCommandBuffer command_buffer) {
         thumbnail.Rendered = true;
     }
 }
-void LibraryPanel::DrawThumbnail(size_t index, const std::filesystem::path& game, float size, size_t cache_limit, bool& loaded_this_frame) {
+void LibraryPanel::Evict(std::map<size_t, Thumbnail>::iterator thumbnail) {
+    if (thumbnail->second.Viewport) retired_.push_back(std::move(thumbnail->second.Viewport));
+    if (thumbnail->second.Pending) {
+        std::lock_guard lock(queue_mutex_);
+        std::erase_if(jobs_, [&](const ThumbnailJob& job) { return job.Index == thumbnail->first; });
+    }
+    thumbnails_.erase(thumbnail);
+}
+void LibraryPanel::UploadThumbnails() {
+    {
+        std::lock_guard lock(queue_mutex_);
+        for (auto& result : results_) ready_.push_back(std::move(result));
+        results_.clear();
+    }
+    // Creating a viewport and uploading its buffers must stay on this thread, so spread that work over frames.
+    const auto start = std::chrono::steady_clock::now();
+    while (!ready_.empty() && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(6)) {
+        ThumbnailResult result = std::move(ready_.front());
+        ready_.pop_front();
+        const auto found = thumbnails_.find(result.Index);
+        if (result.Generation != generation_ || found == thumbnails_.end() || !found->second.Pending) continue;
+        Thumbnail& thumbnail = found->second;
+        thumbnail.Pending = false;
+        try {
+            if (!result.Model) throw InvalidData(result.Error);
+            thumbnail.Viewport = std::make_unique<ModelViewport>(device_);
+            thumbnail.Viewport->SetModel(&*result.Model, 0);
+            thumbnail.Camera = OrbitCamera::Framing(thumbnail.Viewport->Scene().Min, thumbnail.Viewport->Scene().Max);
+        } catch (const std::exception& error) {
+            thumbnail.Viewport.reset();
+            thumbnail.Error = error.what();
+        }
+    }
+}
+void LibraryPanel::DrawThumbnail(size_t index, const std::filesystem::path& game, float size, size_t cache_limit, bool pause_loading) {
     auto found = thumbnails_.find(index);
-    if (found == thumbnails_.end() && !loaded_this_frame) {
+    if (found == thumbnails_.end() && !pause_loading) {
         // Never evict an image referenced by this frame's ImGui draw list.
         while (thumbnails_.size() >= cache_limit) {
             const auto oldest = std::min_element(thumbnails_.begin(), thumbnails_.end(), [](const auto& a, const auto& b) {
                 return a.second.LastFrame < b.second.LastFrame;
             });
-            if (oldest->second.LastFrame < ImGui::GetFrameCount()) {
-                vkDeviceWaitIdle(device_.Device);
-                thumbnails_.erase(oldest);
-            } else break;
+            if (oldest->second.LastFrame < ImGui::GetFrameCount()) Evict(oldest);
+            else break;
         }
         if (thumbnails_.size() < cache_limit) {
-            loaded_this_frame = true;
-            Thumbnail thumbnail;
-            try {
-                const auto& model = models_.at(index);
-                const auto archive = VpkArchive::Open(model.Archive);
-                auto lease = archive.LockSources();
-                std::optional<VpkArchive> base;
-                std::optional<ReadLease> base_lease;
-                if (!game.empty()) { base.emplace(VpkArchive::Open(game)); base_lease.emplace(base->LockSources()); }
-                const VpkArchive* resource_sources[] = {&archive, base ? &*base : nullptr};
-                const ResourceReader read = [&](const std::string& path) -> std::optional<std::vector<uint8_t>> {
-                    for (const auto* source : resource_sources) {
-                        if (!source) continue;
-                        for (const auto& entry : source->Entries()) if (EqualsIgnoreCase(entry.FullPath, path)) return source->Read(entry);
-                    }
-                    return std::nullopt;
-                };
-                const auto bytes = read(model.Model);
-                if (!bytes) throw InvalidData("Model is no longer present. Refresh the library.");
-                const auto geometry = DecodeModelGeometry(*bytes);
-                thumbnail.Viewport = std::make_unique<ModelViewport>(device_);
-                thumbnail.Viewport->SetModel(&geometry, 0, &read, 128);
-                if (thumbnail.Viewport->Scene().Meshes.empty()) throw InvalidData("No renderable meshes in this model.");
-                thumbnail.Camera = OrbitCamera::Framing(thumbnail.Viewport->Scene().Min, thumbnail.Viewport->Scene().Max);
-            } catch (const std::exception& error) {
-                thumbnail.Viewport.reset();
-                thumbnail.Error = error.what();
+            found = thumbnails_.emplace(index, Thumbnail{}).first;
+            {
+                std::lock_guard lock(queue_mutex_);
+                jobs_.push_back({generation_, index, models_.at(index), game, thumbnail_cancellation_.Token()});
             }
-            found = thumbnails_.emplace(index, std::move(thumbnail)).first;
+            queue_changed_.notify_one();
         }
     }
     if (found != thumbnails_.end()) {
@@ -105,15 +191,30 @@ void LibraryPanel::DrawThumbnail(size_t index, const std::filesystem::path& game
     }
     const auto origin = ImGui::GetCursorScreenPos();
     ImGui::Dummy({size, size});
-    const char* label = found == thumbnails_.end() ? "Loading..." : "No preview";
+    const bool loading = found == thumbnails_.end() || found->second.Pending;
+    const char* label = loading ? "Loading..." : "No preview";
     const auto text_size = ImGui::CalcTextSize(label);
     auto* draw = ImGui::GetWindowDrawList();
     draw->AddRectFilled(origin, {origin.x + size, origin.y + size}, ImGui::GetColorU32(ImGuiCol_FrameBg), 4);
     draw->AddText({origin.x + (size - text_size.x) / 2, origin.y + (size - text_size.y) / 2}, ImGui::GetColorU32(ImGuiCol_TextDisabled), label);
-    if (found != thumbnails_.end()) ImGui::SetItemTooltip("%s", found->second.Error.c_str());
+    if (!loading) ImGui::SetItemTooltip("%s", found->second.Error.c_str());
 }
 void LibraryPanel::Poll() {
     if (worker_.valid() && worker_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) status_ = worker_.get();
+    try {
+        if (auto scan = scan_.Take()) {
+            InvalidateThumbnails();
+            models_ = std::move(scan->Models);
+            errors_ = std::move(scan->Errors);
+        }
+    } catch (const std::exception& error) {
+        errors_ = {error.what()};
+    }
+    if (!retired_.empty()) {
+        vkDeviceWaitIdle(device_.Device);
+        retired_.clear();
+    }
+    UploadThumbnails();
 }
 void LibraryPanel::Restore(const ModelLibrary& library) {
     selected_ = library.Selected;
@@ -129,30 +230,34 @@ ModelLibrary LibraryPanel::Snapshot(const std::vector<std::filesystem::path>& so
     return result;
 }
 void LibraryPanel::Refresh(const std::vector<std::filesystem::path>& sources) {
-    InvalidateThumbnails();
     sources_ = sources;
     if (!source_filter_.empty() && std::find(sources.begin(), sources.end(), source_filter_) == sources.end()) source_filter_.clear();
-    models_.clear(); errors_.clear();
-    for (const auto& path : sources) {
-        try {
-            const auto archive = VpkArchive::Open(path);
-            for (const auto& entry : archive.Entries()) if (entry.FullPath.ends_with(".vmdl_c")) models_.push_back({path, entry.FullPath});
-        } catch (const std::exception& error) { errors_.push_back(Narrow(path.wstring()) + ": " + error.what()); }
-    }
-    std::sort(models_.begin(), models_.end(), [](const auto& a, const auto& b) {
-        if (a.Model != b.Model) return a.Model < b.Model;
-        return a.Archive < b.Archive;
-    });
     std::erase_if(selected_, [&](const auto& selected) {
         return std::none_of(sources.begin(), sources.end(), [&](const auto& source) { return EqualsIgnoreCase(Narrow(source.wstring()), Narrow(selected.Archive.wstring())); });
     });
+    // Opening every archive is slow for large collections, so the gallery keeps the last scan until this finishes.
+    scan_.Start([sources, archives = archives_](CancellationToken cancellation) {
+        ScanResult result;
+        for (const auto& path : sources) {
+            cancellation.ThrowIfCancelled();
+            try {
+                const auto archive = archives->Get(path);
+                for (const auto& entry : archive->Archive().Entries()) if (entry.FullPath.ends_with(".vmdl_c")) result.Models.push_back({path, entry.FullPath});
+            } catch (const std::exception& error) { result.Errors.push_back(Narrow(path.wstring()) + ": " + error.what()); }
+        }
+        std::sort(result.Models.begin(), result.Models.end(), [](const auto& a, const auto& b) {
+            if (a.Model != b.Model) return a.Model < b.Model;
+            return a.Archive < b.Archive;
+        });
+        return result;
+    });
 }
 void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& sources,
-    const std::filesystem::path& game, bool repair_busy, bool pack_view, const std::function<void()>& add,
+    const std::filesystem::path& game, bool repair_busy, bool pause_loading, bool pack_view, const std::function<void()>& add,
     const std::function<void(const ModelLibrary&)>& load, const std::function<void(const LibraryModel&)>& preview) {
     Poll();
     if (thumbnail_game_ != game) { InvalidateThumbnails(); thumbnail_game_ = game; }
-    if (!Busy() && sources_ != sources) Refresh(sources);
+    if (!Busy() && !repair_busy && sources_ != sources) Refresh(sources);
     const bool locked = Busy() || repair_busy;
     ImGui::TextColored({.47f, .85f, .77f, 1.f}, pack_view ? "YOUR LOADOUT" : "YOUR COLLECTION");
     ImGui::SetWindowFontScale(1.6f);
@@ -180,7 +285,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         catch (const std::exception& error) { status_ = error.what(); }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Refresh")) Refresh(sources);
+    if (ImGui::Button("Refresh")) { archives_->Clear(); InvalidateThumbnails(); Refresh(sources); }
     ImGui::EndDisabled();
     ImGui::Spacing();
     if (pack_view) {
@@ -207,6 +312,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
     }
     if (Busy() && ImGui::Button("Cancel build")) cancellation_.Cancel();
     if (!status_.empty()) ImGui::TextWrapped("%s", status_.c_str());
+    if (Scanning()) ImGui::TextDisabled("Reading %zu source archives...", sources_.size());
     ImGui::Separator();
     ImGui::BeginDisabled(locked);
     ImGui::SetNextItemWidth(std::max(140.f, ImGui::GetContentRegionAvail().x * .40f));
@@ -242,7 +348,8 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
     ImGui::BeginChild("gallery", {0, 0});
     for (const auto& error : errors_) ImGui::TextWrapped("%s", error.c_str());
     ImGui::BeginDisabled(locked);
-    for (size_t i = 0; i < selected_.size();) {
+    // Until the scan finishes, every selected skin would look missing.
+    for (size_t i = 0; i < selected_.size() && !Scanning();) {
         if (std::none_of(models_.begin(), models_.end(), [&](const auto& model) { return Same(model, selected_[i]); })) {
             ImGui::PushID(static_cast<int>(i));
             ImGui::TextWrapped("Missing skin: %s (%s)", selected_[i].Model.c_str(), Narrow(selected_[i].Archive.wstring()).c_str());
@@ -254,10 +361,15 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
     if (filtered.empty()) {
         ImGui::Spacing(); ImGui::Spacing();
         ImGui::SetWindowFontScale(1.3f);
-        ImGui::TextUnformatted(models_.empty() ? "Start your mod collection" : pack_view && selected_.empty() ? "Your pack is empty" : "No matching skins");
-        ImGui::SetWindowFontScale(1.f);
-        ImGui::TextWrapped(models_.empty() ? "Add or drop reference VPKs to browse their skins here. Your source files stay available for future builds." : pack_view && selected_.empty() ? "Visit the mod library and choose Include in pack on the skins you want." : "Try another search or source filter.");
-        if (models_.empty() && ImGui::Button("Add your first mods...", {190, 40})) add();
+        if (models_.empty() && Scanning()) {
+            ImGui::TextUnformatted("Loading your collection...");
+            ImGui::SetWindowFontScale(1.f);
+        } else {
+            ImGui::TextUnformatted(models_.empty() ? "Start your mod collection" : pack_view && selected_.empty() ? "Your pack is empty" : "No matching skins");
+            ImGui::SetWindowFontScale(1.f);
+            ImGui::TextWrapped(models_.empty() ? "Add or drop reference VPKs to browse their skins here. Your source files stay available for future builds." : pack_view && selected_.empty() ? "Visit the mod library and choose Include in pack on the skins you want." : "Try another search or source filter.");
+            if (models_.empty() && ImGui::Button("Add your first mods...", {190, 40})) add();
+        }
     } else {
         const float spacing = ImGui::GetStyle().ItemSpacing.x;
         const float available = ImGui::GetContentRegionAvail().x;
@@ -270,7 +382,6 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         const float row_height = card_height + ImGui::GetStyle().ItemSpacing.y;
         const auto visible_rows = static_cast<size_t>(std::ceil(ImGui::GetWindowHeight() / row_height)) + 2;
         const auto cache_limit = std::clamp(visible_rows * static_cast<size_t>(columns), size_t{16}, size_t{64});
-        bool loaded_this_frame = repair_busy;
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>((filtered.size() + columns - 1) / columns), row_height);
         while (clipper.Step()) for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
@@ -288,7 +399,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
                 ImGui::BeginChild("card", {card_width, card_height}, ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
                 const float centered = std::max(0.f, (ImGui::GetContentRegionAvail().x - image_size) * .5f);
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + centered);
-                DrawThumbnail(index, game, image_size, cache_limit, loaded_this_frame);
+                DrawThumbnail(index, game, image_size, cache_limit, pause_loading);
                 const auto basename = model.Model.substr(model.Model.find_last_of('/') + 1);
                 auto title = basename.substr(0, basename.size() - std::string(".vmdl_c").size());
                 std::replace(title.begin(), title.end(), '_', ' ');

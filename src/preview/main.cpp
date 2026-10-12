@@ -23,6 +23,7 @@
 #include "repair_panel.hpp"
 #include "library_panel.hpp"
 #include "mod_store.hpp"
+#include "background.hpp"
 
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
@@ -263,21 +264,6 @@ bool EndsWith(const std::string& text, const char* suffix) {
     return text.size() >= length && text.compare(text.size() - length, length, suffix) == 0;
 }
 
-bool EqualsIgnoreCase(std::string_view a, std::string_view b) {
-    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
-        return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
-    });
-}
-
-const VpkEntry* FindEntry(const VpkArchive& archive, std::string_view path) {
-    for (const VpkEntry& entry : archive.Entries()) {
-        if (EqualsIgnoreCase(entry.FullPath, path)) {
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
 std::vector<std::filesystem::path> AskForFiles(HWND owner, const wchar_t* filter, const wchar_t* title, bool multiple = false) {
     std::vector<wchar_t> buffer(65536, L'\0');
     OPENFILENAMEW dialog{sizeof(dialog)};
@@ -307,20 +293,183 @@ std::filesystem::path GamePak(const std::filesystem::path& chosen) {
     return chosen / L"pak01_dir.vpk";
 }
 
+using ArchivePtr = std::shared_ptr<const IndexedArchive>;
+
+// How the game resolves a mod's files: the mod archive overrides the game's.
+// The reader holds its own archive references, so worker threads can use it while the UI changes archives.
+ResourceReader ModThenGame(ArchivePtr mod, ArchivePtr game) {
+    return [mod = std::move(mod), game = std::move(game)](const std::string& path) -> std::optional<std::vector<uint8_t>> {
+        if (mod) {
+            if (auto bytes = mod->Read(path)) return bytes;
+        }
+        return game ? game->Read(path) : std::nullopt;
+    };
+}
+
+ComparisonView::VersionReader VersionReaderFor(ArchivePtr mod, ArchivePtr game) {
+    return [read = ModThenGame(mod, game), game](ModelVersion version, const std::string& path) -> std::optional<std::vector<uint8_t>> {
+        if (version == ModelVersion::Game) return game ? game->Read(path) : std::nullopt;
+        return read(path);
+    };
+}
+
+// Clips in the model's folder (".../clips/", ".../clip/"), from the mod and the game.
+std::vector<std::string> ClipsFor(const std::string& model_path, const IndexedArchive* mod, const IndexedArchive* game) {
+    const size_t slash = model_path.rfind('/');
+    const std::string folder = slash == std::string::npos ? std::string() : model_path.substr(0, slash + 1);
+    std::vector<std::string> clips;
+    for (const IndexedArchive* archive : {mod, game}) {
+        if (archive == nullptr) {
+            continue;
+        }
+        for (const VpkEntry& entry : archive->Archive().Entries()) {
+            if (entry.FullPath.size() > folder.size() && entry.FullPath.compare(0, folder.size(), folder) == 0
+                && EndsWith(entry.FullPath, ".vnmclip_c")
+                && std::find(clips.begin(), clips.end(), entry.FullPath) == clips.end()) {
+                clips.push_back(entry.FullPath);
+            }
+        }
+    }
+    return clips;
+}
+
+ModelSources Sources(const std::string& path, std::vector<uint8_t> bytes, const IndexedArchive& mod, const IndexedArchive& game) {
+    ModelSources sources;
+    sources.ModelPath = path;
+    std::optional<std::string> skeleton;
+    try {
+        skeleton = AnimationSkeletonPath(DecodeModelGeometry(bytes));
+    } catch (const std::exception&) {
+        // The comparison view reports the decode error itself.
+    }
+    sources.ModModel = std::move(bytes);
+    if (const VpkEntry* game_model = game.Find(path)) {
+        sources.GameModelPath = game_model->FullPath;
+        sources.GameModel = game.Archive().Read(*game_model);
+        if (!skeleton) {
+            try {
+                skeleton = AnimationSkeletonPath(DecodeModelGeometry(*sources.GameModel));
+            } catch (const std::exception&) {
+            }
+        }
+    }
+    if (skeleton) {
+        sources.SkeletonPath = *skeleton;
+        sources.ModSkeleton = mod.Read(*skeleton);
+        sources.GameSkeleton = game.Read(*skeleton);
+    }
+    return sources;
+}
+
+// Everything the inspector shows for one model, decoded on a worker thread.
+struct Inspection {
+    ArchivePtr Mod;
+    ArchivePtr Game;
+    std::string Model;
+    std::string Title;
+    std::optional<PreparedModel> Preview;
+    std::string PreviewError;
+    std::optional<std::vector<GeometryBone>> Animation;
+    std::vector<std::string> Clips;
+    std::optional<ComparisonView::Prepared> Comparison;
+    std::string ComparisonError;
+};
+
+// An empty `model` picks the archive's first model.
+Inspection InspectArchiveModel(ArchiveCache& archives, const std::filesystem::path& archive, std::string model, ArchivePtr game,
+    CancellationToken cancellation) {
+    Inspection result;
+    result.Game = game;
+    result.Title = Narrow(archive.filename().wstring());
+    try {
+        result.Mod = archives.Get(archive);
+    } catch (const std::exception& error) {
+        result.Title = Narrow(archive.wstring());
+        result.PreviewError = result.ComparisonError = error.what();
+        return result;
+    }
+    if (model.empty()) {
+        for (const VpkEntry& entry : result.Mod->Archive().Entries()) {
+            if (EndsWith(entry.FullPath, ".vmdl_c") && (model.empty() || entry.FullPath < model)) model = entry.FullPath;
+        }
+        if (model.empty()) {
+            result.PreviewError = "This archive contains no compiled models.";
+            return result;
+        }
+    }
+    result.Model = model;
+    result.Title = model;
+    const VpkEntry* entry = result.Mod->Find(model);
+    if (entry == nullptr) {
+        result.PreviewError = result.ComparisonError = "This model is no longer in " + Narrow(archive.filename().wstring()) + ".";
+        return result;
+    }
+    const ResourceReader read = ModThenGame(result.Mod, game);
+    std::vector<uint8_t> bytes;
+    try {
+        bytes = result.Mod->Archive().Read(*entry, cancellation);
+        const ModelGeometry geometry = DecodeModelGeometry(bytes);
+        if (const std::optional<std::string> skeleton = AnimationSkeletonPath(geometry)) {
+            if (const auto skeleton_bytes = read(*skeleton)) {
+                try {
+                    result.Animation = DecodeAnimationSkeleton(*skeleton_bytes);
+                } catch (const std::exception&) {
+                    // Shown as "no animation skeleton"; the comparison view reports the decode error.
+                }
+            }
+        }
+        result.Clips = ClipsFor(model, result.Mod.get(), game.get());
+        cancellation.ThrowIfCancelled();
+        result.Preview = PrepareModel(geometry, &read);
+    } catch (const std::exception& error) {
+        result.PreviewError = error.what();
+    }
+    if (!game) {
+        result.ComparisonError = "Set the game folder to compare this model with the installed game.";
+        return result;
+    }
+    try {
+        cancellation.ThrowIfCancelled();
+        result.Comparison = ComparisonView::Prepare(BuildModelVersions(Sources(model, std::move(bytes), *result.Mod, *game)),
+            VersionReaderFor(result.Mod, game), result.Preview ? &*result.Preview : nullptr);
+    } catch (const std::exception& error) {
+        result.ComparisonError = error.what();
+    }
+    return result;
+}
+
+Inspection InspectModelFile(const std::filesystem::path& path) {
+    Inspection result;
+    result.Title = Narrow(path.wstring());
+    try {
+        result.Preview = PrepareModel(DecodeModelGeometry(ReadFile(path)));
+    } catch (const std::exception& error) {
+        result.PreviewError = error.what();
+    }
+    result.ComparisonError = "Comparison needs a model opened from a mod VPK.";
+    return result;
+}
+
 // Archives, the model list, and the two views that show the selection.
+// Archives are opened and models decoded on worker threads; this thread only applies finished results and uploads them.
 struct App {
     enum class Page { Gallery, Pack, Inspect, Repair };
     Page CurrentPage = Page::Gallery;
+    std::shared_ptr<ArchiveCache> Archives = std::make_shared<ArchiveCache>();
     PreviewPanel Panel;
     ComparisonView Compare;
-    std::optional<VpkArchive> Mod;
+    ArchivePtr Mod;
     std::string ModName;
-    std::vector<const VpkEntry*> Models;
     std::string Selected;
-    char Filter[128] = {};
-    std::optional<VpkArchive> Game;
+    ArchivePtr Game;
     std::string GameName;
     std::string GameError;
+    std::filesystem::path GameLoading;
+    LatestTask<ArchivePtr> GameLoader;
+    LatestTask<Inspection> Inspector;
+    std::optional<std::string> PendingClip;
+    // A model to inspect once its archive has been imported, from the command line.
+    std::optional<std::pair<std::filesystem::path, std::string>> InspectAfterImport;
     RepairPanel Repair;
     LibraryPanel Builder;
     std::vector<std::filesystem::path> ModPaths;
@@ -332,7 +481,12 @@ struct App {
     std::string StoreStatus;
     std::string SaveError;
     double LastSaveAttempt = -10;
-    struct ImportResult { ModelLibrary Library; std::string Errors; };
+    struct ImportResult {
+        ModelLibrary Library;
+        std::string Errors;
+        // Each source with its stored copy.
+        std::vector<std::pair<std::filesystem::path, std::filesystem::path>> Imported;
+    };
     std::future<ImportResult> ImportWorker;
     CancellationSource ImportCancellation;
     std::atomic<size_t> ImportedCount = 0;
@@ -341,10 +495,15 @@ struct App {
     bool ImportBusy() const { return ImportWorker.valid(); }
     bool FilesBusy() const { return Repair.Busy() || Builder.Busy() || ImportBusy(); }
 
+    void CloseInspection() {
+        Inspector.Cancel();
+        Mod.reset(); Selected.clear(); ActiveMod.clear(); StandaloneModel = false;
+        Panel.ShowError("", ""); Compare.ShowError("", "");
+    }
+
     void ApplyLibrary(const ModelLibrary& library) {
         ModPaths = library.Sources;
-        Mod.reset(); Models.clear(); Selected.clear(); ActiveMod.clear(); StandaloneModel = false;
-        Panel.ShowError("", ""); Compare.ShowError("", "");
+        CloseInspection();
         Builder.Restore(library);
         if (!library.GameArchive.empty() && library.GameArchive != ConfiguredGame) OpenGame(library.GameArchive);
         SyncSources();
@@ -370,11 +529,12 @@ struct App {
         if (replace) starting.Sources.clear();
         ImportWorker = std::async(std::launch::async, [root = Store->Root(), incoming, starting = std::move(starting),
             token = ImportCancellation.Token(), completed = &ImportedCount]() mutable {
-            ImportResult result{std::move(starting), {}};
+            ImportResult result{std::move(starting), {}, {}};
             LocalModStore store(root);
             for (const auto& source : incoming.Sources) {
                 try {
                     const auto cached = store.Import(source, token);
+                    result.Imported.emplace_back(source, cached);
                     if (std::none_of(result.Library.Sources.begin(), result.Library.Sources.end(), [&](const auto& other) {
                         return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(cached.wstring()));
                     })) result.Library.Sources.push_back(cached);
@@ -402,7 +562,13 @@ struct App {
             ApplyLibrary(result.Library);
             StoreStatus = result.Errors.empty() ? "Imports saved locally. Your collection will reopen automatically." : result.Errors;
             Persist(true);
+            if (InspectAfterImport) {
+                for (const auto& [source, cached] : result.Imported) {
+                    if (source == InspectAfterImport->first) StartInspect(cached, InspectAfterImport->second);
+                }
+            }
         } catch (const std::exception& error) { StoreStatus = error.what(); }
+        InspectAfterImport.reset();
     }
 
     void SyncSources() {
@@ -411,7 +577,7 @@ struct App {
         Repair.SetSources(Game ? Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring()) : "", std::move(paths));
     }
 
-    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device) {
+    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device, Archives) {
         try {
             Store.emplace(LocalModStore::DefaultRoot());
             const auto library = Store->Load();
@@ -432,55 +598,86 @@ struct App {
         Game.reset();
         GameName.clear();
         GameError.clear();
-        const std::filesystem::path pak = GamePak(chosen);
-        ConfiguredGame = std::filesystem::absolute(pak).lexically_normal();
-        try {
-            Game.emplace(VpkArchive::Open(pak));
-            GameName = Narrow(pak.wstring());
-        } catch (const std::exception& error) {
-            GameError = Narrow(pak.wstring()) + ": " + error.what();
-        }
-        if (!Selected.empty()) {
-            Select(Selected);
-        }
+        GameLoading = GamePak(chosen);
+        ConfiguredGame = std::filesystem::absolute(GameLoading).lexically_normal();
+        // The game directory has hundreds of thousands of entries, so it is parsed off the UI thread.
+        GameLoader.Start([archives = Archives, pak = GameLoading](CancellationToken) { return archives->Get(pak); });
         SyncSources();
     }
 
-    void OpenMod(const std::filesystem::path& path) {
-        // Clear the views before changing the archive used by their resource readers.
-        Panel.ShowError("", "");
-        Compare.ShowError("", "");
-        Mod.reset();
-        Models.clear();
-        Selected.clear();
-        ModName = Narrow(path.filename().wstring());
-        StandaloneModel = false;
-        ActiveMod = path;
-        Filter[0] = '\0';
+    void PollGame() {
         try {
-            Mod.emplace(VpkArchive::Open(path));
+            const auto game = GameLoader.Take();
+            if (!game) return;
+            Game = *game;
+            GameName = Narrow(GameLoading.wstring());
         } catch (const std::exception& error) {
-            Panel.ShowError(Narrow(path.wstring()), error.what());
-            Compare.ShowError(Narrow(path.wstring()), error.what());
-            return;
+            GameError = Narrow(GameLoading.wstring()) + ": " + error.what();
         }
-        for (const VpkEntry& entry : Mod->Entries()) {
-            if (EndsWith(entry.FullPath, ".vmdl_c")) {
-                Models.push_back(&entry);
-            }
-        }
-        std::sort(Models.begin(), Models.end(), [](const VpkEntry* a, const VpkEntry* b) { return a->FullPath < b->FullPath; });
-        if (!Models.empty()) Select(Models.front()->FullPath);
-        else Panel.ShowError(ModName, "This archive contains no compiled models.");
+        // The comparison and textures depend on the game, so reload the model being inspected.
+        if (!ActiveMod.empty()) StartInspect(ActiveMod, Selected);
+        SyncSources();
     }
 
-    std::filesystem::path AddArchive(const std::filesystem::path& path) {
-        if (!Store) throw IoError("Local mod storage is unavailable.");
-        const auto full = Store->Import(path);
-        if (std::none_of(ModPaths.begin(), ModPaths.end(), [&](const auto& other) {
-            return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(full.wstring()));
-        })) ModPaths.push_back(full);
-        return full;
+    void StartInspect(const std::filesystem::path& archive, const std::string& model) {
+        ActiveMod = archive;
+        ModName = Narrow(archive.filename().wstring());
+        Selected = model;
+        StandaloneModel = false;
+        Panel.ShowError("", "");
+        Compare.ShowError("", "");
+        Inspector.Start([archives = Archives, archive, model, game = Game](CancellationToken cancellation) {
+            return InspectArchiveModel(*archives, archive, model, game, cancellation);
+        });
+    }
+
+    void OpenModelFile(const std::filesystem::path& path) {
+        CloseInspection();
+        StandaloneModel = true;
+        ModName = Narrow(path.filename().wstring());
+        Inspector.Start([path](CancellationToken) { return InspectModelFile(path); });
+    }
+
+    // Imports the archive into local storage first when storage is available, like any added mod.
+    void OpenArchiveModel(const std::filesystem::path& archive, const std::string& model) {
+        if (Store && !FilesBusy()) {
+            InspectAfterImport.emplace(archive, model);
+            ModelLibrary incoming;
+            incoming.Sources.push_back(archive);
+            StartImport(incoming, false);
+        } else {
+            StartInspect(archive, model);
+        }
+    }
+
+    void PollInspect() {
+        std::optional<Inspection> result;
+        try {
+            result = Inspector.Take();
+        } catch (const std::exception& error) {
+            Panel.ShowError(Selected, error.what());
+            Compare.ShowError(Selected, error.what());
+            return;
+        }
+        if (!result) return;
+        Mod = result->Mod;
+        if (!result->Model.empty()) Selected = result->Model;
+        if (result->Preview) {
+            Panel.Load(*result->Preview, result->Title, Mod ? ModThenGame(Mod, result->Game) : ResourceReader{},
+                result->Animation ? &*result->Animation : nullptr, result->Clips);
+        } else {
+            Panel.ShowError(result->Title, result->PreviewError);
+        }
+        if (result->Comparison) {
+            Compare.Load(std::move(*result->Comparison), VersionReaderFor(Mod, result->Game), result->Clips);
+        } else {
+            Compare.ShowError(result->Title, result->ComparisonError);
+        }
+        if (PendingClip) {
+            Panel.PlayClip(*PendingClip);
+            Compare.PlayClip(*PendingClip);
+            PendingClip.reset();
+        }
     }
 
     void AddPaths(const std::vector<std::filesystem::path>& paths) {
@@ -491,142 +688,10 @@ struct App {
         }
         if (!incoming.Sources.empty()) StartImport(incoming, false);
         if (skeleton_repair::EqualsIgnoreCase(Narrow(paths.front().extension().wstring()), ".vmdl_c")) {
-            OpenPath(paths.front());
+            OpenModelFile(paths.front());
             CurrentPage = Page::Inspect;
         } else CurrentPage = Page::Gallery;
         SyncSources();
-    }
-
-    void OpenPath(const std::filesystem::path& path) {
-        const std::string name = Narrow(path.wstring());
-        if (skeleton_repair::EqualsIgnoreCase(Narrow(path.extension().wstring()), ".vpk")) {
-            OpenMod(AddArchive(path));
-            SyncSources();
-            return;
-        }
-        Mod.reset();
-        Models.clear();
-        Selected.clear();
-        ActiveMod.clear();
-        StandaloneModel = true;
-        try {
-            Panel.Load(DecodeModelGeometry(ReadFile(path)), name);
-        } catch (const std::exception& error) {
-            Panel.ShowError(name, error.what());
-        }
-        Compare.ShowError(name, "Comparison needs a model opened from a mod VPK.");
-    }
-
-    std::optional<std::vector<uint8_t>> ReadFrom(const std::optional<VpkArchive>& archive, const std::string& path) const {
-        if (!archive) {
-            return std::nullopt;
-        }
-        const VpkEntry* entry = FindEntry(*archive, path);
-        if (entry == nullptr) {
-            return std::nullopt;
-        }
-        return archive->Read(*entry);
-    }
-
-    // How the game resolves a mod's files: the mod archive overrides the game's.
-    std::optional<std::vector<uint8_t>> ReadModThenGame(const std::string& path) const {
-        if (auto bytes = ReadFrom(Mod, path)) {
-            return bytes;
-        }
-        return ReadFrom(Game, path);
-    }
-
-    // Clips in the model's folder (".../clips/", ".../clip/"), from the mod and the game.
-    std::vector<std::string> ClipsFor(const std::string& model_path) const {
-        const size_t slash = model_path.rfind('/');
-        const std::string folder = slash == std::string::npos ? std::string() : model_path.substr(0, slash + 1);
-        std::vector<std::string> clips;
-        for (const std::optional<VpkArchive>* archive : {&Mod, &Game}) {
-            if (!*archive) {
-                continue;
-            }
-            for (const VpkEntry& entry : (*archive)->Entries()) {
-                if (entry.FullPath.size() > folder.size() && entry.FullPath.compare(0, folder.size(), folder) == 0
-                    && EndsWith(entry.FullPath, ".vnmclip_c")
-                    && std::find(clips.begin(), clips.end(), entry.FullPath) == clips.end()) {
-                    clips.push_back(entry.FullPath);
-                }
-            }
-        }
-        return clips;
-    }
-
-    void Select(const std::string& path) {
-        Selected = path;
-        const VpkEntry* entry = Mod ? FindEntry(*Mod, path) : nullptr;
-        if (entry == nullptr) {
-            return;
-        }
-        std::vector<uint8_t> bytes;
-        try {
-            bytes = Mod->Read(*entry);
-            const ResourceReader read = [this](const std::string& resource) { return ReadModThenGame(resource); };
-            const ModelGeometry geometry = DecodeModelGeometry(bytes);
-            std::optional<std::vector<GeometryBone>> animation;
-            if (const std::optional<std::string> skeleton = AnimationSkeletonPath(geometry)) {
-                if (const auto skeleton_bytes = ReadModThenGame(*skeleton)) {
-                    try {
-                        animation = DecodeAnimationSkeleton(*skeleton_bytes);
-                    } catch (const std::exception&) {
-                        // Shown as "no animation skeleton"; the comparison view reports the decode error.
-                    }
-                }
-            }
-            Panel.Load(geometry, path, &read, animation ? &*animation : nullptr, ClipsFor(path));
-        } catch (const std::exception& error) {
-            Panel.ShowError(path, error.what());
-        }
-        if (!Game) {
-            Compare.ShowError(path, "Set the game folder to compare this model with the installed game.");
-            return;
-        }
-        try {
-            Compare.Load(
-                BuildModelVersions(Sources(path, std::move(bytes))),
-                [this](ModelVersion version, const std::string& resource) {
-                    return version == ModelVersion::Game ? ReadFrom(Game, resource) : ReadModThenGame(resource);
-                },
-                ClipsFor(path));
-        } catch (const std::exception& error) {
-            Compare.ShowError(path, error.what());
-        }
-    }
-
-    ModelSources Sources(const std::string& path, std::vector<uint8_t> bytes) const {
-        ModelSources sources;
-        sources.ModelPath = path;
-        std::optional<std::string> skeleton;
-        try {
-            skeleton = AnimationSkeletonPath(DecodeModelGeometry(bytes));
-        } catch (const std::exception&) {
-            // The comparison view reports the decode error itself.
-        }
-        sources.ModModel = std::move(bytes);
-        if (const VpkEntry* game_model = FindEntry(*Game, path)) {
-            sources.GameModelPath = game_model->FullPath;
-            sources.GameModel = Game->Read(*game_model);
-            if (!skeleton) {
-                try {
-                    skeleton = AnimationSkeletonPath(DecodeModelGeometry(*sources.GameModel));
-                } catch (const std::exception&) {
-                }
-            }
-        }
-        if (skeleton) {
-            sources.SkeletonPath = *skeleton;
-            if (const VpkEntry* mod_skeleton = FindEntry(*Mod, *skeleton)) {
-                sources.ModSkeleton = Mod->Read(*mod_skeleton);
-            }
-            if (const VpkEntry* game_skeleton = FindEntry(*Game, *skeleton)) {
-                sources.GameSkeleton = Game->Read(*game_skeleton);
-            }
-        }
-        return sources;
     }
 
     void AddMods(HWND hwnd) {
@@ -668,10 +733,7 @@ struct App {
             }
             if (remove) {
                 std::erase(ModPaths, *remove);
-                if (ActiveMod == *remove) {
-                    Mod.reset(); Models.clear(); Selected.clear(); ActiveMod.clear();
-                    Panel.ShowError("", ""); Compare.ShowError("", "");
-                }
+                if (ActiveMod == *remove) CloseInspection();
                 SyncSources();
                 Builder.Restore(Builder.Snapshot(ModPaths, ConfiguredGame));
             }
@@ -681,6 +743,9 @@ struct App {
         if (Game) {
             ImGui::TextColored({.47f, .85f, .67f, 1.f}, "Game connected");
             ImGui::SetItemTooltip("%s", GameName.c_str());
+        } else if (GameLoader.Busy()) {
+            ImGui::TextDisabled("Connecting to Deadlock...");
+            ImGui::SetItemTooltip("%s", Narrow(GameLoading.wstring()).c_str());
         } else {
             ImGui::TextDisabled("Game not connected");
             ImGui::TextWrapped("Connect Deadlock for textures, skin repairs and pack dependencies.");
@@ -712,16 +777,19 @@ struct App {
         ImGui::Begin("Workspace", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
         if (CurrentPage == Page::Gallery || CurrentPage == Page::Pack) {
             Builder.Draw(hwnd, ModPaths, Game ? std::filesystem::path(Widen(GameName)) : std::filesystem::path{},
-                Repair.Busy() || ImportBusy(), CurrentPage == Page::Pack, [&] { AddMods(hwnd); },
+                // Thumbnails wait for a connecting game, which supplies most textures, instead of loading twice.
+                Repair.Busy() || ImportBusy(), Repair.Busy() || GameLoader.Busy(), CurrentPage == Page::Pack, [&] { AddMods(hwnd); },
                 [&](const ModelLibrary& library) {
                     StartImport(library, true);
                 },
-                [&](const LibraryModel& model) { OpenMod(model.Archive); Select(model.Model); CurrentPage = Page::Inspect; });
+                [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); CurrentPage = Page::Inspect; });
         } else if (CurrentPage == Page::Inspect) {
             if (ImGui::Button("< Back to library")) CurrentPage = Page::Gallery;
             ImGui::SameLine(); ImGui::TextDisabled("%s", ModName.c_str());
             ImGui::SeparatorText("Model inspector");
-            if (Selected.empty() && !StandaloneModel) {
+            if (Inspector.Busy()) {
+                ImGui::TextDisabled("Loading %s...", Selected.empty() ? ModName.c_str() : Selected.c_str());
+            } else if (Selected.empty() && !StandaloneModel) {
                 ImGui::TextWrapped("Choose Inspect on a skin in the gallery to view its textures, animations and skeleton, or compare it with the installed game.");
                 if (ImGui::Button("Browse skins", {150, 36})) CurrentPage = Page::Gallery;
             } else if (ImGui::BeginTabBar("inspection")) {
@@ -735,7 +803,14 @@ struct App {
             ImGui::TextDisabled("Keep your collection compatible with game updates.");
             ImGui::Spacing();
             ImGui::BeginDisabled(Builder.Busy() || ImportBusy());
-            Repair.Draw(hwnd, [&] { Mod.reset(); Models.clear(); });
+            Repair.Draw(hwnd, [&] {
+                // Release every read of the mod archives before they are replaced.
+                Inspector.Cancel(true);
+                Builder.StopLoading();
+                Mod.reset();
+                Panel.ShowError("", "");
+                Compare.ShowError("", "");
+            });
             ImGui::EndDisabled();
         }
         ImGui::End();
@@ -840,7 +915,8 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 positional.push_back(args[i]);
             }
         }
-        if (!game_folder && !app.Game) {
+        // A game restored from the saved library may still be connecting; only detect one when none is configured.
+        if (!game_folder && app.ConfiguredGame.empty()) {
             try {
                 if (const auto detected = FindGameFolder()) game_folder = Widen(*detected);
             } catch (const std::exception& error) {
@@ -852,13 +928,9 @@ int Run(const std::vector<std::filesystem::path>& args) {
         }
         if (!positional.empty()) {
             if (positional.size() > 1 && EndsWith(Narrow(positional[0].wstring()), ".vpk") && EndsWith(Narrow(positional[1].wstring()), ".vmdl_c")) {
-                app.OpenPath(positional[0]);
-                app.Select(VpkArchive::Normalize(Narrow(positional[1].wstring())));
+                app.PendingClip = clip;
+                app.OpenArchiveModel(positional[0], VpkArchive::Normalize(Narrow(positional[1].wstring())));
                 app.CurrentPage = App::Page::Inspect;
-                if (clip) {
-                    app.Panel.PlayClip(*clip);
-                    app.Compare.PlayClip(*clip);
-                }
             } else {
                 app.AddPaths(positional);
             }
@@ -901,15 +973,16 @@ int Run(const std::vector<std::filesystem::path>& args) {
 
             app.Builder.Poll();
             app.PollImport();
+            app.PollGame();
+            app.PollInspect();
 
             const bool repaired = app.Repair.Poll();
-            if (repaired) app.Builder.InvalidateThumbnails();
-            if (repaired && !app.ActiveMod.empty()) {
-                const auto path = app.ActiveMod;
-                const auto selected = app.Selected;
-                app.OpenMod(path);
-                if (!selected.empty()) app.Select(selected);
+            if (repaired) {
+                // Repaired archives were replaced on disk, so reopen them.
+                app.Archives->Remove(app.ModPaths);
+                app.Builder.InvalidateThumbnails();
             }
+            if (repaired && !app.ActiveMod.empty()) app.StartInspect(app.ActiveMod, app.Selected);
             if (!g_dropped.empty()) {
                 if (!app.FilesBusy()) app.AddPaths(g_dropped);
                 g_dropped.clear();

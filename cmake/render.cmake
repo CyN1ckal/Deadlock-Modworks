@@ -61,6 +61,7 @@ add_library(sr_model_tools STATIC
     src/preview/comparison_view.cpp
     src/preview/repair_panel.cpp
     src/preview/library_panel.cpp
+    src/preview/background.cpp
 )
 target_include_directories(sr_model_tools PUBLIC src/preview)
 target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32)

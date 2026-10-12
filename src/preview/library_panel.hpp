@@ -1,26 +1,37 @@
 #pragma once
+#include "background.hpp"
 #include "model_library.hpp"
 #include "model_viewport.hpp"
+#include <condition_variable>
+#include <deque>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <future>
 #include <functional>
+#include <thread>
 
 namespace skeleton_repair {
 class LibraryPanel {
 public:
-    explicit LibraryPanel(const VulkanDevice& device) : device_(device) {}
+    LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives);
     ~LibraryPanel();
     bool Busy() const { return worker_.valid(); }
+    // True while source archives are being scanned for models.
+    bool Scanning() const { return scan_.Busy(); }
+    // Applies finished background work. Call once per frame before drawing.
     void Poll();
     void InvalidateThumbnails();
+    // Cancels background reads and waits until no worker holds an archive open, for example before a repair replaces files.
+    void StopLoading();
     void Record(VkCommandBuffer command_buffer);
     size_t SelectedCount() const { return selected_.size(); }
     size_t ModelCount() const { return models_.size(); }
     void Restore(const ModelLibrary& library);
     ModelLibrary Snapshot(const std::vector<std::filesystem::path>& sources, const std::filesystem::path& game) const;
+    // `pause_loading` stops new thumbnail loads, for example while a repair replaces archives.
     void Draw(void* owner, const std::vector<std::filesystem::path>& sources,
-        const std::filesystem::path& game, bool repair_busy, bool pack_view,
+        const std::filesystem::path& game, bool repair_busy, bool pause_loading, bool pack_view,
         const std::function<void()>& add,
         const std::function<void(const ModelLibrary&)>& load,
         const std::function<void(const LibraryModel&)>& preview);
@@ -32,11 +43,48 @@ private:
         int LastFrame = 0;
         float RenderSize = 0;
         bool Rendered = false;
+        bool Pending = true;
     };
-    void DrawThumbnail(size_t index, const std::filesystem::path& game, float size, size_t cache_limit, bool& loaded_this_frame);
+    struct ThumbnailJob {
+        uint64_t Generation = 0;
+        size_t Index = 0;
+        LibraryModel Model;
+        std::filesystem::path Game;
+        CancellationToken Cancellation;
+    };
+    struct ThumbnailResult {
+        uint64_t Generation = 0;
+        size_t Index = 0;
+        std::optional<PreparedModel> Model;
+        std::string Error;
+    };
+    struct ScanResult {
+        std::vector<LibraryModel> Models;
+        std::vector<std::string> Errors;
+    };
+    void DrawThumbnail(size_t index, const std::filesystem::path& game, float size, size_t cache_limit, bool pause_loading);
+    void Evict(std::map<size_t, Thumbnail>::iterator thumbnail);
+    void UploadThumbnails();
+    void RunThumbnailWorker();
+    ThumbnailResult LoadThumbnail(const ThumbnailJob& job);
     VulkanDevice device_;
+    std::shared_ptr<ArchiveCache> archives_;
     std::map<size_t, Thumbnail> thumbnails_;
+    // Evicted thumbnails whose images an in-flight frame may still sample; destroyed after the next device wait.
+    std::vector<std::unique_ptr<ModelViewport>> retired_;
+    std::deque<ThumbnailResult> ready_;
+    uint64_t generation_ = 0;
     std::filesystem::path thumbnail_game_;
+    // Shared with the thumbnail workers.
+    std::mutex queue_mutex_;
+    std::condition_variable queue_changed_;
+    std::condition_variable queue_idle_;
+    std::deque<ThumbnailJob> jobs_;
+    std::vector<ThumbnailResult> results_;
+    size_t active_jobs_ = 0;
+    bool stopping_ = false;
+    CancellationSource thumbnail_cancellation_;
+    std::vector<std::thread> workers_;
     void Refresh(const std::vector<std::filesystem::path>& sources);
     std::vector<std::filesystem::path> sources_;
     std::vector<LibraryModel> models_;
@@ -48,5 +96,6 @@ private:
     bool selected_only_ = false;
     std::future<std::string> worker_;
     CancellationSource cancellation_;
+    LatestTask<ScanResult> scan_;
 };
 }

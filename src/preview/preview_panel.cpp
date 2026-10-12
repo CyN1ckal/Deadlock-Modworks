@@ -9,12 +9,12 @@ namespace skeleton_repair {
 
 PreviewPanel::PreviewPanel(const VulkanDevice& device) : viewport_(device) {}
 
-void PreviewPanel::Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read,
+void PreviewPanel::Load(const PreparedModel& model, std::string title, ResourceReader read,
     const std::vector<GeometryBone>* animation_skeleton, const std::vector<std::string>& clips) {
     settings_.Lod = 0;
-    viewport_.SetModel(&geometry, settings_.Lod, read);
+    viewport_.SetModel(&model, settings_.Lod);
     viewport_.SetAnimationSkeleton(animation_skeleton);
-    read_ = read != nullptr ? *read : ResourceReader{};
+    read_ = std::move(read);
     player_.SetClips(viewport_.CanAnimate() && read_ ? clips : std::vector<std::string>{});
     animation_warning_.clear();
     title_ = std::move(title);
@@ -31,8 +31,9 @@ void PreviewPanel::PlayClip(const std::string& path) {
 }
 
 void PreviewPanel::ShowError(std::string title, std::string message) {
-    viewport_.SetModel(nullptr, 0);
+    viewport_.SetModel(static_cast<const PreparedModel*>(nullptr), 0);
     player_.SetClips({});
+    read_ = {};
     title_ = std::move(title);
     error_ = std::move(message);
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "animation_clip.hpp"
+#include "background.hpp"
 #include "model_renderer.hpp"
 #include "preview_materials.hpp"
 #include "preview_scene.hpp"
@@ -9,6 +10,7 @@
 #include <imgui.h>
 #include <vulkan/vulkan.h>
 
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -28,15 +30,31 @@ struct ViewSettings {
 // Sets `frame` when the Frame button was pressed.
 bool DrawViewSettings(ViewSettings& settings, int lod_count, bool& frame);
 
+// The CPU side of a viewport model: the scene and decoded color maps, ready to upload.
+struct PreparedModel {
+    PreviewScene Scene;
+    std::vector<GeometryBone> Bones;
+    // Null when no reader was given. Shared, because versions of one model often use the same materials.
+    std::shared_ptr<const std::vector<PreviewMaterial>> Materials;
+};
+
+// Builds the scene and, with a reader, decodes its materials. Safe to call from any thread if `read` is.
+// `reuse` supplies already decoded materials when it uses exactly the same ones and was read the same way.
+PreparedModel PrepareModel(const ModelGeometry& geometry, const ResourceReader* read = nullptr, uint32_t max_texture_size = 2048,
+    const PreparedModel* reuse = nullptr);
+
 // Picks and plays an animation clip for one or more viewports.
 class AnimationPlayer {
 public:
     // Clip resources (.vnmclip_c). Additive clips with a "+non_additive" twin are hidden in favour of the twin.
     void SetClips(const std::vector<std::string>& paths);
     // Draws the clip picker and transport controls, loading a picked clip through `read`. Returns true when the clip changed.
+    // `read` runs on a worker thread, so it must not touch UI state.
     bool Draw(const ResourceReader& read);
-    // Loads and plays a listed clip by path. Returns false when it is not in the list.
+    // Starts loading and playing a listed clip by path. Returns false when it is not in the list.
     bool Select(const std::string& path, const ResourceReader& read);
+    // Applies a clip that finished loading. Returns true when the clip changed.
+    bool Poll();
     void Advance(float seconds);
 
     // Null for the bind pose.
@@ -51,6 +69,7 @@ private:
     std::vector<Entry> clips_;
     int selected_ = -1;
     std::optional<AnimationClip> clip_;
+    LatestTask<AnimationClip> loading_;
     std::string error_;
     float time_ = 0;
     float speed_ = 1;
@@ -70,6 +89,8 @@ public:
     // Null clears the viewport. With a reader, materials and color maps are loaded for Textured mode.
     // A lower texture limit keeps thumbnail viewports small.
     void SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read = nullptr, uint32_t max_texture_size = 2048);
+    // Uploads a model prepared by PrepareModel. Null clears the viewport.
+    void SetModel(const PreparedModel* model, int lod);
     // The skeleton drawn as lines. `animation` says whether it is the animation skeleton (else the render skeleton),
     // which decides which posed bones replace it while a clip plays.
     void SetSkeleton(const std::vector<GeometryBone>& bones, std::span<const uint32_t> colors, bool animation = false);

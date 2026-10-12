@@ -13,8 +13,9 @@ class PreviewPanel {
 public:
     explicit PreviewPanel(const VulkanDevice& device);
 
-    // `animation_skeleton` and `clips` enable playback; `read` also loads the clips.
-    void Load(const ModelGeometry& geometry, std::string title, const ResourceReader* read = nullptr,
+    // Uploads a model prepared off the UI thread. `animation_skeleton` and `clips` enable playback; `read` loads
+    // the clips on a worker thread, so it must be safe to call from one.
+    void Load(const PreparedModel& model, std::string title, ResourceReader read = {},
         const std::vector<GeometryBone>* animation_skeleton = nullptr, const std::vector<std::string>& clips = {});
     void ShowError(std::string title, std::string message);
     void PlayClip(const std::string& path);

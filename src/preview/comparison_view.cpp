@@ -72,8 +72,34 @@ void DrawEdit(const char* what, const MigrationEdit& edit) {
 
 ComparisonView::ComparisonView(const VulkanDevice& device) : left_view_(device), right_view_(device) {}
 
-void ComparisonView::Load(ModelVersions versions, VersionReader read, std::vector<std::string> clips) {
-    versions_ = std::move(versions);
+ComparisonView::Prepared ComparisonView::Prepare(ModelVersions versions, const VersionReader& read, const PreparedModel* mod_model) {
+    Prepared prepared;
+    for (ModelVersion version : {ModelVersion::Mod, ModelVersion::Repaired, ModelVersion::Game}) {
+        const VersionData& data = versions.Get(version);
+        if (!data.Available || !data.Model) {
+            continue;
+        }
+        // The mod and repaired versions resolve resources the same way, so they can share decoded materials.
+        const PreparedModel* reuse = nullptr;
+        if (version != ModelVersion::Game) {
+            const auto& mod = prepared.Models[static_cast<size_t>(ModelVersion::Mod)];
+            reuse = mod ? &*mod : mod_model;
+        }
+        auto& slot = prepared.Models[static_cast<size_t>(version)];
+        if (read) {
+            const ResourceReader reader = [&read, version](const std::string& path) { return read(version, path); };
+            slot = PrepareModel(*data.Model, &reader, 2048, reuse);
+        } else {
+            slot = PrepareModel(*data.Model);
+        }
+    }
+    prepared.Versions = std::move(versions);
+    return prepared;
+}
+
+void ComparisonView::Load(Prepared prepared, VersionReader read, std::vector<std::string> clips) {
+    versions_ = std::move(prepared.Versions);
+    prepared_ = std::move(prepared.Models);
     read_ = std::move(read);
     clips_ = std::move(clips);
     player_.SetClips(read_ ? clips_ : std::vector<std::string>{});
@@ -98,18 +124,20 @@ void ComparisonView::Load(ModelVersions versions, VersionReader read, std::vecto
 
 void ComparisonView::PlayClip(const std::string& path) {
     if (read_) {
-        player_.Select(path, [this](const std::string& resource) { return read_(ModelVersion::Mod, resource); });
+        player_.Select(path, [read = read_](const std::string& resource) { return read(ModelVersion::Mod, resource); });
     }
 }
 
 void ComparisonView::ShowError(std::string title, std::string message) {
     versions_ = {};
+    prepared_ = {};
     read_ = {};
     loaded_ = false;
     title_ = std::move(title);
     error_ = std::move(message);
-    left_view_.SetModel(nullptr, 0);
-    right_view_.SetModel(nullptr, 0);
+    player_.SetClips({});
+    left_view_.SetModel(static_cast<const PreparedModel*>(nullptr), 0);
+    right_view_.SetModel(static_cast<const PreparedModel*>(nullptr), 0);
     left_shown_.reset();
     right_shown_.reset();
 }
@@ -126,19 +154,13 @@ const std::vector<GeometryBone>* ComparisonView::Skeleton(ModelVersion version) 
 }
 
 void ComparisonView::ShowSide(ModelViewport& view, ModelVersion version, std::optional<ModelVersion>& shown) {
-    // Loading materials reads every color map, so only reload when the side shows another version.
+    // Uploading materials copies every color map to the GPU, so only reload when the side shows another version.
     if (shown == version) {
         return;
     }
     shown = version;
-    const VersionData& data = versions_.Get(version);
-    const ModelGeometry* model = data.Available && data.Model ? &*data.Model : nullptr;
-    if (!read_) {
-        view.SetModel(model, settings_.Lod);
-        return;
-    }
-    const ResourceReader read = [this, version](const std::string& path) { return read_(version, path); };
-    view.SetModel(model, settings_.Lod, &read);
+    const auto& prepared = prepared_[static_cast<size_t>(version)];
+    view.SetModel(prepared ? &*prepared : nullptr, settings_.Lod);
 }
 
 void ComparisonView::Refresh(bool reframe) {
@@ -347,7 +369,7 @@ void ComparisonView::Draw() {
     }
 
     if (read_ && (left_view_.CanAnimate() || right_view_.CanAnimate())) {
-        player_.Draw([this](const std::string& path) { return read_(ModelVersion::Mod, path); });
+        player_.Draw([read = read_](const std::string& path) { return read(ModelVersion::Mod, path); });
         player_.Advance(ImGui::GetIO().DeltaTime);
         left_warning_ = left_view_.Animate(player_.Clip(), player_.Time());
         right_warning_ = right_view_.Animate(player_.Clip(), player_.Time());

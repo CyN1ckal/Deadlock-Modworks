@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <stdexcept>
 #include <string_view>
 
 namespace skeleton_repair {
@@ -54,6 +55,7 @@ void AnimationPlayer::SetClips(const std::vector<std::string>& paths) {
     std::vector<std::string> sorted = paths;
     std::sort(sorted.begin(), sorted.end());
     clips_.clear();
+    loading_.Cancel();
     for (const std::string& path : sorted) {
         const bool twin = path.size() > kTwin.size() && path.compare(path.size() - kTwin.size(), kTwin.size(), kTwin) == 0;
         std::string base = twin ? path.substr(0, path.size() - kTwin.size()) : path.substr(0, path.size() - kClip.size());
@@ -70,7 +72,7 @@ void AnimationPlayer::SetClips(const std::vector<std::string>& paths) {
 }
 
 bool AnimationPlayer::Draw(const ResourceReader& read) {
-    bool changed = false;
+    bool changed = Poll();
     ImGui::SetNextItemWidth(260);
     const char* preview = selected_ >= 0 ? clips_[static_cast<size_t>(selected_)].Label.c_str() : "Bind pose";
     if (ImGui::BeginCombo("##clip", clips_.empty() ? "No animation clips" : preview, ImGuiComboFlags_HeightLarge)) {
@@ -81,6 +83,7 @@ bool AnimationPlayer::Draw(const ResourceReader& read) {
         ImGui::InputTextWithHint("##clip_filter", "Filter", filter_, sizeof(filter_));
         if (ImGui::Selectable("Bind pose", selected_ < 0)) {
             selected_ = -1;
+            loading_.Cancel();
             clip_.reset();
             error_.clear();
             changed = true;
@@ -114,6 +117,10 @@ bool AnimationPlayer::Draw(const ResourceReader& read) {
         ImGui::SameLine();
         ImGui::TextDisabled("%u frames%s", clip_->FrameCount, clip_->Additive ? ", additive" : "");
     }
+    if (loading_.Busy()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Loading clip...");
+    }
     if (!error_.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", error_.c_str());
     }
@@ -128,18 +135,29 @@ bool AnimationPlayer::Select(const std::string& path, const ResourceReader& read
     selected_ = static_cast<int>(found - clips_.begin());
     clip_.reset();
     error_.clear();
+    time_ = 0;
+    playing_ = true;
+    loading_.Start([read, path](CancellationToken) {
+        const auto bytes = read(path);
+        if (!bytes) {
+            throw std::runtime_error("Clip is missing.");
+        }
+        return DecodeAnimationClip(*bytes);
+    });
+    return true;
+}
+
+bool AnimationPlayer::Poll() {
     try {
-        if (const auto bytes = read(path)) {
-            clip_ = DecodeAnimationClip(*bytes);
-        } else {
-            error_ = "Clip is missing.";
+        if (auto clip = loading_.Take()) {
+            clip_ = std::move(*clip);
+            time_ = 0;
+            return true;
         }
     } catch (const std::exception& error) {
         error_ = error.what();
     }
-    time_ = 0;
-    playing_ = true;
-    return true;
+    return false;
 }
 
 void AnimationPlayer::Advance(float seconds) {
@@ -159,7 +177,41 @@ ModelViewport::~ModelViewport() {
     }
 }
 
+PreparedModel PrepareModel(const ModelGeometry& geometry, const ResourceReader* read, uint32_t max_texture_size,
+    const PreparedModel* reuse) {
+    PreparedModel prepared;
+    prepared.Bones = geometry.Bones;
+    prepared.Scene = BuildPreviewScene(geometry);
+    if (read == nullptr) {
+        return prepared;
+    }
+    const auto names = [](const PreviewScene& scene) {
+        std::vector<std::string> materials;
+        for (const PreviewDraw& draw : scene.Draws) {
+            if (!draw.Material.empty() && std::find(materials.begin(), materials.end(), draw.Material) == materials.end()) {
+                materials.push_back(draw.Material);
+            }
+        }
+        return materials;
+    };
+    if (reuse != nullptr && reuse->Materials && names(reuse->Scene) == names(prepared.Scene)) {
+        prepared.Materials = reuse->Materials;
+    } else {
+        prepared.Materials = std::make_shared<const std::vector<PreviewMaterial>>(LoadPreviewMaterials(prepared.Scene, *read, max_texture_size));
+    }
+    return prepared;
+}
+
 void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const ResourceReader* read, uint32_t max_texture_size) {
+    if (geometry == nullptr) {
+        SetModel(static_cast<const PreparedModel*>(nullptr), lod);
+        return;
+    }
+    const PreparedModel prepared = PrepareModel(*geometry, read, max_texture_size);
+    SetModel(&prepared, lod);
+}
+
+void ModelViewport::SetModel(const PreparedModel* model, int lod) {
     textured_materials_ = 0;
     material_count_ = 0;
     material_notes_.clear();
@@ -167,21 +219,21 @@ void ModelViewport::SetModel(const ModelGeometry* geometry, int lod, const Resou
     posed_.reset();
     overlay_colors_.clear();
     overlay_animation_ = false;
-    if (geometry == nullptr) {
+    if (model == nullptr) {
         renderer_.ClearScene();
         scene_ = {};
         model_bones_.clear();
         visible_.clear();
         return;
     }
-    model_bones_ = geometry->Bones;
-    scene_ = BuildPreviewScene(*geometry);
+    model_bones_ = model->Bones;
+    scene_ = model->Scene;
     renderer_.SetScene(scene_);
     SetLod(lod);
-    if (read == nullptr) {
+    if (!model->Materials) {
         return;
     }
-    const std::vector<PreviewMaterial> materials = LoadPreviewMaterials(scene_, *read, max_texture_size);
+    const std::vector<PreviewMaterial>& materials = *model->Materials;
     material_notes_ = renderer_.SetMaterials(materials);
     material_count_ = materials.size();
     textured_materials_ = renderer_.TextureCount();
