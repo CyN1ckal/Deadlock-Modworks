@@ -203,7 +203,7 @@ TEST(Animation, ReordersBonesAndRebuildsWorldPoses) {
     EXPECT_TRUE(edit.BoneAliases->empty());
 }
 
-TEST(Animation, SpunWorldPoseMatchesDotNet) {
+TEST(Animation, SpunWorldPosePreservesExpectedFloatBits) {
     const KvValue spun = Pose(1, 2, 3, 1.5f, 0, 0.70710677f, 0, 0.70710677f);
     const auto mod = Animation({.Names = {"root"}, .Parents = {-1}, .Lod = 1, .Poses = {spun}});
     const auto game = Animation({.Names = {"root", "child"}, .Parents = {-1, 0}, .Lod = 1});

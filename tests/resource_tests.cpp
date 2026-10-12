@@ -38,7 +38,7 @@ uint32_t ReadU32(const std::vector<uint8_t>& bytes, size_t offset) {
     return value;
 }
 
-// One DATA block, optionally followed by a 4-byte PHYS block, matching the C# fixture layout.
+// One DATA block, optionally followed by a 4-byte PHYS block.
 std::vector<uint8_t> Resource(const std::vector<uint8_t>& data, bool trailing_block) {
     const int count = trailing_block ? 2 : 1;
     const int start = 16 + count * 12;
