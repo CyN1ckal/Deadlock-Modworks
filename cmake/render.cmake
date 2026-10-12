@@ -61,8 +61,12 @@ add_library(sr_model_tools STATIC
     src/preview/comparison_view.cpp
     src/preview/repair_panel.cpp
     src/preview/library_panel.cpp
+    src/preview/history_panel.cpp
     src/preview/background.cpp
     src/preview/thumbnail_cache.cpp
+    src/preview/library_model.cpp
+    src/preview/store_reader.cpp
+    src/preview/history_compare.cpp
 )
 target_include_directories(sr_model_tools PUBLIC src/preview)
 target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32 ole32 windowscodecs)

@@ -9,6 +9,8 @@
 
 namespace skeleton_repair {
 
+class ContentStore;
+
 struct UpdateProgress {
     int Completed = 0;
     int Total = 0;
@@ -24,7 +26,7 @@ public:
     static UpdateReport Update(const std::string& game_directory, const std::string& mod_vpk,
         const std::optional<std::string>& output_path, bool replace_source, bool make_backup,
         const std::function<void(const UpdateProgress&)>& progress = {}, CancellationToken cancellation = {},
-        bool analyze_only = false);
+        bool analyze_only = false, ContentStore* store = nullptr);
 };
 
 }  // namespace skeleton_repair

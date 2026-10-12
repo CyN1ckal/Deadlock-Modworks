@@ -12,6 +12,7 @@ namespace skeleton_repair {
 class CommandLine {
 public:
     // One line per call, without a trailing newline. Returns 0, 1, or 2.
+    // Store inspection is headless: --store <dir> import|models|history|duplicates.
     static int Execute(const std::vector<std::string>& args, const std::function<void(std::string_view)>& write,
         CancellationToken cancellation = {});
 };

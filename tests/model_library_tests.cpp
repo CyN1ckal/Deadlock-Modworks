@@ -44,14 +44,14 @@ protected:
         sqlite3_close(db);
         return count;
     }
-    // Every file under `folder` with its contents, skipping the database and rebuilt copies, or only files named `only`.
+    // Every file under `folder` with its contents, skipping the model library and rebuilt copies, or only files named `only`.
     static std::map<std::string, std::string> Snapshot(const fs::path& folder, const std::string& only = {}) {
         std::map<std::string, std::string> files;
         for (const auto& entry : fs::recursive_directory_iterator(folder)) {
             if (!entry.is_regular_file()) continue;
             const auto relative = entry.path().lexically_relative(folder);
             if (!only.empty() ? entry.path().filename() != only
-                : relative.begin()->string() == "cache" || relative.string().starts_with("library.db")) continue;
+                : relative.begin()->string() == "cache" || relative.begin()->string() == "store") continue;
             std::ifstream in(entry.path(), std::ios::binary);
             files[relative.string()] = std::string(std::istreambuf_iterator<char>(in), {});
         }
@@ -219,7 +219,7 @@ TEST_F(LibraryTest, LocalStoreDeduplicatesIdenticalContentByChecksum) {
     // A copy under another name and path is the same stored mod.
     EXPECT_EQ(store.Import(copy), first);
     store.Import(other);
-    EXPECT_EQ(Count(store, "archives"), 2);
+    EXPECT_EQ(Count(store, "snapshots"), 2);
     // a.txt, b.txt, and one shared.bin for both mods.
     EXPECT_EQ(Count(store, "blobs"), 3);
 }
@@ -245,7 +245,7 @@ TEST_F(LibraryTest, LocalStoreStoresOnlyValidatedImportsAndHonorsCancellation) {
     bytes[28 + tree_size] ^= 0xff;
     { std::ofstream out(source, std::ios::binary); out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size()); }
     EXPECT_THROW(store.Import(source), InvalidData);
-    EXPECT_EQ(Count(store, "archives"), 0);
+    EXPECT_EQ(Count(store, "snapshots"), 0);
     EXPECT_FALSE(fs::exists(store.Root() / "cache"));
 }
 TEST_F(LibraryTest, LocalStoreSavesRemovalWithoutDeletingStoredMods) {
@@ -256,7 +256,7 @@ TEST_F(LibraryTest, LocalStoreSavesRemovalWithoutDeletingStoredMods) {
     store.Save({{cached}, {}});
     store.Save({});
     EXPECT_TRUE(store.Load().Sources.empty());
-    EXPECT_EQ(Count(store, "archives"), 1);
+    EXPECT_EQ(Count(store, "snapshots"), 1);
     fs::remove(source);
     // Still stored: the original import is recognized and rebuilt without the original file.
     Archive(dir / "again.vpk", {{"a.txt", std::vector<uint8_t>{1}}});
@@ -280,7 +280,7 @@ TEST_F(LibraryTest, LocalStoreRebuildsMissingOrRepairedCopiesFromTheDatabase) {
     Archive(cached, {{"models/a.vmdl_c", Resource({}, 1)}, {"a.txt", std::vector<uint8_t>{1, 2}}});
     const auto repaired = store.Import(cached);
     EXPECT_NE(repaired, cached);
-    EXPECT_EQ(Count(store, "archives"), 2);
+    EXPECT_EQ(Count(store, "snapshots"), 2);
     EXPECT_EQ(store.Import(source), cached);
     const auto rebuilt = VpkArchive::Open(cached);
     rebuilt.Validate();
@@ -316,7 +316,7 @@ TEST_F(LibraryTest, LocalStoreMergesEarlierFolderStoreWithoutChangingIt) {
     // Merged once: a source removed afterwards is not added back.
     store.Save({});
     EXPECT_TRUE(store.Load().Sources.empty());
-    EXPECT_EQ(Count(store, "archives"), 1);
+    EXPECT_EQ(Count(store, "snapshots"), 1);
 }
 TEST_F(LibraryTest, LocalStoreExportsAndMergesSharedLibraries) {
     const auto one = dir / "one.vpk", two = dir / "two.vpk";
@@ -340,10 +340,36 @@ TEST_F(LibraryTest, LocalStoreExportsAndMergesSharedLibraries) {
     ASSERT_EQ(merged.Sources.size(), 2u);
     EXPECT_EQ(merged.Sources[0], a);
     EXPECT_EQ(merged.Selected.size(), 2u);
-    EXPECT_EQ(Count(mine, "archives"), 2);
+    EXPECT_EQ(Count(mine, "snapshots"), 2);
     EXPECT_EQ(mine.Thumbnail("thumb"), (std::vector<uint8_t>{1, 2, 3}));
     VpkArchive::Open(merged.Sources[1]).Validate();
     EXPECT_THROW(mine.Merge(dir / "missing.db"), std::exception);
+}
+TEST_F(LibraryTest, LocalStoreMergesPreviousSingleFileLibraryOnce) {
+    const auto one = dir / "one.vpk";
+    Archive(one, {{"models/a.vmdl_c", Resource()}});
+    const LocalModStore previous(dir / "previous");
+    const auto a = previous.Import(one);
+    previous.Save({{a}, {{a, "models/a.vmdl_c"}}});
+    previous.SaveThumbnail("thumb", {4, 5});
+    // The previous release kept the whole library in library.db beside the store folder.
+    const auto root = dir / "store";
+    fs::create_directories(root);
+    previous.Export(root / "library.db");
+    const auto before = Snapshot(root, "library.db");
+    fs::remove(one);
+    const LocalModStore store(root);
+    std::string notice;
+    const auto library = store.Load({}, {}, &notice);
+    EXPECT_EQ(notice, "");
+    ASSERT_EQ(library.Sources.size(), 1u);
+    EXPECT_EQ(library.Selected, (std::vector<LibraryModel>{{library.Sources[0], "models/a.vmdl_c"}}));
+    EXPECT_EQ(store.Thumbnail("thumb"), (std::vector<uint8_t>{4, 5}));
+    EXPECT_EQ(Snapshot(root, "library.db"), before);
+    VpkArchive::Open(library.Sources[0]).Validate();
+    // Merged once: a source removed afterwards is not added back.
+    store.Save({});
+    EXPECT_TRUE(store.Load().Sources.empty());
 }
 TEST_F(LibraryTest, LocalStoreRejectsSharedLibraryWithMismatchedChecksums) {
     const auto one = dir / "one.vpk";
@@ -354,7 +380,7 @@ TEST_F(LibraryTest, LocalStoreRejectsSharedLibraryWithMismatchedChecksums) {
     theirs.Export(file);
     Execute(file, "UPDATE archive_entries SET path = 'b.txt'");
     EXPECT_THROW(mine.Merge(file), InvalidData);
-    EXPECT_EQ(Count(mine, "archives"), 0);
+    EXPECT_EQ(Count(mine, "snapshots"), 0);
 }
 TEST_F(LibraryTest, LocalStoreFlattensChunkedVpkIntoSelfContainedCopy) {
     const auto source = dir / "chunked_dir.vpk", chunk = dir / "chunked_000.vpk";

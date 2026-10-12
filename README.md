@@ -83,25 +83,27 @@ Choose **Inspect** on a gallery card to open the **Model inspector**. Its **Prev
 
 ### Build a combined model VPK
 
-1. Use **Add mods...** to add your reference mod VPKs to the library.
+1. Use **Add mods...** to add your reference mod VPKs to the library, or **Add folder...** to add every mod VPK in a folder such as `addons`. Chunk files and `pak01_dir.vpk` are skipped.
 2. Check **Include in pack** on the gallery cards you want. Selected cards are highlighted. The **In pack** filter shows only your selections. Missing materials fall back to clay; hover **No preview** for an error. Use **Refresh** after changing source files.
 3. Connect the installed game archive to resolve dependencies supplied by Deadlock.
 4. Open **VPK builder** in the sidebar to review your selected skins. Click **Build VPK...** and choose a new `.vpk` filename. Export runs in the background and can be cancelled. The output is reopened and validated before it is published. Existing output files and source archives are never overwritten.
 
 Export follows external resource references and supported KV3 resource/skeleton references recursively. It includes selected models and reachable overrides from each model's own source archive; base-game dependencies stay in the game. Identical files at the same internal path are deduplicated. Different contents at the same path block export and identify both sources: deselect one of the conflicting models. A missing dependency also blocks export. Dependencies supplied only by another reference VPK are not resolved automatically.
 
-### Your library file
+### Your model library
 
-Everything the manager keeps is saved in one SQLite file, `%LOCALAPPDATA%\DeadlockModManager\library.db`: every imported mod, your collection, pack selections, the connected game, and gallery thumbnails. Imported mods no longer depend on their original VPKs or chunk files, which can be moved or deleted.
+Everything the manager keeps is saved in the model library, `%LOCALAPPDATA%\DeadlockModManager\store`: every imported mod, your collection, pack selections, the connected game, gallery thumbnails, and the repair history of each model. The catalog is `catalog.sqlite`; file contents are kept under `blobs`. Imported mods no longer depend on their original VPKs or chunk files, which can be moved or deleted.
 
 - Each file inside a mod is stored once per SHA-256 checksum. Importing the same mod again, even renamed or from another folder, reuses it, and files that several mods share are stored once.
 - A changed original, or a repaired mod, is stored as a new version. Earlier versions stay in the library.
 - **Remove from library** only takes a mod out of your collection; it stays stored.
-- Mods you open are rebuilt from the database into the `cache` folder next to it. That folder can be deleted at any time and is rebuilt when needed.
+- Mods you open are rebuilt from the library into the `cache` folder next to it. That folder can be deleted at any time and is rebuilt when needed.
 
 Use **Share library...** to save a copy of your whole library as one `.db` file. **Add library...** adds a shared `.db` library's mods, pack selections and thumbnails to yours; nothing already in your library is replaced. Each shared mod is checked against its checksums first. A game location from another computer is used only if it exists on yours. **Add library...** also opens JSON library lists from earlier releases and imports the VPKs they name.
 
-On first start, the manager adds the mods, collection and thumbnails from earlier releases (`library.json`, `mods`, `thumbnails`) to the database. Those files are only read and are left in place.
+**Version history** lists every model and pack in the library, the versions of each model and how repairs changed them. From there you can view or compare versions, compare a version with the game, repair a pack, or assemble one model into a new pack.
+
+On first start, the manager adds the mods, collection and thumbnails from earlier releases (`library.db`, `library.json`, `mods`, `thumbnails`) to the model library. Those files are only read and are left in place.
 
 **Refresh** rescans changed archives; missing checked models are shown so you can remove them explicitly.
 

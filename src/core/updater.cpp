@@ -2,6 +2,8 @@
 
 #include "animation.hpp"
 #include "archive_transaction.hpp"
+#include "content_hash.hpp"
+#include "content_store.hpp"
 #include "error.hpp"
 #include "kv3.hpp"
 #include "model.hpp"
@@ -468,6 +470,69 @@ MigrationEdit FailedEdit(const std::string& message) {
     return edit;
 }
 
+const char* OutcomeName(ModelOutcome outcome) {
+    switch (outcome) {
+    case ModelOutcome::Repairable: return "Repairable";
+    case ModelOutcome::NeedsReview: return "NeedsReview";
+    case ModelOutcome::Updated: return "Updated";
+    case ModelOutcome::Current: return "Current";
+    case ModelOutcome::Skipped: return "Skipped";
+    case ModelOutcome::Failed: return "Failed";
+    }
+    return "Failed";
+}
+
+RepairRequest MakeRepairRequest(const SnapshotId& input, const UpdateReport& report, const std::vector<Plan>& plans,
+    const std::vector<std::optional<MigrationEdit>>& edits, const VpkArchive& game, CancellationToken cancellation) {
+    RepairRequest request;
+    request.Input = input;
+    request.OutputPath = report.OutputPath ? *report.OutputPath : std::string{};
+    request.BackupPath = report.BackupPath;
+    for (size_t i = 0; i < plans.size(); ++i) {
+        if (!edits[i] || !edits[i]->Bytes || plans[i].Error || !plans[i].Resolved) {
+            continue;
+        }
+        const bool moved = !EqualsIgnoreCase(*plans[i].Resolved, plans[i].Entry.FullPath);
+        RepairChange change;
+        change.InputPath = plans[i].Entry.FullPath;
+        change.OutputPath = moved ? *plans[i].Resolved : plans[i].Entry.FullPath;
+        change.Bytes = edits[i]->Bytes;
+        request.Changes.push_back(std::move(change));
+
+        RepairModelNote note;
+        note.InputPath = plans[i].Entry.FullPath;
+        note.GamePath = *plans[i].Resolved;
+        note.Detail = edits[i]->Detail;
+        note.Outcome = "Updated";
+        if (edits[i]->Warnings) {
+            note.Warnings = *edits[i]->Warnings;
+        }
+        if (edits[i]->BoneAliases) {
+            note.BoneRenames = *edits[i]->BoneAliases;
+        }
+        for (const ModelResult& result : report.Results) {
+            if (!EqualsIgnoreCase(result.Model, plans[i].Entry.FullPath)) {
+                continue;
+            }
+            note.Outcome = OutcomeName(result.Outcome);
+            note.Detail = result.Detail;
+            if (result.Warnings) {
+                note.Warnings = *result.Warnings;
+            }
+            if (result.BoneRenames) {
+                note.BoneRenames = *result.BoneRenames;
+            }
+            break;
+        }
+        if (const VpkEntry* game_entry = FindEntry(game, *plans[i].Resolved)) {
+            const std::vector<uint8_t> game_bytes = game.Read(*game_entry, cancellation);
+            note.GameSha256 = Sha256(game_bytes);
+        }
+        request.Models.push_back(std::move(note));
+    }
+    return request;
+}
+
 }  // namespace
 
 UpdateReport HeroModelUpdater::Analyze(const std::string& game_directory, const std::string& mod_vpk,
@@ -477,7 +542,8 @@ UpdateReport HeroModelUpdater::Analyze(const std::string& game_directory, const 
 
 UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const std::string& mod_vpk,
     const std::optional<std::string>& output_path, bool replace_source, bool make_backup,
-    const std::function<void(const UpdateProgress&)>& progress, CancellationToken cancellation, bool analyze_only) {
+    const std::function<void(const UpdateProgress&)>& progress, CancellationToken cancellation, bool analyze_only,
+    ContentStore* store) {
     if (IsBlank(game_directory)) {
         throw std::invalid_argument("Game folder is required.");
     }
@@ -736,6 +802,10 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
 
     cancellation.ThrowIfCancelled();
     const std::wstring final_path = replace_source ? mod_full : *destination;
+    std::optional<SnapshotId> input_snapshot;
+    if (store != nullptr) {
+        input_snapshot = store->ImportVpk(std::filesystem::path(mod_full), cancellation);
+    }
     ReportProgress(progress, static_cast<int>(plans.size()), static_cast<int>(plans.size()), "Writing and validating the repaired VPK...");
     const std::optional<std::filesystem::path> backup = ArchiveTransaction::Write(
         mod, std::filesystem::path(mod_full), std::filesystem::path(final_path), changes.Items, replace_source, cancellation,
@@ -749,6 +819,9 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
     analysis.OutputPath = Narrow(final_path);
     if (backup) {
         analysis.BackupPath = Narrow(backup->wstring());
+    }
+    if (store != nullptr) {
+        store->RecordRepair(MakeRepairRequest(*input_snapshot, analysis, plans, edits, game, cancellation), cancellation);
     }
     ReportProgress(progress, static_cast<int>(plans.size()), static_cast<int>(plans.size()),
         analysis.BackupPath ? "Repaired VPK. Original backup: " + *analysis.BackupPath : "Wrote " + *analysis.OutputPath + ".");

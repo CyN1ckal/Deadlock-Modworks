@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 
 // Before any vulkan.h include, so the Win32 surface API is declared.
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -14,6 +15,7 @@
 #include "model_geometry.hpp"
 #include "model_renderer.hpp"
 #include "comparison_view.hpp"
+#include "history_panel.hpp"
 #include "model_versions.hpp"
 #include "preview_panel.hpp"
 #include "strings.hpp"
@@ -286,6 +288,20 @@ std::vector<std::filesystem::path> AskForFiles(HWND owner, const wchar_t* filter
     return files;
 }
 
+std::optional<std::filesystem::path> AskForFolder(HWND owner, const wchar_t* title) {
+    BROWSEINFOW browse{};
+    browse.hwndOwner = owner;
+    browse.lpszTitle = title;
+    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_NONEWFOLDERBUTTON;
+    PIDLIST_ABSOLUTE item = SHBrowseForFolderW(&browse);
+    if (item == nullptr) return std::nullopt;
+    wchar_t buffer[MAX_PATH] = {};
+    const BOOL found = SHGetPathFromIDListW(item, buffer);
+    ILFree(item);
+    if (!found || buffer[0] == L'\0') return std::nullopt;
+    return std::filesystem::path(buffer);
+}
+
 // Accepts the game/citadel folder or its pak01_dir.vpk, like the updater's game directory.
 std::filesystem::path GamePak(const std::filesystem::path& chosen) {
     if (EndsWith(Narrow(chosen.wstring()), ".vpk")) {
@@ -454,7 +470,7 @@ Inspection InspectModelFile(const std::filesystem::path& path) {
 // Archives, the model list, and the two views that show the selection.
 // Archives are opened and models decoded on worker threads; this thread only applies finished results and uploads them.
 struct App {
-    enum class Page { Gallery, Pack, Inspect, Repair };
+    enum class Page { Gallery, Pack, History, Inspect, Repair };
     Page CurrentPage = Page::Gallery;
     std::shared_ptr<ArchiveCache> Archives = std::make_shared<ArchiveCache>();
     PreviewPanel Panel;
@@ -473,6 +489,11 @@ struct App {
     std::optional<std::pair<std::filesystem::path, std::string>> InspectAfterImport;
     RepairPanel Repair;
     LibraryPanel Builder;
+    HistoryPanel History;
+    // Animation clips in the game archive, which history previews also offer.
+    std::vector<std::string> GameClips;
+    // Shows the comparison tab of the inspector on the next frame.
+    bool FocusCompare = false;
     std::vector<std::filesystem::path> ModPaths;
     std::filesystem::path ActiveMod;
     bool StandaloneModel = false;
@@ -503,7 +524,7 @@ struct App {
     std::atomic<size_t> ImportTotal = 0;
 
     bool ImportBusy() const { return ImportWorker.valid(); }
-    bool FilesBusy() const { return Repair.Busy() || Builder.Busy() || ImportBusy(); }
+    bool FilesBusy() const { return Repair.Busy() || Builder.Busy() || History.Busy() || ImportBusy(); }
 
     void CloseInspection() {
         Inspector.Cancel();
@@ -640,6 +661,8 @@ struct App {
             if (!QueuedImports.Sources.empty()) StartImport(std::exchange(QueuedImports, {}), false);
             else InspectAfterImport.reset();
         }
+        // Imports and merges add models to the version history too.
+        History.Refresh();
     }
 
     void SyncSources() {
@@ -648,7 +671,12 @@ struct App {
         Repair.SetSources(Game ? Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring()) : "", std::move(paths));
     }
 
-    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device, Archives) {
+    static std::filesystem::path ContentDirectory() {
+        try { return LocalModStore(LocalModStore::DefaultRoot()).ContentDirectory(); }
+        catch (const std::exception&) { return {}; }
+    }
+
+    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device, Archives), History(ContentDirectory()) {
         try {
             Store.emplace(LocalModStore::DefaultRoot());
             StartRestore();
@@ -664,6 +692,7 @@ struct App {
 
     void OpenGame(const std::filesystem::path& chosen) {
         Game.reset();
+        GameClips.clear();
         GameName.clear();
         GameError.clear();
         GameLoading = GamePak(chosen);
@@ -679,6 +708,9 @@ struct App {
             if (!game) return;
             Game = *game;
             GameName = Narrow(GameLoading.wstring());
+            for (const VpkEntry& entry : Game->Archive().Entries()) {
+                if (EndsWith(entry.FullPath, ".vnmclip_c")) GameClips.push_back(entry.FullPath);
+            }
         } catch (const std::exception& error) {
             GameError = Narrow(GameLoading.wstring()) + ": " + error.what();
         }
@@ -767,6 +799,19 @@ struct App {
             L"Add reference mods (Ctrl / Shift to select multiple)", true));
     }
 
+    // Adds every mod VPK directly in a folder, such as the game's addons folder.
+    void AddFolder(HWND hwnd) {
+        const auto folder = AskForFolder(hwnd, L"Add every mod VPK in a folder");
+        if (!folder) return;
+        try {
+            const auto mods = FolderImportCandidates(*folder);
+            if (mods.empty()) { StoreStatus = "No mod VPKs found in " + Narrow(folder->wstring()) + "."; return; }
+            AddPaths(mods);
+        } catch (const std::exception& error) {
+            StoreStatus = error.what();
+        }
+    }
+
     void DrawBrowser(HWND hwnd) {
         ImGui::Begin("Navigation", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
         ImGui::TextColored({.47f, .85f, .77f, 1.f}, "DEADLOCK");
@@ -780,6 +825,7 @@ struct App {
         };
         nav("Mod library", Page::Gallery);
         nav("VPK builder", Page::Pack);
+        nav("Version history", Page::History);
         nav("Skin repairs", Page::Repair);
         nav("Model inspector", Page::Inspect);
         ImGui::Spacing();
@@ -788,6 +834,8 @@ struct App {
         ImGui::Text("%zu skins in pack", Builder.SelectedCount());
         ImGui::BeginDisabled(FilesBusy());
         if (ImGui::Button("Add mods...", {-1, 38})) AddMods(hwnd);
+        if (ImGui::Button("Add folder...", {-1, 32})) AddFolder(hwnd);
+        ImGui::SetItemTooltip("Adds every mod VPK in a folder, such as Deadlock's addons folder. Chunk files and the game archive are skipped.");
         if (!ModPaths.empty() && ImGui::CollapsingHeader("Manage sources")) {
             std::optional<std::filesystem::path> remove;
             for (const auto& path : ModPaths) {
@@ -826,8 +874,8 @@ struct App {
         }
         ImGui::EndDisabled();
         if (Store) {
-            ImGui::TextDisabled("Saved in one library file");
-            ImGui::SetItemTooltip("%s\nShare library saves a copy others can add.", Narrow(Store->Database().wstring()).c_str());
+            ImGui::TextDisabled("Saved in your model library");
+            ImGui::SetItemTooltip("%s\nShare library saves one file others can add.", Narrow(Store->ContentDirectory().wstring()).c_str());
         }
         if (!SaveError.empty()) ImGui::TextWrapped("%s", SaveError.c_str());
         if (ImportBusy()) {
@@ -835,11 +883,21 @@ struct App {
             if (ImportTotal > 0) ImGui::Text(Restoring ? "Preparing %zu / %zu" : "Importing %zu / %zu", ImportedCount.load(), ImportTotal.load());
             if (ImGui::Button("Cancel import")) ImportCancellation.Cancel();
         } else if (!StoreStatus.empty()) ImGui::TextWrapped("%s", StoreStatus.c_str());
-        if (Repair.Busy() || Builder.Busy()) {
+        if (Repair.Busy() || Builder.Busy() || History.Busy()) {
             ImGui::Spacing();
-            ImGui::TextColored({1.f, .76f, .43f, 1.f}, Repair.Busy() ? "Checking / repairing skins..." : "Building your VPK...");
+            ImGui::TextColored({1.f, .76f, .43f, 1.f}, Repair.Busy() ? "Checking / repairing skins..." : Builder.Busy() ? "Building your VPK..."
+                : "Working on your version history...");
         }
         ImGui::End();
+    }
+
+    // Releases every read of the mod archives before a repair replaces them.
+    void ReleaseArchives() {
+        Inspector.Cancel(true);
+        Builder.StopLoading();
+        Mod.reset();
+        Panel.ShowError("", "");
+        Compare.ShowError("", "");
     }
 
     void DrawWorkspace(HWND hwnd) {
@@ -853,6 +911,20 @@ struct App {
                 },
                 [&](const std::filesystem::path& other) { StartMerge(other); },
                 [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); CurrentPage = Page::Inspect; });
+        } else if (CurrentPage == Page::History) {
+            const std::string game_directory = Game ? Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring()) : std::string();
+            History.Draw(hwnd, Panel, [game = Game](const std::string& path) { return game ? game->Read(path) : std::nullopt; }, GameClips,
+                Compare, game_directory, Repair.Busy() || Builder.Busy() || ImportBusy(),
+                [&](bool compare) {
+                    // A stored version is not one of the gallery's archives.
+                    Inspector.Cancel();
+                    Mod.reset(); ActiveMod.clear();
+                    StandaloneModel = true;
+                    ModName = "Version history";
+                    FocusCompare = compare;
+                    CurrentPage = Page::Inspect;
+                },
+                [&] { ReleaseArchives(); });
         } else if (CurrentPage == Page::Inspect) {
             if (ImGui::Button("< Back to library")) CurrentPage = Page::Gallery;
             ImGui::SameLine(); ImGui::TextDisabled("%s", ModName.c_str());
@@ -864,7 +936,10 @@ struct App {
                 if (ImGui::Button("Browse skins", {150, 36})) CurrentPage = Page::Gallery;
             } else if (ImGui::BeginTabBar("inspection")) {
                 if (ImGui::BeginTabItem("Preview")) { Panel.Draw(); ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Compare versions")) { Compare.Draw(); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Compare versions", nullptr, std::exchange(FocusCompare, false) ? ImGuiTabItemFlags_SetSelected : 0)) {
+                    Compare.Draw();
+                    ImGui::EndTabItem();
+                }
                 ImGui::EndTabBar();
             }
         } else {
@@ -873,14 +948,7 @@ struct App {
             ImGui::TextDisabled("Keep your collection compatible with game updates.");
             ImGui::Spacing();
             ImGui::BeginDisabled(Builder.Busy() || ImportBusy());
-            Repair.Draw(hwnd, [&] {
-                // Release every read of the mod archives before they are replaced.
-                Inspector.Cancel(true);
-                Builder.StopLoading();
-                Mod.reset();
-                Panel.ShowError("", "");
-                Compare.ShowError("", "");
-            });
+            Repair.Draw(hwnd, [&] { ReleaseArchives(); });
             ImGui::EndDisabled();
         }
         ImGui::End();
@@ -1047,7 +1115,8 @@ int Run(const std::vector<std::filesystem::path>& args) {
             app.PollGame();
             app.PollInspect();
 
-            const bool repaired = app.Repair.Poll();
+            // A repair from the version history may replace one of the gallery's stored copies too.
+            const bool repaired = app.Repair.Poll() | app.History.TakeRepaired();
             if (repaired) {
                 // Repaired archives were replaced on disk, so reopen them.
                 app.Archives->Remove(app.ModPaths);
