@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -104,7 +105,14 @@ struct SlotObservation {
 
 inline constexpr const char* kUnprovenSlotHeading = "Same path, not proven related";
 
+struct GcStats {
+    int IncomingFilesRemoved = 0;
+    int BlobFilesRemoved = 0;
+    int BlobRowsRemoved = 0;
+};
+
 // Content-addressed library. M1 imports blobs. M2 lists them. M3 records repair edges. M4 queries history.
+// M6 drops observations and collects unreferenced files.
 class ContentStore {
 public:
     static ContentStore Open(const std::filesystem::path& directory);
@@ -124,6 +132,8 @@ public:
     SnapshotId RecordRepair(const RepairRequest& repair, CancellationToken cancellation = {});
     History HistoryOf(const BlobId& blob) const;
     std::vector<SlotObservation> UnprovenSamePath(const BlobId& blob) const;
+    void DropObservation(std::string_view observation_id);
+    GcStats CollectGarbage();
 
 private:
     struct State;

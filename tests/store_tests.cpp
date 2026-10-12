@@ -30,6 +30,7 @@ namespace fs = std::filesystem;
 using skeleton_repair::BlobId;
 using skeleton_repair::CancellationSource;
 using skeleton_repair::ContentStore;
+using skeleton_repair::GcStats;
 using skeleton_repair::HeroModelUpdater;
 using skeleton_repair::History;
 using skeleton_repair::HistoryVersion;
@@ -1389,4 +1390,161 @@ TEST(Store, RenameOnlyKeepsOneVersionWithBothPaths) {
     EXPECT_EQ(history.Links[0].From.Bytes, id.Bytes);
     EXPECT_EQ(history.Links[0].To.Bytes, id.Bytes);
     EXPECT_TRUE(store.UnprovenSamePath(id).empty());
+}
+
+TEST(Store, DroppingOneObservationKeepsTheSnapshotAndBlobs) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model{8, 8, 8};
+    const std::vector<uint8_t> note{1, 2, 3, 4};
+    const std::vector<VpkChange> changes{
+        VpkChange{"models/a.vmdl_c", model},
+        VpkChange{"materials/readme.txt", note},
+    };
+    const fs::path original = dir.Path() / "original.vpk";
+    const fs::path repack = dir.Path() / "repack.vpk";
+    ArchiveWith(original, changes);
+    ArchiveWith(repack, changes);
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId snapshot = store.ImportVpk(original);
+    store.ImportVpk(repack);
+    const int blob_files = CountBlobFiles(store_path);
+    Catalog catalog(store_path);
+    const auto observation_ids = catalog.Texts("SELECT id FROM observations ORDER BY absolute_path");
+    ASSERT_EQ(observation_ids.size(), 2u);
+    const int64_t snapshots = catalog.Int("SELECT COUNT(*) FROM snapshots");
+    const int64_t observations = catalog.Int("SELECT COUNT(*) FROM observations");
+    const int64_t memberships = catalog.Int("SELECT COUNT(*) FROM memberships");
+    const int64_t blobs = catalog.Int("SELECT COUNT(*) FROM blobs");
+
+    ExpectMessage([&] { store.DropObservation("0123456789abcdef0123456789abcdef"); },
+        "The model library has no observation with that id.");
+    ExpectMessage([&] { store.DropObservation(""); }, "The model library has no observation with that id.");
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), snapshots);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), observations);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM memberships"), memberships);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs"), blobs);
+    EXPECT_EQ(CountBlobFiles(store_path), blob_files);
+
+    store.DropObservation(observation_ids[0]);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM memberships"), memberships);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs"), blobs);
+    EXPECT_EQ(CountBlobFiles(store_path), blob_files);
+    EXPECT_EQ(catalog.Text("SELECT id FROM observations"), observation_ids[1]);
+    EXPECT_EQ(catalog.Text("SELECT id FROM snapshots"), snapshot.Value);
+    const std::vector<PackRow> packs = store.ListPacks();
+    ASSERT_EQ(packs.size(), 1u);
+    EXPECT_EQ(packs[0].ObservationCount, 1);
+    EXPECT_EQ(packs[0].Snapshot.Value, snapshot.Value);
+    EXPECT_EQ(store.ReadBlob(IdOf(model)), model);
+    EXPECT_EQ(store.ReadBlob(IdOf(note)), note);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs WHERE bytes_state = 'dropped'"), 0);
+}
+
+TEST(Store, DroppingTheLastObservationKeepsEdgeBlobsThroughGarbageCollection) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model_a{1, 1, 1};
+    const std::vector<uint8_t> model_b{2, 2, 2};
+    const std::vector<uint8_t> model_c{3, 3, 3};
+    const std::vector<uint8_t> model_a2{1, 1, 2};
+    const BlobId id_a = IdOf(model_a);
+    const BlobId id_b = IdOf(model_b);
+    const BlobId id_c = IdOf(model_c);
+    const BlobId id_a2 = IdOf(model_a2);
+    const fs::path vpk = dir.Path() / "mod.vpk";
+    ArchiveWith(vpk, {
+        VpkChange{"models/a.vmdl_c", model_a},
+        VpkChange{"models/b.vmdl_c", model_b},
+        VpkChange{"models/c.vmdl_c", model_c},
+    });
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId input = store.ImportVpk(vpk);
+    RepairRequest repair;
+    repair.Input = input;
+    repair.OutputPath = "D:/out/repaired.vpk";
+    repair.Changes.push_back(RepairChange{"models/a.vmdl_c", "models/a.vmdl_c", model_a2});
+    repair.Changes.push_back(RepairChange{"models/c.vmdl_c", "", std::nullopt});
+    repair.Models.push_back(RepairModelNote{"models/a.vmdl_c", "Updated", "mutate-a", {}, {}, {}, std::nullopt});
+    const SnapshotId output = store.RecordRepair(repair);
+
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 1);
+    const std::string observation_id = catalog.Text("SELECT id FROM observations");
+    store.DropObservation(observation_id);
+
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 0);
+    EXPECT_EQ(catalog.Int(("SELECT COUNT(*) FROM snapshots WHERE id = '" + input.Value + "'").c_str()), 0);
+    EXPECT_EQ(catalog.Int(("SELECT COUNT(*) FROM memberships WHERE snapshot_id = '" + input.Value + "'").c_str()), 0);
+    EXPECT_EQ(catalog.Int(("SELECT COUNT(*) FROM refs WHERE snapshot_id = '" + input.Value + "'").c_str()), 0);
+    EXPECT_EQ(catalog.Text("SELECT id FROM snapshots"), output.Value);
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM memberships WHERE blob_sha256 = ?", id_a.Bytes), 0);
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM memberships WHERE blob_sha256 = ?", id_c.Bytes), 0);
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM memberships WHERE blob_sha256 = ?", id_b.Bytes), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges"), 1);
+    EXPECT_EQ(store.ReadBlob(id_a), model_a);
+    EXPECT_EQ(store.ReadBlob(id_b), model_b);
+    EXPECT_EQ(store.ReadBlob(id_c), model_c);
+    EXPECT_EQ(store.ReadBlob(id_a2), model_a2);
+
+    const History before = store.HistoryOf(id_a2);
+    ASSERT_EQ(before.Versions.size(), 2u);
+    EXPECT_EQ(before.Versions[0].Blob.Bytes, id_a.Bytes);
+    EXPECT_EQ(before.Versions[1].Blob.Bytes, id_a2.Bytes);
+    ASSERT_EQ(before.Links.size(), 1u);
+    EXPECT_EQ(before.Links[0].Relation, "mutated");
+    EXPECT_EQ(before.Links[0].Detail, "mutate-a");
+
+    const fs::path incoming = store_path / "incoming" / "left-behind";
+    WriteBytes(incoming, {1, 2, 3});
+    const fs::path orphan = store_path / "blobs" / "sha256" / "aa" / std::string(64, 'a');
+    fs::create_directories(orphan.parent_path());
+    WriteBytes(orphan, {4, 5});
+    const std::string removed_hex = id_c.Hex();
+    const fs::path removed_blob = store_path / "blobs" / "sha256" / removed_hex.substr(0, 2) / removed_hex;
+    EXPECT_TRUE(fs::exists(removed_blob));
+    const int files_before = CountBlobFiles(store_path);
+
+    const GcStats stats = store.CollectGarbage();
+    EXPECT_EQ(stats.IncomingFilesRemoved, 1);
+    EXPECT_EQ(stats.BlobFilesRemoved, 2);
+    EXPECT_EQ(stats.BlobRowsRemoved, 1);
+    EXPECT_FALSE(fs::exists(incoming));
+    EXPECT_FALSE(fs::exists(orphan));
+    EXPECT_FALSE(fs::exists(removed_blob));
+    EXPECT_EQ(CountBlobFiles(store_path), files_before - 2);
+    EXPECT_EQ(store.ReadBlob(id_a), model_a);
+    EXPECT_EQ(store.ReadBlob(id_a2), model_a2);
+    EXPECT_EQ(store.ReadBlob(id_b), model_b);
+    ExpectMessage([&] { store.ReadBlob(id_c); }, "The model library has no blob with that id.");
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs WHERE bytes_state = 'dropped'"), 0);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs WHERE bytes_state != 'present'"), 0);
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM blobs WHERE sha256 = ?", id_a.Bytes), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges"), 1);
+
+    const History after = store.HistoryOf(id_a2);
+    ASSERT_EQ(after.Versions.size(), 2u);
+    EXPECT_EQ(after.Versions[0].Blob.Bytes, id_a.Bytes);
+    EXPECT_EQ(after.Versions[1].Blob.Bytes, id_a2.Bytes);
+    ASSERT_EQ(after.Links.size(), 1u);
+    EXPECT_EQ(after.Links[0].Relation, "mutated");
+    EXPECT_EQ(after.Links[0].Detail, "mutate-a");
+    EXPECT_EQ(after.Links[0].From.Bytes, id_a.Bytes);
+    EXPECT_EQ(after.Links[0].To.Bytes, id_a2.Bytes);
+
+    const History from_edge = store.HistoryOf(id_a);
+    ASSERT_EQ(from_edge.Versions.size(), 2u);
+    EXPECT_EQ(from_edge.Links[0].Detail, "mutate-a");
+
+    const GcStats again = store.CollectGarbage();
+    EXPECT_EQ(again.IncomingFilesRemoved, 0);
+    EXPECT_EQ(again.BlobFilesRemoved, 0);
+    EXPECT_EQ(again.BlobRowsRemoved, 0);
+    EXPECT_EQ(store.ReadBlob(id_a), model_a);
 }

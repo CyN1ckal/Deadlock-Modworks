@@ -39,6 +39,7 @@ constexpr const char* kChunkMessage = "Import the directory VPK, not a chunk fil
 constexpr const char* kGameArchiveMessage = "That file is the game archive. Choose a mod VPK from the addons folder.";
 constexpr const char* kGameFolderMessage = "Choose a mod outside the game's archive folder, such as a VPK in addons.";
 constexpr const char* kMissingMessage = "Could not find the mod VPK.";
+constexpr const char* kMissingObservation = "The model library has no observation with that id.";
 
 constexpr const char* kCreateSchema = R"sql(
 CREATE TABLE meta (
@@ -1442,6 +1443,92 @@ ORDER BY m.path, hex(m.blob_sha256), m.snapshot_id
     return rows;
 }
 
+void RemoveLibraryFile(const std::filesystem::path& path) {
+    std::error_code error;
+    if (!std::filesystem::remove(path, error) || error) {
+        throw IoError("Could not remove a model library file. " + PathText(path));
+    }
+}
+
+bool IsSha256Hex(std::string_view text) {
+    if (text.size() != 64) {
+        return false;
+    }
+    return std::all_of(text.begin(), text.end(), [](unsigned char character) {
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
+    });
+}
+
+std::unordered_set<std::string> ReferencedBlobHexes(sqlite3* db) {
+    Statement stmt(db, R"sql(
+SELECT blob_sha256 FROM memberships
+UNION
+SELECT input_blob FROM edges WHERE input_blob IS NOT NULL
+UNION
+SELECT output_blob FROM edges WHERE output_blob IS NOT NULL
+)sql");
+    std::unordered_set<std::string> hexes;
+    while (stmt.Step()) {
+        hexes.insert(stmt.ColumnBlobId(0).Hex());
+    }
+    return hexes;
+}
+
+int RemoveUnreferencedBlobFiles(const std::filesystem::path& directory, const std::unordered_set<std::string>& referenced) {
+    const std::filesystem::path root = directory / "blobs" / "sha256";
+    std::error_code exists_error;
+    if (!std::filesystem::exists(root, exists_error) || exists_error) {
+        return 0;
+    }
+    std::vector<std::filesystem::path> doomed;
+    try {
+        for (const std::filesystem::directory_entry& shard : std::filesystem::directory_iterator(root)) {
+            if (!shard.is_directory()) {
+                continue;
+            }
+            for (const std::filesystem::directory_entry& file : std::filesystem::directory_iterator(shard.path())) {
+                std::error_code error;
+                if (!file.is_regular_file(error) || error) {
+                    continue;
+                }
+                const std::string name = AsciiLower(file.path().filename().string());
+                if (IsSha256Hex(name) && !referenced.contains(name)) {
+                    doomed.push_back(file.path());
+                }
+            }
+        }
+    } catch (const std::filesystem::filesystem_error& error) {
+        throw IoError(std::string("Could not read model blob files. ") + error.what());
+    }
+    for (const std::filesystem::path& file : doomed) {
+        RemoveLibraryFile(file);
+    }
+    return static_cast<int>(doomed.size());
+}
+
+int RemoveIncomingFiles(const std::filesystem::path& directory) {
+    const std::filesystem::path incoming = directory / "incoming";
+    std::error_code exists_error;
+    if (!std::filesystem::exists(incoming, exists_error) || exists_error) {
+        return 0;
+    }
+    std::vector<std::filesystem::path> files;
+    try {
+        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(incoming)) {
+            std::error_code error;
+            if (entry.is_regular_file(error) && !error) {
+                files.push_back(entry.path());
+            }
+        }
+    } catch (const std::filesystem::filesystem_error& error) {
+        throw IoError(std::string("Could not read incoming model files. ") + error.what());
+    }
+    for (const std::filesystem::path& file : files) {
+        RemoveLibraryFile(file);
+    }
+    return static_cast<int>(files.size());
+}
+
 }  // namespace
 
 std::string BlobId::Hex() const { return ToLowerHex(Bytes); }
@@ -1712,6 +1799,80 @@ History ContentStore::HistoryOf(const BlobId& blob) const {
 
 std::vector<SlotObservation> ContentStore::UnprovenSamePath(const BlobId& blob) const {
     return LoadUnprovenSamePath(state_->db, blob.Bytes, LineageOfBlob(state_->db, blob.Bytes));
+}
+
+void ContentStore::DropObservation(std::string_view observation_id) {
+    Exec(state_->db, "BEGIN IMMEDIATE;");
+    try {
+        std::string snapshot_id;
+        {
+            Statement stmt(state_->db, "SELECT snapshot_id FROM observations WHERE id = ?");
+            stmt.BindText(1, observation_id);
+            if (!stmt.Step()) {
+                throw InvalidData(kMissingObservation);
+            }
+            snapshot_id = stmt.ColumnText(0);
+        }
+        {
+            Statement stmt(state_->db, "DELETE FROM observations WHERE id = ?");
+            stmt.BindText(1, observation_id);
+            stmt.Execute();
+        }
+        int64_t remaining = 0;
+        {
+            Statement stmt(state_->db, "SELECT COUNT(*) FROM observations WHERE snapshot_id = ?");
+            stmt.BindText(1, snapshot_id);
+            if (stmt.Step()) {
+                remaining = stmt.ColumnInt64(0);
+            }
+        }
+        if (remaining == 0) {
+            {
+                Statement stmt(state_->db, "DELETE FROM memberships WHERE snapshot_id = ?");
+                stmt.BindText(1, snapshot_id);
+                stmt.Execute();
+            }
+            {
+                Statement stmt(state_->db, "DELETE FROM refs WHERE snapshot_id = ?");
+                stmt.BindText(1, snapshot_id);
+                stmt.Execute();
+            }
+            {
+                Statement stmt(state_->db, "DELETE FROM snapshots WHERE id = ?");
+                stmt.BindText(1, snapshot_id);
+                stmt.Execute();
+            }
+        }
+        Exec(state_->db, "COMMIT;");
+    } catch (...) {
+        Rollback(state_->db);
+        throw;
+    }
+}
+
+GcStats ContentStore::CollectGarbage() {
+    GcStats stats;
+    Exec(state_->db, "BEGIN IMMEDIATE;");
+    try {
+        const std::unordered_set<std::string> referenced = ReferencedBlobHexes(state_->db);
+        stats.BlobFilesRemoved = RemoveUnreferencedBlobFiles(state_->directory, referenced);
+        Statement stmt(state_->db, R"sql(
+DELETE FROM blobs
+WHERE NOT EXISTS (SELECT 1 FROM memberships m WHERE m.blob_sha256 = blobs.sha256)
+  AND NOT EXISTS (
+    SELECT 1 FROM edges e
+    WHERE e.input_blob = blobs.sha256 OR e.output_blob = blobs.sha256
+  )
+)sql");
+        stmt.Execute();
+        stats.BlobRowsRemoved = sqlite3_changes(state_->db);
+        Exec(state_->db, "COMMIT;");
+    } catch (...) {
+        Rollback(state_->db);
+        throw;
+    }
+    stats.IncomingFilesRemoved = RemoveIncomingFiles(state_->directory);
+    return stats;
 }
 
 }  // namespace skeleton_repair
