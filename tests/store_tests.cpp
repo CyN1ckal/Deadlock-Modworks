@@ -3,6 +3,8 @@
 #include "error.hpp"
 #include "kv3.hpp"
 #include "resource.hpp"
+#include "strings.hpp"
+#include "updater.hpp"
 #include "vpk.hpp"
 
 #include <gtest/gtest.h>
@@ -28,19 +30,27 @@ namespace fs = std::filesystem;
 using skeleton_repair::BlobId;
 using skeleton_repair::CancellationSource;
 using skeleton_repair::ContentStore;
+using skeleton_repair::HeroModelUpdater;
 using skeleton_repair::InvalidData;
 using skeleton_repair::InvalidOperation;
 using skeleton_repair::IoError;
 using skeleton_repair::KvDocument;
 using skeleton_repair::KvValue;
 using skeleton_repair::MembershipRow;
+using skeleton_repair::ModelOutcome;
 using skeleton_repair::ModelRow;
+using skeleton_repair::Narrow;
 using skeleton_repair::OperationCancelled;
 using skeleton_repair::PackRow;
+using skeleton_repair::RepairChange;
+using skeleton_repair::RepairModelNote;
+using skeleton_repair::RepairRequest;
 using skeleton_repair::Sha256;
 using skeleton_repair::Sha256File;
 using skeleton_repair::SnapshotId;
 using skeleton_repair::ToLowerHex;
+using skeleton_repair::UpdateReport;
+using skeleton_repair::WriteKv3;
 using skeleton_repair::VpkArchive;
 using skeleton_repair::VpkChange;
 
@@ -399,6 +409,69 @@ bool HasBlob(const std::vector<ModelRow>& rows, const BlobId& id) { return FindM
 
 std::string ManifestRow(const std::string& path, const std::vector<uint8_t>& payload, const char* kind) {
     return path + "\t" + ToLowerHex(Sha256(payload)) + "\t" + std::to_string(VpkArchive::Crc(payload)) + "\t" + kind + "\n";
+}
+
+std::string Utf8(const fs::path& path) { return Narrow(path.wstring()); }
+
+KvValue Strings(const std::vector<std::string>& values) {
+    std::vector<KvValue> items;
+    for (const std::string& value : values) {
+        items.push_back(KvValue::String(value));
+    }
+    return KvValue::Array(std::move(items));
+}
+
+KvValue Ints(const std::vector<int>& values) {
+    std::vector<KvValue> items;
+    for (int value : values) {
+        items.push_back(KvValue::Int32(value));
+    }
+    return KvValue::Array(std::move(items));
+}
+
+struct HeroSpec {
+    std::vector<std::string> Names;
+    std::vector<int> Parents;
+    std::vector<int> Remap;
+    float Pose = 0;
+};
+
+std::vector<uint8_t> HeroModel(const HeroSpec& spec) {
+    std::vector<KvValue> positions;
+    std::vector<KvValue> rotations;
+    std::vector<KvValue> spheres;
+    std::vector<KvValue> scales;
+    for (size_t i = 0; i < spec.Names.size(); ++i) {
+        positions.push_back(KvValue::Array({KvValue::Float(spec.Pose), KvValue::Float(0), KvValue::Float(0)}));
+        rotations.push_back(KvValue::Array({KvValue::Float(0), KvValue::Float(0), KvValue::Float(0), KvValue::Float(1)}));
+        spheres.push_back(KvValue::Float(1));
+        scales.push_back(KvValue::Float(1));
+    }
+    KvValue skeleton = KvValue::Object({});
+    skeleton.Set("m_boneName", Strings(spec.Names));
+    skeleton.Set("m_nParent", Ints(spec.Parents));
+    skeleton.Set("m_boneSphere", KvValue::Array(std::move(spheres)));
+    skeleton.Set("m_nFlag", Ints(std::vector<int>(spec.Names.size(), 0)));
+    skeleton.Set("m_bonePosParent", KvValue::Array(std::move(positions)));
+    skeleton.Set("m_boneRotParent", KvValue::Array(std::move(rotations)));
+    skeleton.Set("m_boneScaleParent", KvValue::Array(std::move(scales)));
+    KvValue root = KvValue::Object({});
+    root.Set("m_name", KvValue::String("models/heroes/test/test.vmdl"));
+    root.Set("m_modelSkeleton", std::move(skeleton));
+    root.Set("m_remappingTable", Ints(spec.Remap));
+    KvDocument document;
+    document.Root = std::move(root);
+    return Resource(WriteKv3(document));
+}
+
+std::vector<uint8_t> EntryBytes(const VpkArchive& archive, std::string_view path) {
+    for (const auto& entry : archive.Entries()) {
+        if (entry.FullPath == path) {
+            return archive.Read(entry);
+        }
+    }
+    ADD_FAILURE() << path;
+    return {};
 }
 
 }  // namespace
@@ -998,4 +1071,194 @@ TEST(Store, TwoObservationsAreOnePack) {
     ASSERT_EQ(store.Memberships(IdOf(model)).size(), 1u);
     EXPECT_EQ(store.Memberships(IdOf(model))[0].PackLabel, "repack.vpk");
     EXPECT_EQ(store.Memberships(IdOf(model))[0].ObservedUtc, packs[0].ObservedUtc);
+}
+
+TEST(Store, RepairRewritesOneModelAndReusesTheOther) {
+    const std::vector<uint8_t> game_hero = HeroModel({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Remap = {0, 1}});
+    const std::vector<uint8_t> old_hero = HeroModel({.Names = {"arm", "root"}, .Parents = {1, -1}, .Remap = {0, 1}});
+    const std::vector<uint8_t> side = HeroModel({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Remap = {0, 1}, .Pose = 4.f});
+    constexpr const char* kHero = "models/heroes/test/test.vmdl_c";
+    constexpr const char* kSide = "models/heroes/side/side.vmdl_c";
+
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path game_dir = dir.Path() / "game";
+    const fs::path mod = dir.Path() / "mod.vpk";
+    const fs::path output = dir.Path() / "repaired.vpk";
+    fs::create_directories(game_dir);
+    ArchiveWith(game_dir / "pak01_dir.vpk", {{kHero, game_hero}, {kSide, side}});
+    ArchiveWith(mod, {{kHero, old_hero}, {kSide, side}});
+    const auto original = ReadBytes(mod);
+
+    ContentStore store = ContentStore::Open(store_path);
+    const UpdateReport report = HeroModelUpdater::Update(Utf8(game_dir), Utf8(mod), Utf8(output), false, false, {}, {}, false, &store);
+    EXPECT_TRUE(report.WroteFile);
+    EXPECT_EQ(ReadBytes(mod), original);
+    ASSERT_EQ(report.Results.size(), 2u);
+
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM transforms"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges"), 1);
+    EXPECT_EQ(catalog.Text("SELECT relation FROM edges"), "mutated");
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges WHERE relation = 'copied'"), 0);
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM blobs WHERE sha256 = ?", IdOf(game_hero).Bytes), 0);
+    EXPECT_NE(catalog.Text("SELECT detail_json FROM edges").find("Mesh bone indices were remapped."), std::string::npos);
+    EXPECT_NE(catalog.Text("SELECT detail_json FROM edges").find(ToLowerHex(IdOf(game_hero).Bytes)), std::string::npos);
+    EXPECT_NE(catalog.Text("SELECT summary_json FROM transforms").find("repaired.vpk"), std::string::npos);
+
+    const std::string hero_lineage = catalog.Text(
+        "SELECT lineage_id FROM memberships WHERE path_key = 'models/heroes/test/test.vmdl_c' LIMIT 1");
+    EXPECT_EQ(catalog.Text("SELECT lineage_id FROM edges"), hero_lineage);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(DISTINCT lineage_id) FROM memberships WHERE path_key = 'models/heroes/test/test.vmdl_c'"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(DISTINCT blob_sha256) FROM memberships WHERE path_key = 'models/heroes/test/test.vmdl_c'"), 2);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(DISTINCT blob_sha256) FROM memberships WHERE path_key = 'models/heroes/side/side.vmdl_c'"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(DISTINCT lineage_id) FROM memberships WHERE path_key = 'models/heroes/side/side.vmdl_c'"), 1);
+    EXPECT_EQ(catalog.Int(
+        "SELECT COUNT(*) FROM edges WHERE input_path_key = 'models/heroes/side/side.vmdl_c' "
+        "OR output_path_key = 'models/heroes/side/side.vmdl_c'"), 0);
+
+    const std::vector<ModelRow> models = store.ListModels();
+    const ModelRow* side_row = FindModel(models, IdOf(side));
+    const ModelRow* old_row = FindModel(models, IdOf(old_hero));
+    ASSERT_NE(side_row, nullptr);
+    ASSERT_NE(old_row, nullptr);
+    EXPECT_EQ(side_row->SnapshotCount, 2);
+    EXPECT_NE(side_row->LineageId, hero_lineage);
+    EXPECT_EQ(old_row->LineageId, hero_lineage);
+    EXPECT_EQ(old_row->SnapshotCount, 1);
+
+    BlobId repaired_id{};
+    for (const ModelRow& row : models) {
+        if (row.DisplayPath == kHero && row.Blob.Bytes != IdOf(old_hero).Bytes) {
+            repaired_id = row.Blob;
+        }
+    }
+    EXPECT_EQ(repaired_id.Hex().size(), 64u);
+    EXPECT_NE(repaired_id.Bytes, IdOf(old_hero).Bytes);
+    const std::vector<uint8_t> written = EntryBytes(VpkArchive::Open(output), kHero);
+    EXPECT_EQ(store.ReadBlob(repaired_id), written);
+    EXPECT_NE(written, old_hero);
+    EXPECT_NE(written, game_hero);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs"), 3);
+    EXPECT_EQ(CountBlobFiles(store_path), 3);
+
+    const int64_t snapshots = catalog.Int("SELECT COUNT(*) FROM snapshots");
+    const int64_t blobs = catalog.Int("SELECT COUNT(*) FROM blobs");
+    store.ImportVpk(output);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), snapshots);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM blobs"), blobs);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 2);
+    EXPECT_EQ(static_cast<int64_t>(CountBlobFiles(store_path)), blobs);
+}
+
+TEST(Store, BlockedRepairCommitsNoOutputSnapshot) {
+    const std::vector<uint8_t> game_hero = HeroModel({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Remap = {0, 1}});
+    const std::vector<uint8_t> old_hero = HeroModel({.Names = {"arm", "root"}, .Parents = {1, -1}, .Remap = {0, 1}});
+    constexpr const char* kHero = "models/heroes/test/test.vmdl_c";
+    constexpr const char* kBroken = "models/heroes/test/broken.vmdl_c";
+
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path game_dir = dir.Path() / "game";
+    const fs::path mod = dir.Path() / "mod.vpk";
+    fs::create_directories(game_dir);
+    ArchiveWith(game_dir / "pak01_dir.vpk", {{kHero, game_hero}, {kBroken, game_hero}});
+    ArchiveWith(mod, {{kHero, old_hero}, {kBroken, std::vector<uint8_t>{1, 2, 3}}});
+    const auto before = ReadBytes(mod);
+
+    ContentStore store = ContentStore::Open(store_path);
+    const UpdateReport report = HeroModelUpdater::Update(Utf8(game_dir), Utf8(mod), std::nullopt, true, true, {}, {}, false, &store);
+    EXPECT_TRUE(report.HasFailures());
+    EXPECT_FALSE(report.WroteFile);
+    EXPECT_EQ(ReadBytes(mod), before);
+
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 0);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM transforms"), 0);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges"), 0);
+    EXPECT_EQ(CountBlobFiles(store_path), 0);
+}
+
+TEST(Store, RepairEdgesCoverRenameRemovalAndMutation) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model_a{1, 1, 1};
+    const std::vector<uint8_t> model_b{2, 2, 2};
+    const std::vector<uint8_t> model_c{3, 3, 3};
+    const std::vector<uint8_t> model_d{4, 4, 4};
+    const std::vector<uint8_t> texture{7, 7, 7, 7};
+    const std::vector<uint8_t> model_a2{1, 1, 2};
+    const std::vector<uint8_t> model_d2{4, 4, 5};
+    const std::vector<uint8_t> game_only{9, 9, 9};
+    const fs::path vpk = dir.Path() / "mod.vpk";
+    ArchiveWith(vpk, {
+        VpkChange{"models/a.vmdl_c", model_a},
+        VpkChange{"models/b.vmdl_c", model_b},
+        VpkChange{"models/c.vmdl_c", model_c},
+        VpkChange{"models/d.vmdl_c", model_d},
+        VpkChange{"materials/t.vtex_c", texture},
+    });
+
+    ContentStore store = ContentStore::Open(store_path);
+    ExpectMessage([&] {
+        RepairRequest missing;
+        missing.Input.Value = "0123456789abcdef0123456789abcdef";
+        store.RecordRepair(missing);
+    }, "The model library has no snapshot with that id.");
+    EXPECT_EQ(CountBlobFiles(store_path), 0);
+
+    const SnapshotId input = store.ImportVpk(vpk);
+    const int blobs_before = CountBlobFiles(store_path);
+    RepairRequest repair;
+    repair.Input = input;
+    repair.OutputPath = "D:/out/repaired.vpk";
+    repair.BackupPath = "D:/out/repaired.vpk.bak";
+    repair.Changes.push_back(RepairChange{"models/a.vmdl_c", "models/a.vmdl_c", model_a2});
+    repair.Changes.push_back(RepairChange{"models/b.vmdl_c", "models/renamed/b.vmdl_c", model_b});
+    repair.Changes.push_back(RepairChange{"models/c.vmdl_c", "", std::nullopt});
+    repair.Changes.push_back(RepairChange{"models/d.vmdl_c", "models/moved/d.vmdl_c", model_d2});
+    repair.Models.push_back(RepairModelNote{"models/a.vmdl_c", "Updated", "mutate-a", {}, {}, "models/heroes/test/test.vmdl_c", IdOf(game_only).Bytes});
+    repair.Models.push_back(RepairModelNote{"models/b.vmdl_c", "Updated", "rename-b", {}, {}, {}, std::nullopt});
+    repair.Models.push_back(RepairModelNote{"models/d.vmdl_c", "Updated", "move-d", {}, {}, {}, std::nullopt});
+
+    const SnapshotId output = store.RecordRepair(repair);
+    EXPECT_NE(output.Value, input.Value);
+    EXPECT_EQ(CountBlobFiles(store_path), blobs_before + 2);
+    EXPECT_EQ(store.ReadBlob(IdOf(model_a2)), model_a2);
+    EXPECT_EQ(store.ReadBlob(IdOf(model_b)), model_b);
+
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM observations"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM lineages"), 5);
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM blobs WHERE sha256 = ?", IdOf(game_only).Bytes), 0);
+    EXPECT_EQ(catalog.Texts("SELECT relation FROM edges ORDER BY relation"),
+        (std::vector<std::string>{"mutated", "renamed", "renamed+mutated"}));
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges WHERE relation = 'copied'"), 0);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges WHERE relation = 'renamed' AND input_blob = output_blob"), 1);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM edges WHERE relation = 'renamed+mutated' AND input_blob = output_blob"), 0);
+    EXPECT_NE(catalog.Text("SELECT detail_json FROM edges WHERE relation = 'mutated'").find("mutate-a"), std::string::npos);
+    EXPECT_NE(catalog.Text("SELECT detail_json FROM edges WHERE relation = 'renamed'").find("rename-b"), std::string::npos);
+    EXPECT_NE(catalog.Text("SELECT detail_json FROM edges WHERE relation = 'renamed+mutated'").find("move-d"), std::string::npos);
+    EXPECT_NE(catalog.Text("SELECT summary_json FROM transforms").find("repaired.vpk.bak"), std::string::npos);
+    EXPECT_NE(catalog.Text("SELECT detail_json FROM edges WHERE relation = 'mutated'").find(ToLowerHex(IdOf(game_only).Bytes)), std::string::npos);
+
+    const std::string output_filter = "snapshot_id = '" + output.Value + "'";
+    EXPECT_EQ(catalog.Int(("SELECT COUNT(*) FROM memberships WHERE " + output_filter + " AND path_key = 'models/c.vmdl_c'").c_str()), 0);
+    EXPECT_EQ(catalog.Int(("SELECT COUNT(*) FROM memberships WHERE " + output_filter + " AND path_key = 'models/b.vmdl_c'").c_str()), 0);
+    EXPECT_EQ(catalog.Text(("SELECT path FROM memberships WHERE " + output_filter + " AND path_key = 'models/renamed/b.vmdl_c'").c_str()),
+        "models/renamed/b.vmdl_c");
+    EXPECT_EQ(catalog.Int(("SELECT COUNT(*) FROM memberships WHERE " + output_filter).c_str()), 4);
+    EXPECT_EQ(catalog.Text("SELECT lineage_id FROM edges WHERE relation = 'mutated'"),
+        catalog.Text("SELECT lineage_id FROM memberships WHERE path_key = 'models/a.vmdl_c' LIMIT 1"));
+    EXPECT_EQ(catalog.Text("SELECT lineage_id FROM edges WHERE relation = 'renamed'"),
+        catalog.Text("SELECT lineage_id FROM memberships WHERE path_key = 'models/renamed/b.vmdl_c'"));
+    EXPECT_EQ(catalog.Text("SELECT lineage_id FROM edges WHERE relation = 'renamed+mutated'"),
+        catalog.Text("SELECT lineage_id FROM memberships WHERE path_key = 'models/d.vmdl_c' LIMIT 1"));
+    EXPECT_EQ(catalog.Text(("SELECT lineage_id FROM memberships WHERE " + output_filter + " AND path_key = 'models/moved/d.vmdl_c'").c_str()),
+        catalog.Text("SELECT lineage_id FROM edges WHERE relation = 'renamed+mutated'"));
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM lineages WHERE root_sha256 = ?", IdOf(model_d2).Bytes), 0);
+    EXPECT_EQ(catalog.IntWhere("SELECT COUNT(*) FROM lineages WHERE root_sha256 = ?", IdOf(model_a2).Bytes), 0);
 }

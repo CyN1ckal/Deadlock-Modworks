@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace skeleton_repair {
@@ -44,6 +45,32 @@ struct MembershipRow {
     std::string ObservedUtc;
 };
 
+// One changed output entry. An empty output path and no bytes removes InputPath.
+// Any other change writes Bytes at OutputPath. Omitted input paths are copies.
+struct RepairChange {
+    std::string InputPath;
+    std::string OutputPath;
+    std::optional<std::vector<uint8_t>> Bytes;
+};
+
+struct RepairModelNote {
+    std::string InputPath;
+    std::string Outcome;
+    std::string Detail;
+    std::vector<std::string> Warnings;
+    std::vector<std::pair<std::string, std::string>> BoneRenames;
+    std::string GamePath;
+    std::optional<std::array<uint8_t, 32>> GameSha256;
+};
+
+struct RepairRequest {
+    SnapshotId Input;
+    std::vector<RepairChange> Changes;
+    std::vector<RepairModelNote> Models;
+    std::string OutputPath;
+    std::optional<std::string> BackupPath;
+};
+
 struct HistoryVersion {
     BlobId Blob;
     std::optional<BlobId> Data;
@@ -77,7 +104,7 @@ struct SlotObservation {
 
 inline constexpr const char* kUnprovenSlotHeading = "Same path, not proven related";
 
-// Content-addressed library. M1 imports blobs. M2 lists models, packs, and memberships.
+// Content-addressed library. M1 imports blobs. M2 lists them. M3 records repair edges.
 class ContentStore {
 public:
     static ContentStore Open(const std::filesystem::path& directory);
@@ -94,6 +121,7 @@ public:
     std::vector<PackRow> ListPacks() const;
     std::vector<MembershipRow> Memberships(const BlobId& blob) const;
     std::vector<ModelRow> ExactDuplicateModels() const;
+    SnapshotId RecordRepair(const RepairRequest& repair, CancellationToken cancellation = {});
 
 private:
     struct State;

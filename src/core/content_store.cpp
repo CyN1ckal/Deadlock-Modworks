@@ -14,6 +14,8 @@
 
 #include <sqlite3.h>
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -817,6 +819,367 @@ ORDER BY 2, hex(m.blob_sha256)
     return rows;
 }
 
+struct InputMember {
+    std::string path;
+    std::string path_key;
+    std::array<uint8_t, 32> sha{};
+    std::optional<std::array<uint8_t, 32>> data_sha;
+    uint32_t crc = 0;
+    std::string kind;
+    std::string lineage_id;
+};
+
+struct OutputSlot {
+    PreparedEntry entry;
+    std::string lineage_id;
+    bool same_bytes = true;
+    std::vector<uint8_t> payload;
+    bool has_payload = false;
+};
+
+struct PlannedEdge {
+    std::string relation;
+    std::array<uint8_t, 32> input_blob{};
+    std::string input_path_key;
+    std::optional<std::array<uint8_t, 32>> input_data_sha;
+    std::array<uint8_t, 32> output_blob{};
+    std::string output_path_key;
+    std::optional<std::array<uint8_t, 32>> output_data_sha;
+    std::string lineage_id;
+    std::string detail_json;
+};
+
+struct RepairPlan {
+    std::vector<OutputSlot> slots;
+    std::unordered_map<std::string, std::vector<uint8_t>> payloads;
+    std::vector<PlannedEdge> edges;
+    std::vector<RefRow> refs;
+    std::array<uint8_t, 32> manifest_sha{};
+    std::string summary_json;
+    std::string input_snapshot_id;
+};
+
+bool SnapshotExists(sqlite3* db, const std::string& snapshot_id) {
+    Statement stmt(db, "SELECT 1 FROM snapshots WHERE id = ?");
+    stmt.BindText(1, snapshot_id);
+    return stmt.Step();
+}
+
+std::vector<InputMember> LoadMembers(sqlite3* db, const std::string& snapshot_id) {
+    Statement stmt(db,
+        "SELECT m.path, m.path_key, m.blob_sha256, m.crc32, m.kind, m.lineage_id, b.data_sha256 "
+        "FROM memberships m JOIN blobs b ON b.sha256 = m.blob_sha256 WHERE m.snapshot_id = ?");
+    stmt.BindText(1, snapshot_id);
+    std::vector<InputMember> members;
+    while (stmt.Step()) {
+        InputMember member;
+        member.path = stmt.ColumnText(0);
+        member.path_key = stmt.ColumnText(1);
+        member.sha = stmt.ColumnBlobId(2).Bytes;
+        member.crc = static_cast<uint32_t>(stmt.ColumnInt64(3));
+        member.kind = stmt.ColumnText(4);
+        member.lineage_id = stmt.ColumnText(5);
+        if (!stmt.ColumnNull(6)) {
+            member.data_sha = stmt.ColumnBlobId(6).Bytes;
+        }
+        members.push_back(std::move(member));
+    }
+    return members;
+}
+
+nlohmann::json NoteBody(const RepairModelNote& note) {
+    nlohmann::json body = nlohmann::json::object();
+    body["outcome"] = note.Outcome;
+    body["detail"] = note.Detail;
+    body["warnings"] = note.Warnings;
+    body["bone_renames"] = nlohmann::json::array();
+    for (const auto& rename : note.BoneRenames) {
+        body["bone_renames"].push_back(nlohmann::json::array({rename.first, rename.second}));
+    }
+    if (!note.GamePath.empty()) {
+        body["game_path"] = note.GamePath;
+    }
+    if (note.GameSha256) {
+        body["game_sha256"] = ToLowerHex(*note.GameSha256);
+    }
+    return body;
+}
+
+OutputSlot SlotFromMember(const InputMember& member) {
+    OutputSlot slot;
+    slot.entry.path = member.path;
+    slot.entry.path_key = member.path_key;
+    slot.entry.kind = member.kind;
+    slot.entry.crc = member.crc;
+    slot.entry.sha = member.sha;
+    slot.entry.sha_hex = ToLowerHex(member.sha);
+    slot.lineage_id = member.lineage_id;
+    slot.same_bytes = true;
+    return slot;
+}
+
+OutputSlot SlotFromWrite(const InputMember& input, const std::string& output_path, const std::string& output_key,
+    const std::vector<uint8_t>& bytes) {
+    OutputSlot slot;
+    slot.entry.path = output_path;
+    slot.entry.path_key = output_key;
+    slot.entry.kind = KindFor(output_key);
+    slot.entry.crc = VpkArchive::Crc(bytes);
+    slot.entry.sha = Sha256(bytes);
+    slot.entry.sha_hex = ToLowerHex(slot.entry.sha);
+    slot.entry.size = static_cast<int64_t>(bytes.size());
+    slot.entry.data_sha = DataHash(bytes);
+    slot.entry.refs = ReferenceNames(slot.entry.kind, bytes);
+    slot.lineage_id = input.lineage_id;
+    slot.same_bytes = slot.entry.sha == input.sha;
+    slot.payload = bytes;
+    slot.has_payload = true;
+    return slot;
+}
+
+RepairPlan BuildRepairPlan(sqlite3* db, const std::filesystem::path& directory, const RepairRequest& repair) {
+    const std::vector<InputMember> members = LoadMembers(db, repair.Input.Value);
+    std::unordered_map<std::string, InputMember> inputs;
+    std::unordered_map<std::string, OutputSlot> slots;
+    for (const InputMember& member : members) {
+        inputs.emplace(member.path_key, member);
+        slots.emplace(member.path_key, SlotFromMember(member));
+    }
+
+    struct WriteOp {
+        InputMember input;
+        std::string output_path;
+        std::string output_key;
+        std::vector<uint8_t> bytes;
+    };
+    std::vector<WriteOp> writes;
+    std::vector<std::string> removals;
+    for (const RepairChange& change : repair.Changes) {
+        const std::string input_path = VpkArchive::Normalize(change.InputPath);
+        const std::string input_key = AsciiLower(input_path);
+        const bool has_bytes = change.Bytes.has_value();
+        const bool has_output = !VpkArchive::Normalize(change.OutputPath).empty();
+        if (has_bytes != has_output) {
+            throw InvalidData("A repair change needs an output path and bytes, or neither for a removal.");
+        }
+        const auto found = inputs.find(input_key);
+        if (found == inputs.end()) {
+            throw InvalidData("The repair names a path that is not in the input snapshot.");
+        }
+        if (!has_bytes) {
+            removals.push_back(input_key);
+            continue;
+        }
+        WriteOp write;
+        write.input = found->second;
+        write.output_path = VpkArchive::Normalize(change.OutputPath);
+        write.output_key = AsciiLower(write.output_path);
+        write.bytes = *change.Bytes;
+        writes.push_back(std::move(write));
+    }
+
+    std::unordered_set<std::string> written_keys;
+    for (const WriteOp& write : writes) {
+        if (!written_keys.insert(write.output_key).second) {
+            throw InvalidData("VPK contains duplicate resource paths.");
+        }
+    }
+    for (const std::string& removed : removals) {
+        if (!written_keys.contains(removed)) {
+            slots.erase(removed);
+        }
+    }
+    for (const WriteOp& write : writes) {
+        if (write.output_key != write.input.path_key && !written_keys.contains(write.input.path_key)) {
+            slots.erase(write.input.path_key);
+        }
+        slots.insert_or_assign(write.output_key, SlotFromWrite(write.input, write.output_path, write.output_key, write.bytes));
+    }
+
+    nlohmann::json model_notes = nlohmann::json::array();
+    std::unordered_map<std::string, std::string> note_by_key;
+    for (const RepairModelNote& note : repair.Models) {
+        const std::string key = AsciiLower(VpkArchive::Normalize(note.InputPath));
+        const nlohmann::json body = NoteBody(note);
+        note_by_key.insert_or_assign(key, body.dump());
+        model_notes.push_back(body);
+    }
+    nlohmann::json summary = nlohmann::json::object();
+    summary["output_path"] = repair.OutputPath;
+    summary["backup_path"] = repair.BackupPath ? nlohmann::json(*repair.BackupPath) : nlohmann::json(nullptr);
+    summary["models"] = std::move(model_notes);
+
+    RepairPlan plan;
+    plan.input_snapshot_id = repair.Input.Value;
+    plan.summary_json = summary.dump();
+    plan.slots.reserve(slots.size());
+    for (auto& item : slots) {
+        plan.slots.push_back(std::move(item.second));
+    }
+    std::sort(plan.slots.begin(), plan.slots.end(), [](const OutputSlot& left, const OutputSlot& right) {
+        return left.entry.path_key < right.entry.path_key;
+    });
+    for (OutputSlot& slot : plan.slots) {
+        if (slot.has_payload || (slot.entry.kind != "vmdl_c" && slot.entry.kind != "vnmskel_c")) {
+            continue;
+        }
+        slot.entry.refs = ReferenceNames(slot.entry.kind, ReadExactFile(BlobPath(directory, slot.entry.sha_hex)));
+    }
+
+    std::vector<PreparedEntry> prepared;
+    prepared.reserve(plan.slots.size());
+    for (const OutputSlot& slot : plan.slots) {
+        prepared.push_back(slot.entry);
+        if (!slot.same_bytes && slot.has_payload) {
+            plan.payloads.emplace(slot.entry.sha_hex, slot.payload);
+        }
+    }
+    plan.refs = ResolveRefs(prepared);
+    const std::string manifest = ManifestBody(prepared);
+    plan.manifest_sha = Sha256(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(manifest.data()), manifest.size()));
+
+    for (const WriteOp& write : writes) {
+        const std::array<uint8_t, 32> sha = Sha256(write.bytes);
+        const bool same_bytes = sha == write.input.sha;
+        const bool same_path = write.output_key == write.input.path_key;
+        if (same_bytes && same_path) {
+            continue;
+        }
+        PlannedEdge edge;
+        if (same_bytes) {
+            edge.relation = "renamed";
+        } else if (same_path) {
+            edge.relation = "mutated";
+        } else {
+            edge.relation = "renamed+mutated";
+        }
+        edge.input_blob = write.input.sha;
+        edge.input_path_key = write.input.path_key;
+        edge.input_data_sha = write.input.data_sha;
+        edge.output_blob = sha;
+        edge.output_path_key = write.output_key;
+        edge.output_data_sha = DataHash(write.bytes);
+        edge.lineage_id = write.input.lineage_id;
+        if (const auto note = note_by_key.find(write.input.path_key); note != note_by_key.end()) {
+            edge.detail_json = note->second;
+        } else {
+            edge.detail_json = "{}";
+        }
+        plan.edges.push_back(std::move(edge));
+    }
+    return plan;
+}
+
+void BindOptionalHash(Statement& stmt, int index, const std::optional<std::array<uint8_t, 32>>& hash) {
+    if (hash) {
+        stmt.BindBlob(index, *hash);
+    } else {
+        stmt.BindNull(index);
+    }
+}
+
+std::string CommitRepair(sqlite3* db, const RepairPlan& plan, CancellationToken cancellation) {
+    const std::string now = UtcNow();
+    Exec(db, "BEGIN IMMEDIATE;");
+    try {
+        std::unordered_set<std::string> existed;
+        for (const OutputSlot& slot : plan.slots) {
+            if (BlobRowExists(db, slot.entry.sha)) {
+                existed.insert(slot.entry.sha_hex);
+            } else {
+                InsertBlob(db, slot.entry, now);
+            }
+        }
+
+        std::string snapshot_id;
+        {
+            Statement stmt(db, "SELECT id FROM snapshots WHERE manifest_sha256 = ?");
+            stmt.BindBlob(1, plan.manifest_sha);
+            if (stmt.Step()) {
+                snapshot_id = stmt.ColumnText(0);
+            }
+        }
+        if (snapshot_id.empty()) {
+            snapshot_id = NewId();
+            Statement stmt(db, "INSERT INTO snapshots (id, manifest_sha256, created_utc, tool_version) VALUES (?, ?, ?, NULL)");
+            stmt.BindText(1, snapshot_id);
+            stmt.BindBlob(2, plan.manifest_sha);
+            stmt.BindText(3, now);
+            stmt.Execute();
+
+            for (const OutputSlot& slot : plan.slots) {
+                std::string lineage = slot.lineage_id;
+                if (!slot.same_bytes && existed.contains(slot.entry.sha_hex)) {
+                    lineage = LineageForExistingBlob(db, slot.entry.sha);
+                }
+                Statement membership(db,
+                    "INSERT INTO memberships (snapshot_id, path, path_key, blob_sha256, crc32, kind, lineage_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)");
+                membership.BindText(1, snapshot_id);
+                membership.BindText(2, slot.entry.path);
+                membership.BindText(3, slot.entry.path_key);
+                membership.BindBlob(4, slot.entry.sha);
+                membership.BindInt64(5, static_cast<int64_t>(slot.entry.crc));
+                membership.BindText(6, slot.entry.kind);
+                membership.BindText(7, lineage);
+                membership.Execute();
+            }
+            for (const RefRow& ref : plan.refs) {
+                Statement row(db,
+                    "INSERT INTO refs (snapshot_id, from_path_key, name, resolved_path_key, resolved_blob) "
+                    "VALUES (?, ?, ?, ?, ?)");
+                row.BindText(1, snapshot_id);
+                row.BindText(2, ref.from_path_key);
+                row.BindText(3, ref.name);
+                if (ref.resolved_path_key && ref.resolved_blob) {
+                    row.BindText(4, *ref.resolved_path_key);
+                    row.BindBlob(5, *ref.resolved_blob);
+                } else {
+                    row.BindNull(4);
+                    row.BindNull(5);
+                }
+                row.Execute();
+            }
+        }
+
+        const std::string transform_id = NewId();
+        {
+            Statement stmt(db,
+                "INSERT INTO transforms (id, kind, tool_name, tool_version, finished_utc, summary_json, "
+                "input_snapshot_id, output_snapshot_id) VALUES (?, 'repair', 'HeroModelUpdater', '1', ?, ?, ?, ?)");
+            stmt.BindText(1, transform_id);
+            stmt.BindText(2, now);
+            stmt.BindText(3, plan.summary_json);
+            stmt.BindText(4, plan.input_snapshot_id);
+            stmt.BindText(5, snapshot_id);
+            stmt.Execute();
+        }
+        for (const PlannedEdge& edge : plan.edges) {
+            Statement stmt(db,
+                "INSERT INTO edges (transform_id, relation, input_blob, input_path_key, input_data_sha256, "
+                "output_blob, output_path_key, output_data_sha256, lineage_id, detail_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            stmt.BindText(1, transform_id);
+            stmt.BindText(2, edge.relation);
+            stmt.BindBlob(3, edge.input_blob);
+            stmt.BindText(4, edge.input_path_key);
+            BindOptionalHash(stmt, 5, edge.input_data_sha);
+            stmt.BindBlob(6, edge.output_blob);
+            stmt.BindText(7, edge.output_path_key);
+            BindOptionalHash(stmt, 8, edge.output_data_sha);
+            stmt.BindText(9, edge.lineage_id);
+            stmt.BindText(10, edge.detail_json);
+            stmt.Execute();
+        }
+        cancellation.ThrowIfCancelled();
+        Exec(db, "COMMIT;");
+        return snapshot_id;
+    } catch (...) {
+        Rollback(db);
+        throw;
+    }
+}
+
 }  // namespace
 
 std::string BlobId::Hex() const { return ToLowerHex(Bytes); }
@@ -1056,6 +1419,22 @@ std::vector<ModelRow> ContentStore::ExactDuplicateModels() const {
     std::vector<ModelRow> rows = ListModels();
     std::erase_if(rows, [](const ModelRow& row) { return row.SnapshotCount <= 1 && row.PathCount <= 1; });
     return rows;
+}
+
+SnapshotId ContentStore::RecordRepair(const RepairRequest& repair, CancellationToken cancellation) {
+    cancellation.ThrowIfCancelled();
+    if (!SnapshotExists(state_->db, repair.Input.Value)) {
+        throw InvalidData("The model library has no snapshot with that id.");
+    }
+    const RepairPlan plan = BuildRepairPlan(state_->db, state_->directory, repair);
+    for (const auto& item : plan.payloads) {
+        cancellation.ThrowIfCancelled();
+        WriteBlobFile(state_->directory, item.first, item.second);
+    }
+    cancellation.ThrowIfCancelled();
+    SnapshotId id;
+    id.Value = CommitRepair(state_->db, plan, cancellation);
+    return id;
 }
 
 }  // namespace skeleton_repair
