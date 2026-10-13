@@ -10,13 +10,12 @@
 #include "comparison_view.hpp"
 #include "history_compare.hpp"
 #include "library_model.hpp"
-#include "model_geometry.hpp"
 #include "model_versions.hpp"
 #include "preview_panel.hpp"
+#include "store_jobs.hpp"
 #include "store_reader.hpp"
 #include "strings.hpp"
 #include "ui.hpp"
-#include "updater.hpp"
 
 #include <imgui.h>
 
@@ -54,136 +53,6 @@ bool ContainsIgnoreCase(std::string_view text, std::string_view query) {
         if (EqualsIgnoreCase(text.substr(i, query.size()), query)) return true;
     }
     return false;
-}
-
-using GameReader = std::function<std::optional<std::vector<uint8_t>>(const std::string&)>;
-
-struct PreparedVersion {
-    std::string Label;
-    std::string Title;
-    std::optional<ModelGeometry> Geometry;
-    std::optional<std::vector<GeometryBone>> Animation;
-    SnapshotId Snapshot;
-    bool HasSnapshot = false;
-    std::string Error;
-};
-
-const SnapshotId* PreferredSnapshot(const std::optional<size_t>& selected_copy, const std::vector<MembershipRow>& memberships,
-    SnapshotId& storage) {
-    if (!selected_copy || *selected_copy >= memberships.size()) {
-        return nullptr;
-    }
-    storage = memberships[*selected_copy].Snapshot;
-    return &storage;
-}
-
-PreparedVersion PrepareVersion(ContentStore& store, const HistoryVersion& version, const SnapshotId* preferred, const GameReader& read_game) {
-    PreparedVersion prepared;
-    const std::string hex = version.Blob.Hex();
-    prepared.Label = hex.substr(0, hex.size() < 12 ? hex.size() : 12);
-    prepared.Title = prepared.Label;
-    try {
-        const std::vector<uint8_t> bytes = store.ReadBlob(version.Blob);
-        prepared.Geometry = DecodeModelGeometry(bytes);
-        const std::vector<MembershipRow> rows = store.Memberships(version.Blob);
-        if (const MembershipRow* membership = VersionMembership(rows, preferred)) {
-            prepared.Snapshot = membership->Snapshot;
-            prepared.HasSnapshot = true;
-            if (!membership->Path.empty()) {
-                prepared.Title = membership->Path;
-            }
-        } else if (!version.Paths.empty()) {
-            prepared.Title = version.Paths.front();
-        }
-        const SnapshotId* snapshot = prepared.HasSnapshot ? &prepared.Snapshot : nullptr;
-        if (prepared.Geometry) {
-            if (const std::optional<std::string> skeleton = AnimationSkeletonPath(*prepared.Geometry)) {
-                if (const std::optional<std::vector<uint8_t>> skeleton_bytes = ReadSnapshotThenGame(store, snapshot, *skeleton, read_game)) {
-                    try {
-                        prepared.Animation = DecodeAnimationSkeleton(*skeleton_bytes);
-                    } catch (const std::exception& error) {
-                        prepared.Error = error.what();
-                    }
-                }
-            }
-        }
-    } catch (const std::exception& error) {
-        prepared.Geometry.reset();
-        prepared.Error = error.what();
-    } catch (...) {
-        prepared.Geometry.reset();
-        prepared.Error = "The model could not be read.";
-    }
-    return prepared;
-}
-
-VersionData SideData(const PreparedVersion& prepared) {
-    VersionData data;
-    data.Available = prepared.Geometry.has_value();
-    data.Model = prepared.Geometry;
-    data.AnimationSkeleton = prepared.Animation;
-    data.Error = prepared.Error;
-    data.Notes.push_back(prepared.Label);
-    return data;
-}
-
-VersionData GameSide(const std::string& model_path, const std::optional<std::string>& skeleton_path, const GameReader& read_game) {
-    VersionData data;
-    std::optional<std::vector<uint8_t>> bytes;
-    try {
-        if (read_game) {
-            bytes = read_game(model_path);
-        }
-    } catch (const std::exception& error) {
-        data.Error = error.what();
-        return data;
-    }
-    if (!bytes) {
-        data.Notes.push_back("The game has no model at this path.");
-        return data;
-    }
-    data.Available = true;
-    data.Notes.push_back("From the game archive.");
-    try {
-        data.Model = DecodeModelGeometry(*bytes);
-    } catch (const std::exception& error) {
-        data.Error = error.what();
-    }
-    if (!skeleton_path || !read_game) {
-        return data;
-    }
-    try {
-        if (const std::optional<std::vector<uint8_t>> skeleton_bytes = read_game(*skeleton_path)) {
-            data.AnimationSkeleton = DecodeAnimationSkeleton(*skeleton_bytes);
-        }
-    } catch (const std::exception& error) {
-        if (!data.Error.empty()) {
-            data.Error += " ";
-        }
-        data.Error += error.what();
-    }
-    return data;
-}
-
-std::vector<std::string> ClipsForPrepared(ContentStore& store, const PreparedVersion& prepared, const std::vector<std::string>& game_clips) {
-    std::vector<std::string> candidates;
-    if (prepared.HasSnapshot) {
-        try {
-            candidates = store.SnapshotPaths(prepared.Snapshot, "vnmclip_c");
-        } catch (const std::exception&) {
-            candidates.clear();
-        }
-    }
-    candidates.insert(candidates.end(), game_clips.begin(), game_clips.end());
-    return ClipsUnderModel(prepared.Title, candidates);
-}
-
-void AppendClips(std::vector<std::string>& clips, const std::vector<std::string>& more) {
-    for (const std::string& path : more) {
-        if (std::find(clips.begin(), clips.end(), path) == clips.end()) {
-            clips.push_back(path);
-        }
-    }
 }
 
 using Shown = std::function<void(bool compare)>;
@@ -393,9 +262,7 @@ void HistoryPanel::StartAssemble(const SnapshotId& snapshot, const std::filesyst
     try {
         worker_ = std::thread([this, source, model, destination, token] {
             try {
-                ContentStore store = ContentStore::Open(store_directory_);
-                store.Assemble(source, {model}, destination, token);
-                store.ImportVpk(destination, token);
+                AssembleIntoStore(store_directory_, source, model, destination, token);
                 import_ok_ = true;
                 import_error_.clear();
             } catch (const std::exception& error) {
@@ -435,9 +302,7 @@ void HistoryPanel::StartRepair(const std::string& vpk_path, const std::string& g
     try {
         worker_ = std::thread([this, vpk_path, game_directory, token] {
             try {
-                ContentStore store = ContentStore::Open(store_directory_);
-                const UpdateReport report = HeroModelUpdater::Update(game_directory, vpk_path, std::nullopt, true, true, {}, token,
-                    false, &store);
+                const UpdateReport report = RepairIntoStore(store_directory_, vpk_path, game_directory, token);
                 if (report.WroteFile) {
                     import_ok_ = true;
                     import_error_.clear();
@@ -482,50 +347,23 @@ void HistoryPanel::ViewSelected(PreviewPanel& preview,
         return;
     }
     const HistoryVersion& version = history_.Versions[*selected_version_];
-    std::string title = version.Blob.Hex().substr(0, 12);
-    try {
-        const std::vector<uint8_t> bytes = store_->ReadBlob(version.Blob);
-        const ModelGeometry geometry = DecodeModelGeometry(bytes);
-        const SnapshotId* preferred = nullptr;
-        SnapshotId preferred_id;
-        if (selected_copy_ && *selected_copy_ < memberships_.size()) {
-            preferred_id = memberships_[*selected_copy_].Snapshot;
-            preferred = &preferred_id;
+    SnapshotId preferred_id;
+    const SnapshotId* preferred = PreferredSnapshot(selected_copy_, memberships_, preferred_id);
+    const PreparedVersion prepared = PrepareVersion(*store_, version, preferred, read_game);
+    if (!prepared.Geometry) {
+        preview.ShowError(prepared.Title, prepared.Error.empty() ? "The model could not be read." : prepared.Error);
+    } else {
+        try {
+            // Clips load on a worker thread, which may outlive this panel, so the reader shares the store.
+            const ResourceReader read = [store = store_, snapshot = prepared.Snapshot, has_snapshot = prepared.HasSnapshot,
+                                            read_game](const std::string& path) {
+                return ReadSnapshotThenGame(*store, has_snapshot ? &snapshot : nullptr, path, read_game);
+            };
+            preview.Load(PrepareModel(*prepared.Geometry, &read), prepared.Title, read,
+                prepared.Animation ? &*prepared.Animation : nullptr, ClipsForPrepared(*store_, prepared, game_clip_paths));
+        } catch (const std::exception& error) {
+            preview.ShowError(prepared.Title, error.what());
         }
-        const std::vector<MembershipRow> version_rows = store_->Memberships(version.Blob);
-        const MembershipRow* membership = VersionMembership(version_rows, preferred);
-        const SnapshotId* snapshot = membership == nullptr ? nullptr : &membership->Snapshot;
-        if (membership != nullptr && !membership->Path.empty()) {
-            title = membership->Path;
-        } else if (!version.Paths.empty()) {
-            title = version.Paths.front();
-        }
-        std::vector<std::string> clip_candidates;
-        if (snapshot != nullptr) {
-            clip_candidates = store_->SnapshotPaths(*snapshot, "vnmclip_c");
-        }
-        clip_candidates.insert(clip_candidates.end(), game_clip_paths.begin(), game_clip_paths.end());
-        const std::vector<std::string> clips = ClipsUnderModel(title, clip_candidates);
-        const SnapshotId snapshot_copy = snapshot != nullptr ? *snapshot : SnapshotId{};
-        const bool has_snapshot = snapshot != nullptr;
-        // Clips load on a worker thread, which may outlive this panel, so the reader shares the store.
-        const ResourceReader read = [store = store_, snapshot_copy, has_snapshot, read_game](const std::string& path) {
-            return ReadSnapshotThenGame(*store, has_snapshot ? &snapshot_copy : nullptr, path, read_game);
-        };
-        std::optional<std::vector<GeometryBone>> animation;
-        if (const std::optional<std::string> skeleton = AnimationSkeletonPath(geometry)) {
-            if (const std::optional<std::vector<uint8_t>> skeleton_bytes = read(*skeleton)) {
-                try {
-                    animation = DecodeAnimationSkeleton(*skeleton_bytes);
-                } catch (const std::exception&) {
-                }
-            }
-        }
-        preview.Load(PrepareModel(geometry, &read), title, read, animation ? &*animation : nullptr, clips);
-    } catch (const std::exception& error) {
-        preview.ShowError(title, error.what());
-    } catch (...) {
-        preview.ShowError(title, "The model could not be read.");
     }
     if (shown) {
         shown(false);

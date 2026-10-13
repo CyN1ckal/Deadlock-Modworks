@@ -119,6 +119,7 @@ add_library(skeleton_repair_core STATIC
     src/core/content_hash.cpp
     src/core/content_store.cpp
     src/core/mod_store.cpp
+    src/core/store_jobs.cpp
     src/core/model_versions.cpp
     src/core/version_builder.cpp
 )

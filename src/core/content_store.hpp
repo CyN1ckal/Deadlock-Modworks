@@ -37,11 +37,11 @@ public:
     // Imports every eligible VPK in the folder, non-recursive. Skips chunk files and the game archive.
     // A failed archive is listed and does not roll back archives already committed.
     FolderImportResult ImportFolder(const std::filesystem::path& directory, CancellationToken cancellation = {});
-    std::vector<uint8_t> ReadBlob(const BlobId& id) const;
+    std::vector<uint8_t> ReadBlob(const BlobId& id) const override;
     // Membership bytes for a normalized path. Empty when the snapshot has no such path. Does not open a VPK.
     std::optional<std::vector<uint8_t>> ReadSnapshotPath(const SnapshotId& snapshot, std::string_view path) const override;
     // Membership paths of one kind, ordered by path. Used to find clips in a snapshot.
-    std::vector<std::string> SnapshotPaths(const SnapshotId& snapshot, std::string_view kind) const;
+    std::vector<std::string> SnapshotPaths(const SnapshotId& snapshot, std::string_view kind) const override;
     // Every file of the snapshot, ordered by path. Empty when the snapshot does not exist.
     std::vector<SnapshotMember> SnapshotMembers(const SnapshotId& snapshot) const;
     // Lowercase hex of the snapshot's manifest SHA-256. The same files give the same id in every library.
@@ -57,7 +57,7 @@ public:
     void RenameSnapshot(const SnapshotId& snapshot, std::string_view name);
     std::vector<ModelRow> ListModels() const;
     std::vector<PackRow> ListPacks() const;
-    std::vector<MembershipRow> Memberships(const BlobId& blob) const;
+    std::vector<MembershipRow> Memberships(const BlobId& blob) const override;
     std::vector<ModelRow> ExactDuplicateModels() const;
     SnapshotId RecordRepair(const RepairRequest& repair, CancellationToken cancellation = {}) override;
     History HistoryOf(const BlobId& blob) const;
