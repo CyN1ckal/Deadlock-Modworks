@@ -1,6 +1,5 @@
 #pragma once
 #include "library_types.hpp"
-#include "mod_store.hpp"
 #include "model_renderer.hpp"
 #include <imgui.h>
 #include <cstdint>
@@ -20,12 +19,13 @@ struct ThumbnailPixels {
     std::vector<uint8_t> Rgba;
 };
 
-// The image folder used by earlier releases, or empty when local app data is unavailable. Only read, never changed.
-std::filesystem::path LegacyThumbnailFolder();
+// The image folder earlier releases used under the mod store root, or empty for an empty root. Only read, never changed.
+std::filesystem::path LegacyThumbnailFolder(const std::filesystem::path& store_root);
 // Where an earlier release cached the thumbnail of `model`, which still names the archive copy it stored.
 std::filesystem::path LegacyThumbnailPath(const std::filesystem::path& folder, const LibraryModel& model, const std::filesystem::path& game);
 // The library database key of `model`'s thumbnail. It changes with the archive's content and the base game archive.
-std::string ThumbnailKey(const LocalModStore* store, const LibraryModel& model, const std::filesystem::path& game);
+// `content_id` is the mod store's content id for the archive. Without one the archive file itself is hashed.
+std::string ThumbnailKey(const std::optional<std::string>& content_id, const LibraryModel& model, const std::filesystem::path& game);
 // Reads a PNG. Returns nothing when it is missing or unreadable. The calling thread must have initialized COM.
 std::optional<ThumbnailPixels> DecodeThumbnail(const std::vector<uint8_t>& png);
 std::optional<ThumbnailPixels> LoadThumbnailImage(const std::filesystem::path& path);

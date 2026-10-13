@@ -2,6 +2,7 @@
 #include "background.hpp"
 #include "model_library.hpp"
 #include "model_viewport.hpp"
+#include "mod_store.hpp"
 #include "thumbnail_cache.hpp"
 #include <condition_variable>
 #include <deque>

@@ -1,7 +1,6 @@
 #include "thumbnail_cache.hpp"
 #include "error.hpp"
 #include "texture.hpp"
-#include "mod_store.hpp"
 #include "strings.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -68,9 +67,8 @@ uint32_t MemoryType(VkPhysicalDevice physical, uint32_t type_bits, VkMemoryPrope
 }
 }
 
-fs::path LegacyThumbnailFolder() {
-    try { return LocalModStore::DefaultRoot() / L"thumbnails"; }
-    catch (const std::exception&) { return {}; }
+fs::path LegacyThumbnailFolder(const fs::path& store_root) {
+    return store_root.empty() ? fs::path() : store_root / L"thumbnails";
 }
 
 fs::path LegacyThumbnailPath(const fs::path& folder, const LibraryModel& model, const fs::path& game) {
@@ -85,12 +83,12 @@ fs::path LegacyThumbnailPath(const fs::path& folder, const LibraryModel& model, 
     return folder / (Hex64(hash) + ".png");
 }
 
-std::string ThumbnailKey(const LocalModStore* store, const LibraryModel& model, const fs::path& game) {
+std::string ThumbnailKey(const std::optional<std::string>& content_id, const LibraryModel& model, const fs::path& game) {
     uint64_t hash = 0xcbf29ce484222325ull;
     Hash(hash, kCacheVersion);
     Hash(hash, std::to_string(kThumbnailSize));
     // Stored mods are identified by content, so their thumbnails survive moving or sharing the library.
-    if (const auto content = store ? store->ContentId(model.Archive) : std::nullopt) Hash(hash, *content);
+    if (content_id) Hash(hash, *content_id);
     else HashFile(hash, model.Archive);
     Hash(hash, Lower(model.Model));
     if (game.empty()) Hash(hash, "");

@@ -126,9 +126,13 @@ std::filesystem::path Dialog(void* owner, FileKind kind) {
     if (!(save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))) return {};
     return buffer;
 }
+std::filesystem::path DefaultLegacyThumbnails() {
+    try { return LegacyThumbnailFolder(LocalModStore::DefaultRoot()); }
+    catch (const std::exception&) { return {}; }
+}
 }
 LibraryPanel::LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives)
-    : device_(device), archives_(std::move(archives)), legacy_thumbnails_(LegacyThumbnailFolder()) {
+    : device_(device), archives_(std::move(archives)), legacy_thumbnails_(DefaultLegacyThumbnails()) {
     try { store_.emplace(LocalModStore::DefaultRoot()); } catch (const std::exception&) {}
     const unsigned count = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
     for (unsigned i = 0; i < count; ++i) workers_.emplace_back([this] { RunThumbnailWorker(); });
@@ -184,7 +188,7 @@ LibraryPanel::ThumbnailResult LibraryPanel::LoadTextureThumbnail(const Thumbnail
         job.Cancellation.ThrowIfCancelled();
         const LibraryModel identity{job.Model.Archive, job.TexturePath};
         if (store_) {
-            result.CacheKey = ThumbnailKey(&*store_, identity, {});
+            result.CacheKey = ThumbnailKey(store_->ContentId(identity.Archive), identity, {});
             try {
                 if (const auto png = store_->Thumbnail(result.CacheKey))
                     if ((result.Pixels = DecodeThumbnail(*png))) return result;
@@ -212,7 +216,7 @@ LibraryPanel::ThumbnailResult LibraryPanel::LoadThumbnail(const ThumbnailJob& jo
     try {
         job.Cancellation.ThrowIfCancelled();
         if (store_) {
-            result.CacheKey = ThumbnailKey(&*store_, job.Model, job.Game);
+            result.CacheKey = ThumbnailKey(store_->ContentId(job.Model.Archive), job.Model, job.Game);
             // An unavailable database only means the thumbnail is rendered.
             try {
                 if (const auto png = store_->Thumbnail(result.CacheKey))

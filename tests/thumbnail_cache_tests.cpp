@@ -1,4 +1,5 @@
 #include "thumbnail_cache.hpp"
+#include "mod_store.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -49,11 +50,11 @@ TEST_F(ThumbnailCacheTest, KeyChangesWithTheArchive) {
     const auto archive = dir / "mod.vpk";
     Write(archive, "one");
     const LibraryModel model{archive, "models/heroes/hero.vmdl_c"};
-    const auto first = ThumbnailKey(nullptr, model, {});
-    EXPECT_EQ(first, ThumbnailKey(nullptr, {archive, "Models/Heroes/Hero.vmdl_c"}, {}));
-    EXPECT_NE(first, ThumbnailKey(nullptr, {archive, "models/heroes/other.vmdl_c"}, {}));
+    const auto first = ThumbnailKey(std::nullopt, model, {});
+    EXPECT_EQ(first, ThumbnailKey(std::nullopt, {archive, "Models/Heroes/Hero.vmdl_c"}, {}));
+    EXPECT_NE(first, ThumbnailKey(std::nullopt, {archive, "models/heroes/other.vmdl_c"}, {}));
     Write(archive, "changed");
-    EXPECT_NE(first, ThumbnailKey(nullptr, model, {}));
+    EXPECT_NE(first, ThumbnailKey(std::nullopt, model, {}));
 }
 
 TEST_F(ThumbnailCacheTest, StoredModKeyFollowsContentNotLocation) {
@@ -63,10 +64,10 @@ TEST_F(ThumbnailCacheTest, StoredModKeyFollowsContentNotLocation) {
     const auto moved = dir / "elsewhere" / "cache" / hash / "mod.vpk";
     fs::create_directories(cached.parent_path());
     Write(cached, "one");
-    const auto key = ThumbnailKey(&store, {cached, "models/a.vmdl_c"}, {});
+    const auto key = ThumbnailKey(store.ContentId(cached), {cached, "models/a.vmdl_c"}, {});
     Write(cached, "touched");
-    EXPECT_EQ(ThumbnailKey(&store, {cached, "models/a.vmdl_c"}, {}), key);
-    EXPECT_NE(ThumbnailKey(&store, {moved, "models/a.vmdl_c"}, {}), key);
+    EXPECT_EQ(ThumbnailKey(store.ContentId(cached), {cached, "models/a.vmdl_c"}, {}), key);
+    EXPECT_NE(ThumbnailKey(store.ContentId(moved), {moved, "models/a.vmdl_c"}, {}), key);
 }
 
 TEST_F(ThumbnailCacheTest, LegacyPathMatchesEarlierReleases) {
