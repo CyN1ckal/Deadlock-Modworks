@@ -463,3 +463,33 @@ Side-by-side comparison of two models was not captured. The empty library has no
 | Two-model comparison | NOT RUN | — | No disposable model | The inspector page is empty. No `.vmdl_c` was added |
 | Shortcuts dialog | PASS | `docs/screenshots/shortcuts.png` | F1 | Modal lists View > Workspace and View > Reset layout |
 | Missing `--data-root` value | PASS | `docs/screenshots/data-root-error.png` | Exit 1 | Message box: `--data-root needs a directory.` Store was not opened |
+
+## Milestone 8 documentation
+
+Written against source at `9d9262df2e5a57e455bf88d81c5399c17b0fbe67` on `codex/modworks-v0.1-docs`. No C++, CMake, `scripts/Publish.ps1`, or workflow file was edited. The GUI was not launched. `%LOCALAPPDATA%\DeadlockModManager` was not opened. `Publish.ps1` was not run, so this stage produced no zip and no new SHA-256. `docs/ARCHITECTURE.md` and `docs/architecture.svg` were not edited, so `scripts/architecture_diagram.py --check` was not re-run. `THIRD_PARTY_NOTICES.md` already matches the FetchContent pins in this tree (VRF 20.0.6980 not linked, LZ4 1.10.0, Zstd 1.5.7, nlohmann/json 3.11.3, meshoptimizer 0.24, Dear ImGui 1.91.9b-docking, Tracy 0.13.1, SQLite amalgamation 3540000) and was left unchanged. Earlier PASS rows in this file were not rewritten. `v0.1.0` is still untagged and nothing has been pushed.
+
+The project source has no copyright line. The owner already chose MIT. `LICENSE` uses `Copyright (c) 2026 CyN1ckal` because that is the GitHub owner of `https://github.com/CyN1ckal/deadlock-model-updater`. That string is an owner-account assumption, not a personal legal name. No other name was invented.
+
+`docs/screenshots/library.png` was cropped in place from the existing capture to the application window, box `(7, 0, 1273, 812)`, result 1266 by 812. The removed strip was the desktop margin and the orchestrator sliver on the last rows. The other screenshots were not cropped and still include that sliver. No screenshot was generated or replaced.
+
+Labels in `README.md`, `docs/QUICK_START.md`, `docs/USER_GUIDE.md`, and `docs/TROUBLESHOOTING.md` were taken from `src/preview/main.cpp` and the panels it calls, plus the screenshots already in `docs/screenshots/`. `Publish.ps1` copies `README.md` into the zip and does not copy `docs\`. A reader of the zip therefore gets the short first-run path in the README. The longer guides stay in the repository until a later package change.
+
+These milestone-5 items are not in this commit, so the guides do not document them as buttons:
+
+- There is no in-app **Open quick start**.
+- There is no log folder, **Open logs**, or **Copy diagnostic details**.
+- Export completion puts the path in the status line. Right-click offers **Copy message** and **Dismiss**. It does not offer **Reveal in Explorer** for the exported file. **Reveal in Explorer** does exist on path menus, and **File > Open library folder** opens the library `store` folder.
+- A missing `vulkan-1.dll` is a Windows loader dialog before `main`. The executable does not delay-load that DLL and has no GPU chooser.
+
+`docs/MOD_MANAGER_HANDOFF.md` is marked historical at the top. Its storage description and test counts are not current evidence.
+
+| Check | Result (PASS/FAIL/BLOCKED/NOT RUN) | Commit/artifact | Environment | Evidence/notes |
+| --- | --- | --- | --- | --- |
+| MIT `LICENSE` added | PASS | This documentation commit | Source has no copyright line | Text is the standard MIT license. Copyright line is the GitHub-owner assumption above |
+| User and maintainer docs written from this commit | PASS | `README.md`, `docs/QUICK_START.md`, `docs/USER_GUIDE.md`, `docs/TROUBLESHOOTING.md`, `docs/BUILDING.md`, `docs/RELEASING.md`, `CHANGELOG.md`, `.github/ISSUE_TEMPLATE/bug_report.md` | Labels read from source at `9d9262d` and existing screenshots | GUI not launched for this pass. Bug template asks for version, reproduction, expected, actual, and diagnostics, and does not ask for the private library |
+| `library.png` cropped to the window | PASS | `docs/screenshots/library.png` | Pillow crop of the existing capture | 1266 by 812. Status bar text remains. Other captures were not cropped |
+| Walkthrough of the final artifact against the written labels | NOT RUN | No zip from this commit | `Publish.ps1` not run. GUI not launched | Plan acceptance for Docs stays open. The stage 7 zip SHA is an older commit and is not this tree |
+| Two-model comparison screenshot | NOT RUN | `docs/screenshots/inspector.png` | Empty inspector from the theme stage | No `.vmdl_c` was opened. The guides describe comparison from source and say that capture was not made |
+| Clean-machine launch | NOT RUN | | No machine without VS, the Vulkan SDK, and a dev PATH | Unchanged from stage 7 |
+| Code signing | NOT RUN | | No certificate | Signing stays deferred |
+| Draft GitHub release / tag `v0.1.0` | NOT RUN | `.github/workflows/release.yml` | Not executed. Nothing pushed | Publication is still a draft step. The docs say the zip is the artifact and that no release exists yet |
