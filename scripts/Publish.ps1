@@ -39,6 +39,7 @@ $licenseSources = @(
     @{ Source = Join-Path $build '_deps\nlohmann_json-src\LICENSE.MIT'; Name = 'nlohmann-json-LICENSE.MIT' },
     @{ Source = Join-Path $build '_deps\meshoptimizer-src\LICENSE.md'; Name = 'meshoptimizer-LICENSE.md' }
     @{ Source = Join-Path $build '_deps\imgui-src\LICENSE.txt'; Name = 'imgui-LICENSE.txt' }
+    @{ Source = Join-Path $repository 'third_party\tracy\LICENSE'; Name = 'tracy-LICENSE.txt' }
 )
 foreach ($license in $licenseSources) {
     if (!(Test-Path -LiteralPath $license.Source)) { throw "Cannot locate $($license.Source)" }

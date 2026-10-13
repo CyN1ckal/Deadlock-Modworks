@@ -39,6 +39,18 @@ public:
     void SetMultiViewHandler(std::function<void(const LibraryModel&)> open) { open_multi_ = std::move(open); }
     // Cards the gallery showed on the last frame it was drawn, after search and filters.
     size_t ShownCount() const { return shown_count_; }
+    // Bumps when the saved library would change: sources, pack selection, or a removed skin.
+    uint64_t Revision() const { return revision_; }
+    // Cached labels for one source. Counts stay at the last finished scan until the next one replaces them.
+    struct SourceInfo {
+        std::filesystem::path Path;
+        std::string Name;
+        std::string Full;
+        std::string Tip;
+        size_t Skins = 0;
+        size_t Files = 0;
+    };
+    const SourceInfo* FindSource(const std::filesystem::path& path) const;
     // Models the last scan found in one source archive.
     size_t ModelsIn(const std::filesystem::path& source) const;
     const std::string& Status() const { return status_; }
@@ -144,7 +156,14 @@ private:
     void SetInPack(size_t index, bool include);
     void SortModels(int column, bool descending);
     void Evict(std::map<Card, Thumbnail>::iterator thumbnail);
+    void Retire(std::unique_ptr<ThumbnailImage> image);
+    void AgeRetired();
     void UploadThumbnails();
+    void EnsureListing();
+    void RebuildSourceInfo();
+    void RebuildMissing();
+    // Pack selection or the source list changed, so the next frame may save the library.
+    void Changed();
     void RunThumbnailWorker();
     ThumbnailResult LoadThumbnail(const ThumbnailJob& job);
     ThumbnailResult LoadTextureThumbnail(const ThumbnailJob& job);
@@ -152,8 +171,15 @@ private:
     VulkanDevice device_;
     std::shared_ptr<ArchiveCache> archives_;
     std::map<Card, Thumbnail> thumbnails_;
-    // Evicted thumbnails whose images an in-flight frame may still sample; destroyed after the next device wait.
-    std::vector<std::unique_ptr<ThumbnailImage>> retired_;
+    // Images an in-flight frame may still sample. Destroyed a few frames later, without idling the device.
+    struct RetiredThumbnail {
+        std::unique_ptr<ThumbnailImage> Image;
+        int FramesLeft = 0;
+    };
+    std::vector<RetiredThumbnail> retired_;
+    int retired_aged_frame_ = -1;
+    // One GPU thumbnail upload per ImGui frame. Each upload waits on the queue the window also presents with.
+    int uploaded_frame_ = -1;
     // Renders thumbnails that are not cached yet. Created on first use.
     std::unique_ptr<ModelRenderer> renderer_;
     // Thumbnails are kept in the library database. Unset when local app data is unavailable.
@@ -201,6 +227,19 @@ private:
     std::vector<size_t> order_;
     std::vector<uint8_t> in_pack_;
     bool pack_stale_ = true;
+    // Skins and packages in display order, with the strings the search and the sort need. Rebuilt when marked stale.
+    struct ListedCard {
+        Card Id;
+        std::string SortKey;
+        std::string FilterText;
+    };
+    std::vector<ListedCard> listed_;
+    bool listing_stale_ = true;
+    std::vector<SourceInfo> source_info_;
+    // Pack rows whose model is no longer in the library. Rebuilt when the selection or the scan changes.
+    std::vector<size_t> missing_;
+    bool missing_stale_ = true;
+    uint64_t revision_ = 0;
     int sort_column_ = 0;
     bool sort_descending_ = false;
     std::future<std::string> worker_;

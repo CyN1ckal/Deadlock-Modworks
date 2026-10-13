@@ -21,10 +21,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - nlohmann/json — https://github.com/nlohmann/json — MIT License. Version 3.11.3.
 - meshoptimizer — https://github.com/zeux/meshoptimizer — MIT License. Version 0.24.
 - Dear ImGui — https://github.com/ocornut/imgui — MIT License. Version 1.91.9b-docking.
+- Tracy — https://github.com/wolfpld/tracy — BSD 3-Clause License. Version 0.13.1.
 - SQLite — https://www.sqlite.org — Public domain. Version 3.54.0.
 
 The portable package copies each of those license files into `licenses/`. SQLite is in the public domain and has no license file.
 
 ## Model tools
 
-The default GUI and `ModelPreview.exe` use the Vulkan loader provided by the graphics driver. The SDK is needed to build them; the SDK and loader are not redistributed. Dear ImGui's license is included in the portable package.
+The default GUI and `ModelPreview.exe` use the Vulkan loader provided by the graphics driver. The SDK is needed to build them; the SDK and loader are not redistributed. Dear ImGui's and Tracy's licenses are included in the portable package.

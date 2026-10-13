@@ -1,3 +1,4 @@
+#include "profile.hpp"
 #include "library_panel.hpp"
 #include "character_view.hpp"
 #include "strings.hpp"
@@ -144,7 +145,12 @@ LibraryPanel::~LibraryPanel() {
     }
     queue_changed_.notify_all();
     for (auto& thread : workers_) thread.join();
-    InvalidateThumbnails();
+    // The window has already waited for the device, but this destructor also runs if setup throws.
+    vkDeviceWaitIdle(device_.Device);
+    thumbnails_.clear();
+    retired_.clear();
+    ready_.clear();
+    renderer_.reset();
 }
 void LibraryPanel::RunThumbnailWorker() {
     // Thumbnail images are encoded and decoded with WIC.
@@ -200,6 +206,7 @@ LibraryPanel::ThumbnailResult LibraryPanel::LoadTextureThumbnail(const Thumbnail
     return result;
 }
 LibraryPanel::ThumbnailResult LibraryPanel::LoadThumbnail(const ThumbnailJob& job) {
+    ZoneScopedN("Load thumbnail");
     if (!job.TexturePath.empty()) return LoadTextureThumbnail(job);
     ThumbnailResult result{job.Generation, job.Index};
     try {
@@ -265,15 +272,26 @@ void LibraryPanel::InvalidateThumbnails() {
         results_.clear();
     }
     ready_.clear();
-    if (!thumbnails_.empty() || !retired_.empty() || renderer_) {
-        vkDeviceWaitIdle(device_.Device);
-        thumbnails_.clear();
-        retired_.clear();
-        renderer_.reset();
-    }
+    for (auto& entry : thumbnails_) Retire(std::move(entry.second.Image));
+    thumbnails_.clear();
+    // The thumbnail renderer is only used by Capture, which waits for its own submit.
+    // Dropping it here would idle every frame that is still presenting.
+}
+void LibraryPanel::Retire(std::unique_ptr<ThumbnailImage> image) {
+    if (!image) return;
+    // The swapchain can still sample the image until this many frames have been submitted after it.
+    constexpr int kThumbnailRetireFrames = 6;
+    retired_.push_back({std::move(image), kThumbnailRetireFrames});
+}
+void LibraryPanel::AgeRetired() {
+    if (retired_.empty()) return;
+    const int frame = ImGui::GetFrameCount();
+    if (frame == retired_aged_frame_) return;
+    retired_aged_frame_ = frame;
+    std::erase_if(retired_, [](RetiredThumbnail& item) { return --item.FramesLeft <= 0; });
 }
 void LibraryPanel::Evict(std::map<Card, Thumbnail>::iterator thumbnail) {
-    if (thumbnail->second.Image) retired_.push_back(std::move(thumbnail->second.Image));
+    Retire(std::move(thumbnail->second.Image));
     if (thumbnail->second.Pending) {
         std::lock_guard lock(queue_mutex_);
         std::erase_if(jobs_, [&](const ThumbnailJob& job) {
@@ -283,6 +301,7 @@ void LibraryPanel::Evict(std::map<Card, Thumbnail>::iterator thumbnail) {
     thumbnails_.erase(thumbnail);
 }
 ThumbnailPixels LibraryPanel::RenderThumbnail(const PreparedModel& model) {
+    ZoneScopedN("Render thumbnail");
     if (!renderer_) renderer_ = std::make_unique<ModelRenderer>(device_);
     renderer_->SetScene(model.Scene);
     if (model.Materials) renderer_->SetMaterials(*model.Materials);
@@ -303,9 +322,10 @@ void LibraryPanel::UploadThumbnails() {
         for (auto& result : results_) ready_.push_back(std::move(result));
         results_.clear();
     }
-    // Rendering and uploading images must stay on this thread, so spread that work over frames.
-    const auto start = std::chrono::steady_clock::now();
-    while (!ready_.empty() && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(6)) {
+    if (ready_.empty()) return;
+    ZoneScopedN("Thumbnail upload");
+    // One image per frame. Its submit waits for the queue, including the frame that is still presenting.
+    while (!ready_.empty()) {
         ThumbnailResult result = std::move(ready_.front());
         ready_.pop_front();
         const auto found = thumbnails_.find(Card{result.Package, result.Index});
@@ -315,7 +335,7 @@ void LibraryPanel::UploadThumbnails() {
         try {
             if (result.Texture) {
                 thumbnail.Image = std::make_unique<ThumbnailImage>(device_, *result.Texture);
-                continue;
+                return;
             }
             if (!result.Pixels) {
                 if (!result.Model) throw InvalidData(result.Error);
@@ -338,6 +358,7 @@ void LibraryPanel::UploadThumbnails() {
             thumbnail.Image.reset();
             thumbnail.Error = error.what();
         }
+        return;
     }
 }
 const std::string* LibraryPanel::DrawThumbnail(const Card& card, const std::filesystem::path& game, ImVec2 origin, float size,
@@ -388,9 +409,11 @@ const std::string* LibraryPanel::DrawThumbnail(const Card& card, const std::file
     return loading || found == thumbnails_.end() ? nullptr : &found->second.Error;
 }
 void LibraryPanel::Poll() {
+    ZoneScopedN("Library poll");
     if (worker_.valid() && worker_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) status_ = worker_.get();
     try {
         if (auto scan = scan_.Take()) {
+            ZoneScopedN("Apply library scan");
             InvalidateThumbnails();
             models_ = std::move(scan->Models);
             payloads_ = std::move(scan->Packages);
@@ -400,15 +423,18 @@ void LibraryPanel::Poll() {
             for (const auto& model : models_) ++source_counts_[model.Archive];
             SortModels(sort_column_, sort_descending_);
             pack_stale_ = true;
+            missing_stale_ = true;
+            RebuildSourceInfo();
         }
     } catch (const std::exception& error) {
         errors_ = {error.what()};
     }
-    if (!retired_.empty()) {
-        vkDeviceWaitIdle(device_.Device);
-        retired_.clear();
+    AgeRetired();
+    const int frame = ImGui::GetFrameCount();
+    if (frame != uploaded_frame_) {
+        uploaded_frame_ = frame;
+        UploadThumbnails();
     }
-    UploadThumbnails();
 }
 void LibraryPanel::Restore(const ModelLibrary& library) {
     selected_ = library.Selected;
@@ -436,8 +462,11 @@ void LibraryPanel::Refresh(const std::vector<std::filesystem::path>& sources) {
     std::erase_if(selected_, [&](const auto& selected) { return listed(selected.Archive); });
     std::erase_if(package_selection_, [&](const auto& package) { return listed(package); });
     pack_stale_ = true;
+    Changed();
+    RebuildSourceInfo();
     // Opening every archive is slow for large collections, so the gallery keeps the last scan until this finishes.
     scan_.Start([sources, archives = archives_](CancellationToken cancellation) {
+        ZoneScopedN("Scan source archives");
         ScanResult result;
         for (const auto& path : sources) {
             cancellation.ThrowIfCancelled();
@@ -515,8 +544,12 @@ size_t LibraryPanel::SourceCount(const std::filesystem::path& source) const {
 }
 size_t LibraryPanel::ListedCount() const {
     size_t total = 0;
-    for (const auto& source : sources_) total += SourceCount(source);
+    for (const auto& info : source_info_) total += info.Skins > 0 ? info.Skins : info.Files;
     return total;
+}
+const LibraryPanel::SourceInfo* LibraryPanel::FindSource(const std::filesystem::path& path) const {
+    for (const auto& info : source_info_) if (SamePath(info.Path, path)) return &info;
+    return nullptr;
 }
 bool LibraryPanel::PackageInPack(const std::filesystem::path& source) const {
     return std::any_of(package_selection_.begin(), package_selection_.end(), [&](const auto& path) { return SamePath(path, source); });
@@ -533,6 +566,79 @@ void LibraryPanel::SortModels(int column, bool descending) {
     order_.resize(models_.size());
     std::iota(order_.begin(), order_.end(), size_t{0});
     std::stable_sort(order_.begin(), order_.end(), [&](size_t a, size_t b) { return descending ? keys[b] < keys[a] : keys[a] < keys[b]; });
+    listing_stale_ = true;
+}
+void LibraryPanel::EnsureListing() {
+    if (order_.size() != models_.size()) SortModels(sort_column_, sort_descending_);
+    if (!listing_stale_) return;
+    ZoneScopedN("Gallery sort");
+    listed_.clear();
+    listed_.reserve(order_.size() + payloads_.size());
+    for (const size_t index : order_) {
+        const auto& model = models_[index];
+        ListedCard card;
+        card.Id = {false, index};
+        const auto file = Narrow(model.Archive.filename().wstring());
+        const auto title = SkinTitle(model);
+        card.SortKey = Lower(sort_column_ == ColumnSource ? file + "|" + model.Model
+            : sort_column_ == ColumnModel ? model.Model : title + "|" + model.Model);
+        card.FilterText = model.Model + " " + Narrow(model.Archive.wstring());
+        listed_.push_back(std::move(card));
+    }
+    for (size_t index = 0; index < payloads_.size(); ++index) {
+        const auto& package = payloads_[index];
+        ListedCard card;
+        card.Id = {true, index};
+        const auto file = Narrow(package.Archive.filename().wstring());
+        const auto title = PackageTitle(package.Archive);
+        const auto subtitle = PackageSubtitle(package.Paths);
+        card.SortKey = Lower(sort_column_ == ColumnSource ? file : sort_column_ == ColumnModel ? subtitle : title + "|" + file);
+        card.FilterText = title + " " + file + " " + subtitle;
+        listed_.push_back(std::move(card));
+    }
+    std::stable_sort(listed_.begin(), listed_.end(), [descending = sort_descending_](const ListedCard& a, const ListedCard& b) {
+        return descending ? b.SortKey < a.SortKey : a.SortKey < b.SortKey;
+    });
+    listing_stale_ = false;
+}
+void LibraryPanel::RebuildSourceInfo() {
+    source_info_.clear();
+    source_info_.reserve(sources_.size());
+    for (const auto& source : sources_) {
+        SourceInfo info;
+        info.Path = source;
+        info.Name = Narrow(source.filename().wstring());
+        info.Full = Narrow(source.wstring());
+        info.Skins = ModelsIn(source);
+        for (const auto& package : payloads_) {
+            if (!SamePath(package.Archive, source)) continue;
+            info.Files = package.Paths.size();
+            break;
+        }
+        info.Tip = info.Full;
+        if (info.Skins > 0) {
+            info.Tip += "\n" + std::to_string(info.Skins) + (info.Skins == 1 ? " skin" : " skins");
+            if (info.Files > 0) info.Tip += ", " + std::to_string(info.Files) + (info.Files == 1 ? " other file" : " other files");
+            info.Tip += "\nClick to show its skins. Right-click for more.";
+        } else {
+            info.Tip += "\n" + std::to_string(info.Files) + (info.Files == 1 ? " file" : " files");
+            info.Tip += "\nClick to show it. Right-click for more.";
+        }
+        source_info_.push_back(std::move(info));
+    }
+}
+void LibraryPanel::RebuildMissing() {
+    missing_.clear();
+    std::set<std::string> present;
+    for (const auto& model : models_) present.insert(PackKey(model));
+    for (size_t i = 0; i < selected_.size(); ++i) {
+        if (!present.contains(PackKey(selected_[i]))) missing_.push_back(i);
+    }
+    missing_stale_ = false;
+}
+void LibraryPanel::Changed() {
+    ++revision_;
+    missing_stale_ = true;
 }
 bool LibraryPanel::InPack(size_t index) {
     if (pack_stale_) {
@@ -552,6 +658,7 @@ void LibraryPanel::SetInPack(size_t index, bool include) {
     else selected_.erase(found);
     if (!pack_stale_ && index < in_pack_.size()) in_pack_[index] = include;
     status_.clear();
+    Changed();
 }
 void LibraryPanel::IncludeSource(const std::filesystem::path& source, bool include) {
     for (size_t i = 0; i < models_.size(); ++i) if (SamePath(models_[i].Archive, source)) SetInPack(i, include);
@@ -562,13 +669,16 @@ void LibraryPanel::IncludePackage(const std::filesystem::path& source, bool incl
     if (include) package_selection_.push_back(source);
     else package_selection_.erase(found);
     status_.clear();
+    Changed();
 }
 void LibraryPanel::ClearPack() {
     if (Busy()) return;
+    if (selected_.empty() && package_selection_.empty()) return;
     selected_.clear();
     package_selection_.clear();
     pack_stale_ = true;
     status_.clear();
+    Changed();
 }
 void LibraryPanel::Reload(const std::vector<std::filesystem::path>& sources) {
     if (Busy()) return;
@@ -847,6 +957,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
     const std::filesystem::path& game, bool repair_busy, bool pause_loading, bool pack_view, const std::function<void()>& add,
     const std::function<void(const ModelLibrary&)>&, const std::function<void(const std::filesystem::path&)>&,
     const std::function<void(const LibraryModel&)>& preview, const std::function<void(const LibraryModel&)>& analyze) {
+    ZoneScopedN("Gallery");
     Poll();
     if (thumbnail_game_ != game) { InvalidateThumbnails(); thumbnail_game_ = game; }
     if (!Busy() && !repair_busy && sources_ != sources) Refresh(sources);
@@ -948,44 +1059,21 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
     }
 
     ImGuiTextFilter filter(filter_);
-    if (order_.size() != models_.size()) SortModels(sort_column_, sort_descending_);
-    const auto card_key = [&](const Card& card) {
-        if (card.Package) {
-            const auto& package = payloads_[card.Index];
-            const auto file = Narrow(package.Archive.filename().wstring());
-            const auto title = PackageTitle(package.Archive);
-            const auto subtitle = PackageSubtitle(package.Paths);
-            return Lower(sort_column_ == ColumnSource ? file : sort_column_ == ColumnModel ? subtitle : title + "|" + file);
-        }
-        const auto& model = models_[card.Index];
-        return Lower(sort_column_ == ColumnSource ? Narrow(model.Archive.filename().wstring()) + "|" + model.Model
-            : sort_column_ == ColumnModel ? model.Model : SkinTitle(model) + "|" + model.Model);
-    };
-    std::vector<Card> cards;
-    cards.reserve(order_.size() + payloads_.size());
-    for (const size_t index : order_) cards.push_back({false, index});
-    for (size_t index = 0; index < payloads_.size(); ++index) cards.push_back({true, index});
-    std::stable_sort(cards.begin(), cards.end(), [&](const Card& a, const Card& b) {
-        const auto left = card_key(a);
-        const auto right = card_key(b);
-        return sort_descending_ ? right < left : left < right;
-    });
+    EnsureListing();
     std::vector<Card> shown;
-    shown.reserve(cards.size());
-    for (const Card& card : cards) {
-        if (card.Package) {
-            const auto& package = payloads_[card.Index];
+    shown.reserve(listed_.size());
+    for (const ListedCard& card : listed_) {
+        if (card.Id.Package) {
+            const auto& package = payloads_[card.Id.Index];
             if ((pack_view || selected_only_) && !PackageInPack(package.Archive)) continue;
             if (!source_filter_.empty() && source_filter_ != package.Archive) continue;
-            const auto haystack = PackageTitle(package.Archive) + " " + Narrow(package.Archive.filename().wstring()) + " " + PackageSubtitle(package.Paths);
-            if (filter.IsActive() && !filter.PassFilter(haystack.c_str())) continue;
         } else {
-            const auto& model = models_[card.Index];
-            if ((pack_view || selected_only_) && !InPack(card.Index)) continue;
+            const auto& model = models_[card.Id.Index];
+            if ((pack_view || selected_only_) && !InPack(card.Id.Index)) continue;
             if (!source_filter_.empty() && source_filter_ != model.Archive) continue;
-            if (filter.IsActive() && !filter.PassFilter((model.Model + " " + Narrow(model.Archive.wstring())).c_str())) continue;
         }
-        shown.push_back(card);
+        if (filter.IsActive() && !filter.PassFilter(card.FilterText.c_str())) continue;
+        shown.push_back(card.Id);
     }
     shown_count_ = shown.size();
 
@@ -1000,10 +1088,9 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         }
     }
     // Until the scan finishes, every selected skin would look missing.
-    std::vector<size_t> missing;
-    for (size_t i = 0; i < selected_.size() && !Scanning(); ++i) {
-        if (std::none_of(models_.begin(), models_.end(), [&](const auto& model) { return Same(model, selected_[i]); })) missing.push_back(i);
-    }
+    if (!Scanning() && missing_stale_) RebuildMissing();
+    static const std::vector<size_t> kNoMissing;
+    const std::vector<size_t>& missing = Scanning() ? kNoMissing : missing_;
     if (!missing.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ui::kWarning);
         const bool open = ImGui::TreeNode("missing", "%zu skins in the pack are missing from your library", missing.size());
@@ -1024,9 +1111,11 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         if (remove_all) {
             for (auto i = missing.rbegin(); i != missing.rend(); ++i) selected_.erase(selected_.begin() + static_cast<std::ptrdiff_t>(*i));
             pack_stale_ = true;
+            Changed();
         } else if (remove) {
             selected_.erase(selected_.begin() + static_cast<std::ptrdiff_t>(*remove));
             pack_stale_ = true;
+            Changed();
         }
     }
     const bool no_sources = sources.empty();

@@ -1,3 +1,4 @@
+#include "profile.hpp"
 #include "preview_panel.hpp"
 
 #include "ui.hpp"
@@ -156,6 +157,7 @@ void PreviewPanel::DrawDetails() {
 }
 
 void PreviewPanel::Draw() {
+    ZoneScopedN("Preview");
     if (!error_.empty()) {
         if (!title_.empty()) {
             ui::TextEllipsis(title_);
@@ -225,6 +227,7 @@ void PreviewPanel::Draw() {
 }
 
 void PreviewPanel::Record(VkCommandBuffer command_buffer) {
+    ZoneScopedN("Record preview");
     viewport_.Record(command_buffer, camera_, settings_);
 }
 

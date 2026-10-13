@@ -1,3 +1,4 @@
+#include "profile.hpp"
 #include "repair_panel.hpp"
 #include "strings.hpp"
 #include "ui.hpp"
@@ -187,6 +188,7 @@ void RepairPanel::Start(bool repair, std::optional<std::pair<std::string, std::s
 }
 
 bool RepairPanel::Poll() {
+    ZoneScopedN("Repair poll");
     if (!busy_) return false;
     const bool finished = done_.load();
     {
@@ -221,6 +223,7 @@ size_t RepairPanel::RepairableCount() const {
 }
 
 void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) {
+    ZoneScopedN("Repairs");
     const auto jobs = RepairJobs(reports_, partial_);
     const bool one_model = jobs.size() == 1 && jobs.front().Model.has_value();
     if (ui::ToolButton("Analyze", "Check every mod in your library against the installed game", CanAnalyze())) Start(false);

@@ -1,3 +1,4 @@
+#include "profile.hpp"
 #include "model_viewport.hpp"
 
 #include <imgui_impl_vulkan.h>
@@ -325,6 +326,7 @@ void ModelViewport::SetLod(int lod) {
 }
 
 bool ModelViewport::Draw(const char* id, ImVec2 size, OrbitCamera& camera, bool interactive) {
+    ZoneScopedN("Viewport");
     drawn_ = false;
     size.x = std::max(size.x, 32.0f);
     size.y = std::max(size.y, 32.0f);
@@ -383,6 +385,7 @@ bool ModelViewport::Draw(const char* id, ImVec2 size, OrbitCamera& camera, bool 
 }
 
 void ModelViewport::Record(VkCommandBuffer command_buffer, const OrbitCamera& camera, const ViewSettings& settings) {
+    ZoneScopedN("Record viewport");
     if (!drawn_) {
         return;
     }

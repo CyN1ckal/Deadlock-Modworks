@@ -1,3 +1,4 @@
+#include "profile.hpp"
 #include "comparison_view.hpp"
 
 #include "ui.hpp"
@@ -341,6 +342,7 @@ void ComparisonView::DrawDiff() {
 }
 
 void ComparisonView::Draw() {
+    ZoneScopedN("Compare");
     if (!error_.empty()) {
         if (!title_.empty()) {
             ui::TextEllipsis(title_);
@@ -502,6 +504,7 @@ void ComparisonView::Draw() {
 }
 
 void ComparisonView::Record(VkCommandBuffer command_buffer) {
+    ZoneScopedN("Record compare");
     if (!loaded_) {
         return;
     }

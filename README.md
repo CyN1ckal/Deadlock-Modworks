@@ -46,7 +46,7 @@ You can also double-click that executable in File Explorer. Close the app before
 
 Open the repository's `CMakeLists.txt` in CLion. In **Settings > Build, Execution, Deployment > Toolchains**, create or select a **Visual Studio** toolchain named **Visual Studio**, with the architecture set to **amd64**. Use its bundled CMake and Ninja. The Vulkan SDK must be installed and visible to CLion; restart the IDE after installing it.
 
-Reload the CMake presets and enable **clion-debug** (or **clion-release**) in **Settings > Build, Execution, Deployment > CMake**. Select the enabled profile and the **DeadlockSkeletonRepair** target to build, run, or debug the full model tools app. The profiles use separate `build/clion-debug` and `build/clion-release` directories and do not depend on a specific Visual Studio release.
+Reload the CMake presets and enable a profile in **Settings > Build, Execution, Deployment > CMake**. **clion-debug** and **clion-release** are normal builds. **clion-profile** is the same app, optimized with debug symbols, and Tracy listening on localhost while the window is open. Select the enabled profile and the **DeadlockSkeletonRepair** target to build, run, or debug. The profiles use separate `build/clion-debug`, `build/clion-release`, and `build/clion-profile` directories and do not depend on a specific Visual Studio release.
 
 For command-line use of these presets, run CMake from an **x64 Native Tools Command Prompt** with Ninja on `PATH`:
 

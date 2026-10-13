@@ -1,3 +1,5 @@
+#include "profile.hpp"
+
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -21,6 +23,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <exception>
+#include <string_view>
 #include <utility>
 
 namespace skeleton_repair {
@@ -43,6 +46,15 @@ std::optional<std::filesystem::path> AskForSaveVpk(HWND owner) {
 }
 
 bool SameBlob(const BlobId& left, const BlobId& right) { return left.Bytes == right.Bytes; }
+
+bool ContainsIgnoreCase(std::string_view text, std::string_view query) {
+    if (query.empty()) return true;
+    if (query.size() > text.size()) return false;
+    for (size_t i = 0; i + query.size() <= text.size(); ++i) {
+        if (EqualsIgnoreCase(text.substr(i, query.size()), query)) return true;
+    }
+    return false;
+}
 
 using GameReader = std::function<std::optional<std::vector<uint8_t>>(const std::string&)>;
 
@@ -206,6 +218,8 @@ HistoryPanel::~HistoryPanel() {
 }
 
 void HistoryPanel::Refresh() {
+    ZoneScopedN("History refresh");
+    shown_dirty_ = true;
     if (!store_) {
         return;
     }
@@ -253,7 +267,30 @@ void HistoryPanel::Refresh() {
     LoadSelection();
 }
 
+void HistoryPanel::RebuildShownModels() {
+    shown_models_.clear();
+    shown_models_.reserve(models_.size());
+    const std::string_view query(filter_);
+    for (size_t i = 0; i < models_.size(); ++i) {
+        if (ContainsIgnoreCase(models_[i].DisplayPath, query)) shown_models_.push_back(i);
+    }
+    if (shown_column_ >= 0) {
+        const int column = shown_column_;
+        const bool descending = shown_descending_;
+        std::stable_sort(shown_models_.begin(), shown_models_.end(), [&](size_t left, size_t right) {
+            const ModelRow& first = models_[descending ? right : left];
+            const ModelRow& second = models_[descending ? left : right];
+            if (column == 1) return first.SnapshotCount < second.SnapshotCount;
+            if (column == 2) return first.Blob.Bytes < second.Blob.Bytes;
+            return first.DisplayPath < second.DisplayPath;
+        });
+    }
+    shown_filter_ = filter_;
+    shown_dirty_ = false;
+}
+
 void HistoryPanel::LoadSelection() {
+    ZoneScopedN("History query");
     if (!store_ || !selected_ || running_) {
         return;
     }
@@ -440,6 +477,7 @@ void HistoryPanel::HideObservation(const std::string& observation_id) {
 void HistoryPanel::ViewSelected(PreviewPanel& preview,
     const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& read_game,
     const std::vector<std::string>& game_clip_paths, const Shown& shown) {
+    ZoneScopedN("View stored model");
     if (!store_ || !selected_version_ || *selected_version_ >= history_.Versions.size() || running_) {
         return;
     }
@@ -531,6 +569,7 @@ std::optional<std::string> HistoryPanel::SelectedPackPath() const {
 
 void HistoryPanel::CompareSelected(ComparisonView& compare, const Shown& focus_compare, const GameReader& read_game,
     const std::vector<std::string>& game_clip_paths) {
+    ZoneScopedN("Compare stored versions");
     if (!store_ || !selected_version_ || !compare_version_ || *selected_version_ == *compare_version_
         || *selected_version_ >= history_.Versions.size() || *compare_version_ >= history_.Versions.size()) {
         return;
@@ -601,6 +640,7 @@ void HistoryPanel::CompareSelected(ComparisonView& compare, const Shown& focus_c
 
 void HistoryPanel::CompareWithGame(ComparisonView& compare, const Shown& focus_compare, const GameReader& read_game,
     const std::vector<std::string>& game_clip_paths) {
+    ZoneScopedN("Compare with game");
     if (!store_ || !selected_version_ || *selected_version_ >= history_.Versions.size()) {
         return;
     }
@@ -658,6 +698,7 @@ void HistoryPanel::SelectModel(const BlobId& blob) {
 void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameReader& read_game,
     const std::vector<std::string>& game_clip_paths, ComparisonView& compare, const std::string& game_directory,
     bool files_busy, const Shown& shown, const std::function<void()>& before_repair) {
+    ZoneScopedN("History");
     JoinFinishedWork();
     const HWND owner = static_cast<HWND>(owner_window);
     if (!store_) {
@@ -684,17 +725,30 @@ void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameRea
     }
     ui::ToolSeparator();
     const std::optional<std::string> pack_path = selected_ ? SelectedPackPath() : std::nullopt;
-    const bool pack_file = pack_path && ObservationFileExists(*pack_path);
+    bool pack_file = false;
+    if (pack_path) {
+        const double now = ImGui::GetTime();
+        if (*pack_path != pack_exists_path_ || now - pack_exists_at_ >= 0.5) {
+            pack_exists_path_ = *pack_path;
+            pack_exists_ = ObservationFileExists(*pack_path);
+            pack_exists_at_ = now;
+        }
+        pack_file = pack_exists_;
+    }
     const RepairGate repair_gate = pack_path ? RepairGateFor(pack_file, !game_directory.empty()) : RepairGate{};
     const char* repair_tooltip = repair_gate.Message != nullptr ? repair_gate.Message
         : pack_path ? "Repair the pack of the selected copy. The repaired pack is saved as a new version; this one is kept."
         : "Select a copy or a pack to repair.";
-    if (ui::ToolButton("Repair", repair_tooltip, !running_ && !files_busy && repair_gate.Enabled) && pack_path && pack_file) {
-        // The pack may be open for previews or thumbnails, and the repair replaces it.
-        if (before_repair) {
-            before_repair();
+    if (ui::ToolButton("Repair", repair_tooltip, !running_ && !files_busy && repair_gate.Enabled) && pack_path) {
+        pack_exists_ = ObservationFileExists(*pack_path);
+        pack_exists_at_ = ImGui::GetTime();
+        if (pack_exists_) {
+            // The pack may be open for previews or thumbnails, and the repair replaces it.
+            if (before_repair) {
+                before_repair();
+            }
+            StartRepair(*pack_path, game_directory);
         }
-        StartRepair(*pack_path, game_directory);
     }
     ImGui::SameLine();
     const std::optional<SnapshotId> assembly = AssemblySnapshot();
@@ -742,7 +796,6 @@ void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameRea
         if (ImGui::BeginTabItem(label)) {
             ImGui::SetNextItemWidth(-1.0f);
             ImGui::InputTextWithHint("##model-filter", "Filter models by path", filter_, sizeof(filter_));
-            std::vector<ModelRow> rows = FilterModels(models_, filter_);
             const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable
                 | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Sortable | ImGuiTableFlags_Hideable | ImGuiTableFlags_SizingFixedFit;
             if (ImGui::BeginTable("model-list", 3, flags)) {
@@ -751,22 +804,24 @@ void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameRea
                 ImGui::TableSetupColumn("Packs", ImGuiTableColumnFlags_WidthFixed);
                 ImGui::TableSetupColumn("Hash", ImGuiTableColumnFlags_WidthFixed);
                 ImGui::TableHeadersRow();
-                if (const ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs(); specs != nullptr && specs->SpecsCount > 0) {
-                    const ImGuiTableColumnSortSpecs& spec = specs->Specs[0];
-                    const bool descending = spec.SortDirection == ImGuiSortDirection_Descending;
-                    std::stable_sort(rows.begin(), rows.end(), [&](const ModelRow& a, const ModelRow& b) {
-                        const ModelRow& first = descending ? b : a;
-                        const ModelRow& second = descending ? a : b;
-                        if (spec.ColumnIndex == 1) return first.SnapshotCount < second.SnapshotCount;
-                        if (spec.ColumnIndex == 2) return first.Blob.Bytes < second.Blob.Bytes;
-                        return first.DisplayPath < second.DisplayPath;
-                    });
+                bool resort = shown_dirty_ || shown_filter_ != filter_;
+                if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs()) {
+                    if (specs->SpecsDirty && specs->SpecsCount > 0) {
+                        shown_column_ = specs->Specs[0].ColumnIndex;
+                        shown_descending_ = specs->Specs[0].SortDirection == ImGuiSortDirection_Descending;
+                        resort = true;
+                    }
+                    specs->SpecsDirty = false;
+                }
+                if (resort) {
+                    ZoneScopedN("History filter");
+                    RebuildShownModels();
                 }
                 ImGuiListClipper clipper;
-                clipper.Begin(static_cast<int>(rows.size()));
+                clipper.Begin(static_cast<int>(shown_models_.size()));
                 while (clipper.Step()) {
                     for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-                        const ModelRow& row = rows[static_cast<size_t>(i)];
+                        const ModelRow& row = models_[shown_models_[static_cast<size_t>(i)]];
                         const std::string hex = row.Blob.Hex();
                         ImGui::PushID(hex.c_str());
                         ImGui::TableNextRow();
@@ -816,7 +871,10 @@ void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameRea
                 ImGui::TableSetupColumn("Observed", ImGuiTableColumnFlags_WidthFixed);
                 ImGui::TableHeadersRow();
                 std::optional<std::string> hide;
-                for (const PackRow& pack : packs_) {
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(packs_.size()));
+                while (clipper.Step()) for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                    const PackRow& pack = packs_[static_cast<size_t>(row)];
                     ImGui::PushID(pack.Snapshot.Value.c_str());
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();

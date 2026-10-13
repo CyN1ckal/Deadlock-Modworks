@@ -1,3 +1,4 @@
+#include "profile.hpp"
 #include "multi_view.hpp"
 
 #include "error.hpp"
@@ -301,6 +302,7 @@ ResourceReader MultiView::ClipReader() const {
 }
 
 void MultiView::Poll() {
+    ZoneScopedN("Multi view poll");
     for (int slot = 0; slot < kMaxSlots; ++slot) {
         try {
             if (std::optional<LoadResult> result = loads_[slot].Take()) Apply(slot, std::move(*result));
@@ -397,6 +399,7 @@ void MultiView::DrawSlot(int slot, ImVec2 size, const std::vector<LibraryModel>&
 }
 
 void MultiView::Draw(const std::vector<LibraryModel>& library) {
+    ZoneScopedN("Multi view");
     const float scale = ImGui::GetFontSize() / 15.0f;
     const std::vector<CharacterOption> characters = CharactersIn(library);
     ImGui::SetNextItemWidth(180 * scale);
@@ -498,6 +501,7 @@ void MultiView::Draw(const std::vector<LibraryModel>& library) {
 }
 
 void MultiView::Record(VkCommandBuffer command_buffer) {
+    ZoneScopedN("Record multi view");
     for (int slot = 0; slot < slot_count_; ++slot) {
         const OrbitCamera& camera = link_cameras_ ? shared_ : slots_[slot].Camera;
         views_[slot]->Record(command_buffer, camera, settings_);
