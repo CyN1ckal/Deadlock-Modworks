@@ -132,20 +132,68 @@ Environment for every row that ran: Windows 11 Pro 10.0.26200, this worktree, co
 | IDE screenshot | NOT RUN | `8470d84` | Live library present | Launching the GUI runs `LocalModStore::Load`, which materializes every gallery source, and process exit calls `Persist`, which deletes and rewrites `gallery_sources`, `gallery_selected`, and `gallery_packages`. Layout is described from source instead |
 | Identity, icon, theme, packaging, docs, license file | NOT RUN | | | Later stages. MIT is decided and was not written into `LICENSE` |
 
+## Stage 2 product identity
+
+Worktree: `C:\Users\warri\.ao\data\worktrees\deadlock-model-updater\deadlock-model-updater-10`. Branch `codex/modworks-v0.1`. Started from `1b9bb6d` (`docs: record v0.1 verified baseline`). No reset or rebase. The GUI was not launched. `%LOCALAPPDATA%\DeadlockModManager` was not opened. `scripts/Publish.ps1` was not executed. No tag was created and nothing was pushed.
+
+The tested binary was configured while `HEAD` was still `1b9bb6d5325a8e4f5fe17071f72cf7d130ff0a4e`, so its diagnostics embed that revision. The next configure embeds whatever `git rev-parse HEAD` returns then.
+
+Commands, from this worktree, exit code 0:
+
+```powershell
+cmake --preset windows-release -DSR_BUILD_MODEL_TOOLS=ON -DSR_TRACY=OFF
+cmake --build --preset windows-release
+.\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+.\build\release\bin\Release\render_tests.exe --gtest_brief=1
+py -3 scripts/architecture_diagram.py --check
+ctest --test-dir build/release -C Release --output-on-failure
+.\build\release\bin\Release\DeadlockModworks.exe --version
+```
+
+| Command | Result |
+| --- | --- |
+| Configure | Exit 0 in 21.8 seconds. Visual Studio 18 2026, Windows SDK 10.0.26100.0, MSVC 19.51.36260.0. `SR_BUILD_MODEL_TOOLS=ON`, `SR_TRACY=OFF`. Vulkan 1.4.357 found, including `glslc` |
+| Full Release build | Exit 0 in 129.78 seconds. `build\release\bin\Release\DeadlockModworks.exe` and `ModelPreview.exe`. `DeadlockSkeletonRepair.exe` was not produced |
+| `skeleton_repair_tests.exe --gtest_brief=1` | 215 tests from 22 suites ran. 215 passed. 6427 ms. Exit 0. The added test is `Library.DefaultDataRootIsDeadlockModManager` |
+| `render_tests.exe --gtest_brief=1` | 50 tests from 11 suites ran. 50 passed. 326 ms. Exit 0. The summary had no skipped line |
+| `architecture_diagram.py --check` | Exit 0. `58 modules: no cycles, layering holds, stable dependencies hold within 0.10 and 1 accepted exception(s).` |
+| CTest Release | 266 tests passed, 0 failed, 11.35 seconds. The last test was `dependency_levels`. `Library.DefaultDataRootIsDeadlockModManager` passed |
+| `DeadlockModworks.exe --version` | Exit 0. Printed `Deadlock Modworks 0.1.0 (1b9bb6d5325a8e4f5fe17071f72cf7d130ff0a4e)`. No store path was passed |
+
+`--help` still starts `Deadlock Modworks 0.1.0 — hero models and animation skeleton repairs` and returns 0. Existing analyze, update, repair, and store arguments and exit codes were not changed. The version check is inside the existing command-line test.
+
+Windows file properties on that executable, read without launching the GUI:
+
+| Property | Value |
+| --- | --- |
+| FileDescription | Deadlock Modworks 0.1.0 |
+| FileVersion | 0.1.0.0 |
+| ProductName | Deadlock Modworks |
+| ProductVersion | 0.1.0 |
+| OriginalFilename | DeadlockModworks.exe |
+| InternalName | DeadlockModworks |
+| Comments | build 1b9bb6d5325a8e4f5fe17071f72cf7d130ff0a4e |
+
+CMake `project(DeadlockModworks VERSION 0.1.0)` writes `product_version.hpp`, `app.rc`, and `product_package_name.txt`. About, the window titles, the Vulkan application name, the failure dialog, CLI usage, and `--version` use that header. The resource script has version strings and no icon. The IDE window is still created at 100,100 with size 1440x960, `WS_OVERLAPPEDWINDOW`, and `WS_EX_ACCEPTFILES`. `io.IniFilename`, the dock builder, and theme colors were not changed. Win32 class atoms stay `DeadlockModelPreview` and `DeadlockSkeletonRepairWindow`.
+
+`Library.DefaultDataRootIsDeadlockModManager` calls `LocalModStore::DefaultRoot()` and checks the path string only. The filename is `DeadlockModManager`. The test does not construct a store at that path and does not open the live library. No `DeadlockModworks` data directory was added, and there is no migration.
+
+### Alias decision
+
+`git tag --list` printed nothing. `git ls-remote --tags origin` printed nothing. `gh release list --limit 20` printed nothing. Nothing was published under `DeadlockSkeletonRepair.exe`, so this stage does not ship a second executable or a compatibility copy of the old name.
+
+`scripts/Publish.ps1` still recursively deletes its output directory before copying. That behavior is unchanged and was not run. The script now reads the executable and zip names from the CMake file `build/release/product_package_name.txt` (`DeadlockModworks.exe` and `DeadlockModworks-0.1.0-win-x64.zip`). The default staging directory is `dist/DeadlockModworks`. `.github/workflows/build.yml` uploads artifact `DeadlockModworks-0.1.0-win-x64` from `dist/DeadlockModworks-0.1.0-win-x64.zip`.
+
 ## Remaining blockers
 
-These are reproducible and still open. None of them failed the headless baseline, and none were fixed in this stage. No data-loss bug, startup crash, or broken primary headless workflow showed up in the runs above.
-
-1. Public names disagree. `CMakeLists.txt` names the project `DeadlockSkeletonRepair` and the executable target `DeadlockSkeletonRepair`. `src/preview/main.cpp` creates the window and the Vulkan application as `Deadlock Mod Manager`, and the failure dialog title is `Deadlock Model Tools`. `CommandLine::Execute` usage text starts with `Deadlock Model Updater`. `scripts/Publish.ps1` and `.github/workflows/build.yml` package `DeadlockSkeletonRepair-win-x64.zip`.
-
-2. The version number disagrees with the release name. CMake `PROJECT_VERSION` is `0.1.1`. Remote and local tag lists are empty, so `v0.1.0` is free. This stage did not change the version or create a tag.
+Stage 1 items 1 and 2 are closed by the run above. These are still open. `v0.1.0` is still not tagged.
 
 3. Saved docking cannot restore. `src/preview/main.cpp` sets `io.IniFilename = nullptr` and, on the first frame, calls `DockBuilderRemoveNode` and rebuilds the 17% Explorer split. Relaunching always discards a rearranged layout. Reset of that layout is the same first-frame path. There is no separate data-root switch, so this was not exercised against a copy of the live library.
 
-4. The window class sets no icon, and the source tree has no application resource script. Explorer, the title bar, and Alt-Tab cannot show a product icon for `DeadlockSkeletonRepair.exe`.
+4. The window class sets no icon. `cmake/app.rc.in` is a VERSIONINFO resource only, with no ICON statement. Explorer, the title bar, and Alt-Tab still cannot show a product icon for `DeadlockModworks.exe`.
 
-5. Interactive GUI acceptance has no safe profile. `LocalModStore::DefaultRoot` is `%LOCALAPPDATA%\DeadlockModManager` with no command-line or environment override. On this machine that directory already contains `library.db` (1,221,091,328 bytes), `store\catalog.sqlite` (7,467,008 bytes), `mods`, `cache`, and `thumbnails`. `gallery_settings` already has `legacy_store_merged=1`, `legacy_collection_merged=1`, and `library_db_merged=1`. A launch still materializes sources into `cache` and persists the gallery tables on exit. Viewport, button-level build, and a screenshot stay NOT RUN until a later change can aim the GUI at a disposable directory.
+5. Interactive GUI acceptance has no safe profile. `LocalModStore::DefaultRoot` remains `%LOCALAPPDATA%\DeadlockModManager` with no command-line or environment override. That compatibility path is intentional for 0.1. On this machine that directory already contains `library.db` (1,221,091,328 bytes), `store\catalog.sqlite` (7,467,008 bytes), `mods`, `cache`, and `thumbnails`. `gallery_settings` already has `legacy_store_merged=1`, `legacy_collection_merged=1`, and `library_db_merged=1`. A launch still materializes sources into `cache` and persists the gallery tables on exit. Viewport, button-level build, and a screenshot stay NOT RUN until a later change can aim the GUI at a disposable directory.
 
-6. `scripts/Publish.ps1` deletes the whole output directory it was given (`Remove-Item -Recurse -Force` on `$OutputDirectory`) before copying the executable. It does not run tests. It was not executed. The CI workflow builds, runs the two test executables, and uploads a ZIP. It does not invoke `architecture_diagram.py` itself. Local CTest registered that test only because Python 3 with `networkx` was found at configure time.
+6. `scripts/Publish.ps1` deletes the whole output directory it was given (`Remove-Item -Recurse -Force` on `$OutputDirectory`) before copying the executable. It does not run tests. It was not executed. The public exe and zip names now follow the CMake identity. The CI workflow builds, runs the two test executables, and uploads that ZIP. It does not invoke `architecture_diagram.py` itself. Local CTest registered that test only because Python 3 with `networkx` was found at configure time.
 
 7. The repository root has no `LICENSE`. The owner decision for publication is MIT. Third-party notices do not replace it. The file was intentionally not added in this stage.

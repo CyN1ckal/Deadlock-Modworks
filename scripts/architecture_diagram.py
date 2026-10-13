@@ -192,10 +192,10 @@ for n in G:
 FILL = {'ext': ('#eef0f3', '#59636e'), 'core': ('#e7eef5', '#3d5a73'), 'render': ('#f3eef8', '#5b4580'),
         'preview': ('#fff4e0', '#9a6416'), 'app': ('#e7f3ec', '#2c6b4a')}
 LABEL = {'ext': 'Third-party and OS', 'core': 'skeleton_repair_core', 'render': 'sr_render',
-         'preview': 'sr_model_tools', 'app': 'DeadlockSkeletonRepair.exe'}
+         'preview': 'sr_model_tools', 'app': 'DeadlockModworks.exe'}
 o = []; w = o.append
 w(f'<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img">')
-w('<title>Deadlock Mod Manager dependency levels</title>')
+w('<title>Deadlock Modworks dependency levels</title>')
 w('<desc>UML component diagram of the #include graph in src, layered by stability. Stable modules are at the top, volatile modules at the bottom, and every dependency arrow points up.</desc>')
 w('<defs>'
   '<marker id="use" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="10" markerHeight="10" orient="auto"><path d="M1,1 L11,6 L1,11" fill="none" stroke="#5f6b78" stroke-width="1.5"/></marker>'
@@ -203,7 +203,7 @@ w('<defs>'
   '</defs>')
 w("<style>text{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif} .u{fill:none;stroke:#7b8794;stroke-width:1.15;stroke-dasharray:5 3}</style>")
 w(f'<rect width="{W}" height="{H}" fill="#fbfaf7"/>')
-w('<text x="36" y="46" fill="#1c2430" font-size="26" font-weight="650">Deadlock Mod Manager: dependency levels</text>')
+w('<text x="36" y="46" fill="#1c2430" font-size="26" font-weight="650">Deadlock Modworks: dependency levels</text>')
 w('<text x="36" y="72" fill="#526272" font-size="14">Every #include in src/, drawn as UML components. A module sits one level below the lowest module it uses, so every arrow points up and nothing depends on a module beneath it.</text>')
 w('<text x="36" y="92" fill="#526272" font-size="14">Arrows are the transitive reduction: an arrow already implied by a longer path is left out. I = Ce / (Ca + Ce). Ca and Ce count project modules only. Commits are changes to the file pair in git history.</text>')
 lx = 36

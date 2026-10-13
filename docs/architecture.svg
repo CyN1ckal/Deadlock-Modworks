@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="2074" height="1960" viewBox="0 0 2074 1960" role="img">
-<title>Deadlock Mod Manager dependency levels</title>
+<title>Deadlock Modworks dependency levels</title>
 <desc>UML component diagram of the #include graph in src, layered by stability. Stable modules are at the top, volatile modules at the bottom, and every dependency arrow points up.</desc>
 <defs><marker id="use" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="10" markerHeight="10" orient="auto"><path d="M1,1 L11,6 L1,11" fill="none" stroke="#5f6b78" stroke-width="1.5"/></marker><marker id="real" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="13" markerHeight="13" orient="auto"><path d="M1,1 L13,7 L1,13 Z" fill="#ffffff" stroke="#2c6b4a" stroke-width="1.4"/></marker></defs>
 <style>text{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif} .u{fill:none;stroke:#7b8794;stroke-width:1.15;stroke-dasharray:5 3}</style>
 <rect width="2074" height="1960" fill="#fbfaf7"/>
-<text x="36" y="46" fill="#1c2430" font-size="26" font-weight="650">Deadlock Mod Manager: dependency levels</text>
+<text x="36" y="46" fill="#1c2430" font-size="26" font-weight="650">Deadlock Modworks: dependency levels</text>
 <text x="36" y="72" fill="#526272" font-size="14">Every #include in src/, drawn as UML components. A module sits one level below the lowest module it uses, so every arrow points up and nothing depends on a module beneath it.</text>
 <text x="36" y="92" fill="#526272" font-size="14">Arrows are the transitive reduction: an arrow already implied by a longer path is left out. I = Ce / (Ca + Ce). Ca and Ce count project modules only. Commits are changes to the file pair in git history.</text>
 <rect x="36" y="112" width="14" height="14" rx="2" fill="#eef0f3" stroke="#59636e" stroke-width="1.2"/><text x="56" y="124" fill="#3e4c5c" font-size="12.5">Third-party and OS</text>
 <rect x="196" y="112" width="14" height="14" rx="2" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.2"/><text x="216" y="124" fill="#3e4c5c" font-size="12.5">skeleton_repair_core</text>
 <rect x="370" y="112" width="14" height="14" rx="2" fill="#f3eef8" stroke="#5b4580" stroke-width="1.2"/><text x="390" y="124" fill="#3e4c5c" font-size="12.5">sr_render</text>
 <rect x="467" y="112" width="14" height="14" rx="2" fill="#fff4e0" stroke="#9a6416" stroke-width="1.2"/><text x="487" y="124" fill="#3e4c5c" font-size="12.5">sr_model_tools</text>
-<rect x="599" y="112" width="14" height="14" rx="2" fill="#e7f3ec" stroke="#2c6b4a" stroke-width="1.2"/><text x="619" y="124" fill="#3e4c5c" font-size="12.5">DeadlockSkeletonRepair.exe</text>
+<rect x="599" y="112" width="14" height="14" rx="2" fill="#e7f3ec" stroke="#2c6b4a" stroke-width="1.2"/><text x="619" y="124" fill="#3e4c5c" font-size="12.5">DeadlockModworks.exe</text>
 <path d="M825,119 H867" class="u" marker-end="url(#use)"/><text x="873" y="124" fill="#3e4c5c" font-size="12.5">«use» (#include)</text>
 <path d="M995,119 H1037" fill="none" stroke="#2c6b4a" stroke-width="1.4" stroke-dasharray="6 3" marker-end="url(#real)"/><text x="1043" y="124" fill="#3e4c5c" font-size="12.5">realizes</text>
 <rect x="20" y="129" width="2034" height="142" rx="8" fill="#f3f1ec"/>

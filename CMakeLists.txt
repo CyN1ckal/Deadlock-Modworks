@@ -1,10 +1,33 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DeadlockSkeletonRepair VERSION 0.1.1 LANGUAGES C CXX)
+project(DeadlockModworks VERSION 0.1.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
-    message(FATAL_ERROR "Deadlock Skeleton Repair builds on Windows x64.")
+    message(FATAL_ERROR "Deadlock Modworks builds on Windows x64.")
 endif()
+
+# One product identity for About, CLI --version, Windows VERSIONINFO, and the package file name.
+set(SR_PRODUCT_NAME "Deadlock Modworks")
+set(SR_PRODUCT_EXECUTABLE "DeadlockModworks")
+set(SR_PACKAGE_ZIP "${SR_PRODUCT_EXECUTABLE}-${PROJECT_VERSION}-win-x64.zip")
+find_package(Git QUIET)
+set(SR_GIT_COMMIT "unknown")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE SR_GIT_COMMIT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE SR_GIT_RESULT
+    )
+    if(NOT SR_GIT_RESULT EQUAL 0 OR SR_GIT_COMMIT STREQUAL "")
+        set(SR_GIT_COMMIT "unknown")
+    endif()
+endif()
+configure_file(cmake/product_version.hpp.in "${CMAKE_BINARY_DIR}/generated/product_version.hpp" @ONLY)
+configure_file(cmake/app.rc.in "${CMAKE_BINARY_DIR}/generated/app.rc" @ONLY)
+file(WRITE "${CMAKE_BINARY_DIR}/product_package_name.txt" "${SR_PRODUCT_EXECUTABLE}.exe\n${SR_PACKAGE_ZIP}\n")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -123,16 +146,17 @@ add_library(skeleton_repair_core STATIC
     src/core/model_versions.cpp
     src/core/version_builder.cpp
 )
-target_include_directories(skeleton_repair_core PUBLIC src/core)
+target_include_directories(skeleton_repair_core PUBLIC src/core "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32 windowscodecs)
 
 # Opens the model tools workspace by default; command-line options run the console workflow.
-add_executable(DeadlockSkeletonRepair
+add_executable(DeadlockModworks
     src/app/main.cpp
     src/app/main_window.cpp
     src/app/app.manifest
+    "${CMAKE_BINARY_DIR}/generated/app.rc"
 )
-target_link_libraries(DeadlockSkeletonRepair PRIVATE skeleton_repair_core shell32 ole32 comctl32)
+target_link_libraries(DeadlockModworks PRIVATE skeleton_repair_core shell32 ole32 comctl32)
 
 add_executable(skeleton_repair_tests
     tests/skeleton_tests.cpp
@@ -164,7 +188,7 @@ target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_
 
 if(MSVC)
     target_compile_options(skeleton_repair_core PRIVATE /W4 /permissive- /utf-8)
-    target_compile_options(DeadlockSkeletonRepair PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(DeadlockModworks PRIVATE /W4 /permissive- /utf-8)
     target_compile_options(skeleton_repair_tests PRIVATE /W4 /permissive- /utf-8)
 endif()
 

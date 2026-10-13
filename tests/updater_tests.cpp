@@ -1,4 +1,5 @@
 #include "command_line.hpp"
+#include "product_version.hpp"
 #include "kv3.hpp"
 #include "report.hpp"
 #include "resource.hpp"
@@ -912,8 +913,12 @@ TEST(Updater, CliCommandsMatchTheContract) {
 
     const CliOutput help = Execute({"--help"});
     EXPECT_EQ(help.Code, 0);
-    EXPECT_NE(help.Text.find("Deadlock Model Updater — hero models and animation skeleton repairs"), std::string::npos);
+    EXPECT_NE(help.Text.find(std::string(SR_PRODUCT_TITLE) + " — hero models and animation skeleton repairs"), std::string::npos);
     EXPECT_EQ(Execute({"-h"}).Code, 0);
+    const CliOutput version = Execute({"--version"});
+    EXPECT_EQ(version.Code, 0);
+    EXPECT_NE(version.Text.find(std::string(SR_PRODUCT_TITLE) + " (" + SR_GIT_COMMIT + ")"), std::string::npos);
+    EXPECT_EQ(version.Text.find("Exit codes:"), std::string::npos);
     const CliOutput none = Execute({});
     EXPECT_EQ(none.Code, 2);
     EXPECT_NE(none.Text.find("Exit codes:"), std::string::npos);

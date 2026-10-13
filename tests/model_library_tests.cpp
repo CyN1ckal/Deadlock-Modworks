@@ -616,4 +616,13 @@ TEST_F(LibraryTest, SharedLibraryVersionTwoRestoresPackagesAndVersionOneDoesNot)
     EXPECT_TRUE(legacy.Packages.empty());
     EXPECT_NE(FindEntry(VpkArchive::Open(legacy.Sources[1]), "models/hideout/materials/a.vtex_c"), nullptr);
 }
+
+// Path only. DefaultRoot does not open the directory, and this test must not touch the live library.
+TEST(Library, DefaultDataRootIsDeadlockModManager) {
+    const fs::path root = LocalModStore::DefaultRoot();
+    const std::wstring text = root.wstring();
+    EXPECT_EQ(root.filename().wstring(), L"DeadlockModManager");
+    EXPECT_NE(text.find(L"\\DeadlockModManager"), std::wstring::npos);
+    EXPECT_EQ(text.find(L"DeadlockModworks"), std::wstring::npos);
+}
 }

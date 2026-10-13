@@ -1,8 +1,8 @@
-# Deadlock Mod Manager
+# Deadlock Modworks
 
 A native C++20 mod manager for Windows x64. Browse Deadlock skins in a thumbnail gallery, assemble a custom VPK, inspect models, and repair supported skeleton changes.
 
-The main executable is **`DeadlockSkeletonRepair.exe`**. Launch it without arguments to open the GUI, or use command-line options to analyze and repair a mod from a terminal.
+The main executable is **`DeadlockModworks.exe`**. Launch it without arguments to open the GUI, or use command-line options to analyze and repair a mod from a terminal.
 
 ## Build from source
 
@@ -37,7 +37,7 @@ Choose the commands for your installed Visual Studio version. If you switch gene
 ### 3. Start the app
 
 ```powershell
-.\build\release\bin\Release\DeadlockSkeletonRepair.exe
+.\build\release\bin\Release\DeadlockModworks.exe
 ```
 
 You can also double-click that executable in File Explorer. Close the app before rebuilding it, so Windows can replace the executable.
@@ -46,7 +46,7 @@ You can also double-click that executable in File Explorer. Close the app before
 
 Open the repository's `CMakeLists.txt` in CLion. In **Settings > Build, Execution, Deployment > Toolchains**, create or select a **Visual Studio** toolchain named **Visual Studio**, with the architecture set to **amd64**. Use its bundled CMake and Ninja. The Vulkan SDK must be installed and visible to CLion; restart the IDE after installing it.
 
-Reload the CMake presets and enable a profile in **Settings > Build, Execution, Deployment > CMake**. **clion-debug** and **clion-release** are normal builds. **clion-profile** is the same app, optimized with debug symbols, with Tracy announcing the window to tracy-profiler while it is open. Select the enabled profile and the **DeadlockSkeletonRepair** target to build, run, or debug. The profiles use separate `build/clion-debug`, `build/clion-release`, and `build/clion-profile` directories and do not depend on a specific Visual Studio release.
+Reload the CMake presets and enable a profile in **Settings > Build, Execution, Deployment > CMake**. **clion-debug** and **clion-release** are normal builds. **clion-profile** is the same app, optimized with debug symbols, with Tracy announcing the window to tracy-profiler while it is open. Select the enabled profile and the **DeadlockModworks** target to build, run, or debug. The profiles use separate `build/clion-debug`, `build/clion-release`, and `build/clion-profile` directories and do not depend on a specific Visual Studio release.
 
 For command-line use of these presets, run CMake from an **x64 Native Tools Command Prompt** with Ninja on `PATH`:
 
@@ -163,16 +163,16 @@ Run these examples from `build/release/bin/Release`, or from an extracted portab
 
 ```powershell
 # Check a mod without changing it and save a report.
-.\DeadlockSkeletonRepair.exe --analyze "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" --report "report.json"
+.\DeadlockModworks.exe --analyze "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" --report "report.json"
 
 # Write a repaired copy to a new file.
-.\DeadlockSkeletonRepair.exe --update "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" "C:\Mods\mod-repaired.vpk"
+.\DeadlockModworks.exe --update "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" "C:\Mods\mod-repaired.vpk"
 
 # Repair the original mod and keep a backup.
-.\DeadlockSkeletonRepair.exe --repair "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" --report "repair.json"
+.\DeadlockModworks.exe --repair "C:\Games\Deadlock\game\citadel" "C:\Mods\mod.vpk" --report "repair.json"
 
 # Show command-line help.
-.\DeadlockSkeletonRepair.exe --help
+.\DeadlockModworks.exe --help
 ```
 
 Each command accepts one mod VPK. Use the GUI to work with multiple archives. The game argument is the **citadel folder**, not the `pak01_dir.vpk` file. `--update` refuses to overwrite an existing output file. Optional `--report` must come last and use a `.json` filename. **Ctrl+C** cancels the operation.
@@ -198,7 +198,7 @@ From the repository folder:
 .\scripts\Publish.ps1
 ```
 
-The script builds the release app, chooses Visual Studio 2026 or 2022 when configuring a fresh build folder, and creates **`dist/DeadlockSkeletonRepair-win-x64.zip`**. Extract the ZIP and launch `DeadlockSkeletonRepair.exe`. It includes the README and third-party licenses. Shaders are embedded; game assets are not included.
+The script builds the release app, chooses Visual Studio 2026 or 2022 when configuring a fresh build folder, and creates **`dist/DeadlockModworks-0.1.0-win-x64.zip`**. Extract the ZIP and launch `DeadlockModworks.exe`. It includes the README and third-party licenses. Shaders are embedded; game assets are not included.
 
 The executable uses the Visual C++ runtime. If Windows reports a missing `VCRUNTIME` or `MSVCP` DLL, install the Microsoft Visual C++ x64 Redistributable. The GUI also needs a Vulkan 1.3 graphics driver.
 
@@ -209,7 +209,7 @@ To build without the Vulkan SDK, use a separate build folder:
 ```powershell
 cmake -S . -B build/repair-only -G "Visual Studio 17 2022" -A x64 -DSR_BUILD_MODEL_TOOLS=OFF
 cmake --build build/repair-only --config Release
-.\build\repair-only\bin\Release\DeadlockSkeletonRepair.exe
+.\build\repair-only\bin\Release\DeadlockModworks.exe
 ```
 
 For Visual Studio 2026, use `-G "Visual Studio 18 2026"`. This build opens the native repair window and supports the same CLI commands. Model viewing and comparison are available in the standard build.

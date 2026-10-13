@@ -28,6 +28,7 @@
 #include "repair_panel.hpp"
 #include "library_panel.hpp"
 #include "mod_store.hpp"
+#include "product_version.hpp"
 #include "background.hpp"
 #include "ui.hpp"
 
@@ -81,7 +82,8 @@ void CheckVk(VkResult result) {
 
 void SetupVulkan() {
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    app.pApplicationName = "Deadlock Mod Manager";
+    app.pApplicationName = SR_PRODUCT_NAME;
+    app.applicationVersion = VK_MAKE_API_VERSION(0, SR_PRODUCT_VERSION_MAJOR, SR_PRODUCT_VERSION_MINOR, SR_PRODUCT_VERSION_PATCH);
     app.apiVersion = VK_API_VERSION_1_3;
     const char* extensions[] = {"VK_KHR_surface", "VK_KHR_win32_surface"};
     VkInstanceCreateInfo instance{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -1469,7 +1471,8 @@ struct App {
         }
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
         if (ImGui::BeginPopupModal("About", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted("Deadlock Mod Manager");
+            ImGui::TextUnformatted(SR_PRODUCT_TITLE);
+            ImGui::TextDisabled("Build %s", SR_GIT_COMMIT);
             ImGui::TextDisabled("Browse skins, build packs, inspect models and repair skeleton changes.");
             ImGui::TextDisabled("Dear ImGui %s, Vulkan 1.3", ImGui::GetVersion());
 #ifdef TRACY_ENABLE
@@ -1583,7 +1586,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
     ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, GetModuleHandleW(nullptr), nullptr, nullptr, nullptr, nullptr, L"DeadlockModelPreview", nullptr};
     RegisterClassExW(&wc);
-    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, L"Deadlock Mod Manager", WS_OVERLAPPEDWINDOW, 100, 100, 1440, 960, nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, SR_PRODUCT_TITLE_W, WS_OVERLAPPEDWINDOW, 100, 100, 1440, 960, nullptr, nullptr, wc.hInstance, nullptr);
     if (!hwnd) throw std::runtime_error("Could not create the model tools window.");
 
     SetupVulkan();
@@ -1802,7 +1805,7 @@ int skeleton_repair::RunModelTools(const std::vector<std::filesystem::path>& arg
         return Run(args);
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
-        MessageBoxA(nullptr, error.what(), "Deadlock Model Tools", MB_ICONERROR);
+        MessageBoxA(nullptr, error.what(), SR_PRODUCT_TITLE, MB_ICONERROR);
         return 1;
     }
 }
