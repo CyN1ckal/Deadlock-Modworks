@@ -10,6 +10,7 @@
 #include "comparison_view.hpp"
 #include "history_compare.hpp"
 #include "library_model.hpp"
+#include "startup.hpp"
 #include "model_versions.hpp"
 #include "preview_panel.hpp"
 #include "store_jobs.hpp"
@@ -96,7 +97,7 @@ void HistoryPanel::Refresh() {
         models_ = store_->ListModels();
         packs_ = store_->ListPacks();
     } catch (const std::exception& error) {
-        status_ = error.what();
+        NoteStatus(error.what(), true);
         return;
     }
     if (selected_pack_) {
@@ -191,8 +192,21 @@ void HistoryPanel::LoadSelection() {
             selected_copy_.reset();
         }
     } catch (const std::exception& error) {
-        status_ = error.what();
+        NoteStatus(error.what(), true);
     }
+}
+
+void HistoryPanel::NoteStatus(std::string text, bool error) {
+    status_ = std::move(text);
+    status_error_ = error;
+}
+
+std::optional<AssembledPack> HistoryPanel::TakeExportNotice() {
+    if (!export_ready_) {
+        return std::nullopt;
+    }
+    export_ready_ = false;
+    return AssembledPack{assemble_output_, status_};
 }
 
 void HistoryPanel::JoinFinishedWork() {
@@ -209,11 +223,16 @@ void HistoryPanel::JoinFinishedWork() {
     }
     if (import_ok_) {
         import_error_.clear();
-        status_.clear();
+        if (job_ == Job::Assemble) {
+            NoteStatus(AssembleResultSummary(assemble_output_), false);
+            export_ready_ = true;
+        } else {
+            NoteStatus({}, false);
+        }
         Refresh();
         return;
     }
-    status_ = import_error_;
+    NoteStatus(import_error_, true);
 }
 
 std::optional<SnapshotId> HistoryPanel::AssemblySnapshot() const {
@@ -247,9 +266,11 @@ void HistoryPanel::StartAssemble(const SnapshotId& snapshot, const std::filesyst
     try {
         importing_name_ = Narrow(destination.filename().wstring());
     } catch (const std::exception& error) {
-        status_ = error.what();
+        NoteStatus(error.what(), true);
         return;
     }
+    assemble_output_ = destination;
+    export_ready_ = false;
     const BlobId model = *selected_;
     const SnapshotId source = snapshot;
     cancel_ = CancellationSource();
@@ -277,7 +298,7 @@ void HistoryPanel::StartAssemble(const SnapshotId& snapshot, const std::filesyst
     } catch (const std::exception& error) {
         running_ = false;
         import_error_ = error.what();
-        status_ = import_error_;
+        NoteStatus(import_error_, true);
     }
 }
 
@@ -289,7 +310,7 @@ void HistoryPanel::StartRepair(const std::string& vpk_path, const std::string& g
     try {
         importing_name_ = Narrow(std::filesystem::path(Widen(vpk_path)).filename().wstring());
     } catch (const std::exception& error) {
-        status_ = error.what();
+        NoteStatus(error.what(), true);
         return;
     }
     cancel_ = CancellationSource();
@@ -322,7 +343,7 @@ void HistoryPanel::StartRepair(const std::string& vpk_path, const std::string& g
     } catch (const std::exception& error) {
         running_ = false;
         import_error_ = error.what();
-        status_ = import_error_;
+        NoteStatus(import_error_, true);
     }
 }
 
@@ -332,10 +353,10 @@ void HistoryPanel::HideObservation(const std::string& observation_id) {
     }
     try {
         store_->DropObservation(observation_id);
-        status_.clear();
+        NoteStatus({}, false);
         Refresh();
     } catch (const std::exception& error) {
-        status_ = error.what();
+        NoteStatus(error.what(), true);
     }
 }
 
@@ -609,11 +630,12 @@ void HistoryPanel::Draw(void* owner_window, PreviewPanel& preview, const GameRea
         }
     }
     if (!status_.empty()) {
-        ui::TextEllipsis(status_, 0, &ui::kError);
+        const ImVec4 status_color = status_error_ ? ui::kError : ui::kGood;
+        ui::TextEllipsis(status_, 0, &status_color);
         if (ImGui::BeginPopupContextItem("status_menu")) {
             ui::CopyMenuItem("Copy message", status_);
             if (ImGui::MenuItem("Dismiss")) {
-                status_.clear();
+                NoteStatus({}, false);
             }
             ImGui::EndPopup();
         }

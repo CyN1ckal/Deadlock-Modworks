@@ -3,6 +3,7 @@
 #include "model_library.hpp"
 #include "model_viewport.hpp"
 #include "mod_store.hpp"
+#include "startup.hpp"
 #include "thumbnail_cache.hpp"
 #include <condition_variable>
 #include <deque>
@@ -16,7 +17,7 @@
 namespace skeleton_repair {
 class LibraryPanel {
 public:
-    LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives);
+    LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives, const std::filesystem::path& data_root);
     ~LibraryPanel();
     bool Busy() const { return worker_.valid(); }
     // True while source archives are being scanned for models.
@@ -55,6 +56,9 @@ public:
     // Models the last scan found in one source archive.
     size_t ModelsIn(const std::filesystem::path& source) const;
     const std::string& Status() const { return status_; }
+    bool StatusIsError() const { return status_error_; }
+    // Set after a pack export finishes. Empty for share and for a failed build.
+    std::optional<AssembledPack> TakeExportNotice();
     // Shows only the skins of one source archive in the gallery. Empty shows every source.
     void SetSourceFilter(std::filesystem::path source) { source_filter_ = std::move(source); }
     const std::filesystem::path& SourceFilter() const { return source_filter_; }
@@ -84,7 +88,10 @@ public:
         const std::function<void(const ModelLibrary&)>& load,
         const std::function<void(const std::filesystem::path&)>& merge,
         const std::function<void(const LibraryModel&)>& preview,
-        const std::function<void(const LibraryModel&)>& analyze);
+        const std::function<void(const LibraryModel&)>& analyze,
+        const std::function<void()>& connect_game = {},
+        const std::function<void()>& open_quick_start = {},
+        bool collection_ready = true);
 private:
     struct Thumbnail {
         std::unique_ptr<ThumbnailImage> Image;
@@ -165,6 +172,12 @@ private:
     void RebuildMissing();
     // Pack selection or the source list changed, so the next frame may save the library.
     void Changed();
+    void NoteStatus(std::string text, bool error);
+    struct PanelJob {
+        std::string Status;
+        bool Error = false;
+        std::optional<std::filesystem::path> Output;
+    };
     void RunThumbnailWorker();
     ThumbnailResult LoadThumbnail(const ThumbnailJob& job);
     ThumbnailResult LoadTextureThumbnail(const ThumbnailJob& job);
@@ -208,6 +221,8 @@ private:
     std::vector<std::filesystem::path> package_selection_;
     std::vector<std::string> errors_;
     std::string status_;
+    bool status_error_ = false;
+    std::optional<AssembledPack> export_notice_;
     char filter_[256] = {};
     std::filesystem::path source_filter_;
     bool selected_only_ = false;
@@ -243,7 +258,7 @@ private:
     uint64_t revision_ = 0;
     int sort_column_ = 0;
     bool sort_descending_ = false;
-    std::future<std::string> worker_;
+    std::future<PanelJob> worker_;
     CancellationSource cancellation_;
     LatestTask<ScanResult> scan_;
 };

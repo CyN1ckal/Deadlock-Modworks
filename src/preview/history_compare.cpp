@@ -1,6 +1,7 @@
 #include "history_compare.hpp"
 
 #include "error.hpp"
+#include "startup.hpp"
 #include "strings.hpp"
 
 #include <nlohmann/json.hpp>
@@ -97,27 +98,10 @@ std::string RepairFailureText(const UpdateReport& report) {
 }
 
 LibrarySettings LoadLibrarySettings(const std::filesystem::path& store_directory) {
-    try {
-        const std::filesystem::path path = store_directory / "settings.json";
-        std::error_code error;
-        if (!std::filesystem::is_regular_file(path, error) || error) {
-            return {};
-        }
-        std::ifstream input(path, std::ios::binary);
-        if (!input) {
-            return {};
-        }
-        const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-        const nlohmann::json body = nlohmann::json::parse(text);
-        if (!body.is_object() || !body.contains("gameDirectory") || !body["gameDirectory"].is_string()) {
-            return {};
-        }
-        LibrarySettings settings;
-        settings.GameDirectory = body["gameDirectory"].get<std::string>();
-        return settings;
-    } catch (const std::exception&) {
-        return {};
-    }
+    const SettingsInspection inspection = InspectLibrarySettings(store_directory);
+    LibrarySettings settings;
+    settings.GameDirectory = inspection.GameDirectory;
+    return settings;
 }
 
 void SaveLibrarySettings(const std::filesystem::path& store_directory, const LibrarySettings& settings) {

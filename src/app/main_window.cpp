@@ -18,6 +18,7 @@
 #include "main_window.hpp"
 
 #include "cancellation.hpp"
+#include "product_version.hpp"
 #include "error.hpp"
 #include "game_folder.hpp"
 #include "report.hpp"
@@ -157,7 +158,7 @@ public:
         window_class.lpszClassName = kWindowClass;
         RegisterClassExW(&window_class);
 
-        hwnd_ = CreateWindowExW(WS_EX_ACCEPTFILES, kWindowClass, L"Deadlock Skeleton Repair",
+        hwnd_ = CreateWindowExW(WS_EX_ACCEPTFILES, kWindowClass, SR_PRODUCT_TITLE_W,
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1100, 780, nullptr, nullptr, instance, this);
         if (hwnd_ == nullptr) {
             return 2;

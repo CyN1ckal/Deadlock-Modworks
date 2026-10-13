@@ -1,0 +1,3 @@
+// Resource 1 matches the ICON in cmake/app.rc.in.
+// ModelPreview keeps its own target name and does not take the product VERSIONINFO.
+1 ICON "@SR_APP_ICON@"

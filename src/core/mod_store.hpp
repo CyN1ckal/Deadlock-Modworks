@@ -45,4 +45,13 @@ public:
 private:
     std::filesystem::path root_;
 };
+
+// The directory a GUI store should open. An explicit path wins, then a non-empty environment value,
+// then DefaultRoot(). This does not create or open the directory. DefaultRoot() itself is unchanged.
+inline std::filesystem::path ResolveDataRoot(const std::optional<std::filesystem::path>& explicit_root,
+    const wchar_t* environment_value) {
+    if (explicit_root.has_value() && !explicit_root->empty()) return *explicit_root;
+    if (environment_value != nullptr && environment_value[0] != L'\0') return std::filesystem::path(environment_value);
+    return LocalModStore::DefaultRoot();
+}
 }

@@ -1,6 +1,7 @@
 #include "command_line.hpp"
 
 #include "content_store.hpp"
+#include "product_version.hpp"
 #include "error.hpp"
 #include "report.hpp"
 #include "strings.hpp"
@@ -33,7 +34,7 @@ const char* OutcomeName(ModelOutcome outcome) {
 }
 
 void Usage(const std::function<void(std::string_view)>& write) {
-    write("Deadlock Model Updater — hero models and animation skeleton repairs");
+    write(std::string(SR_PRODUCT_TITLE) + " — hero models and animation skeleton repairs");
     write("  --analyze <citadel-folder> <mod.vpk> [--report <report.json>]");
     write("  --update  <citadel-folder> <mod.vpk> <new-output.vpk> [--report <report.json>]");
     write("  --repair  <citadel-folder> <mod.vpk> [--report <report.json>]");
@@ -41,6 +42,7 @@ void Usage(const std::function<void(std::string_view)>& write) {
     write("  --store <dir> models");
     write("  --store <dir> history <64-hex-blob>");
     write("  --store <dir> duplicates");
+    write("  --version");
     write("Repair replaces the mod with a validated archive and keeps an original backup.");
     write("Exit codes: 0 = supported analysis/repair; 1 = needs review or unsupported; 2 = invalid input, failure, or cancellation.");
 }
@@ -200,6 +202,10 @@ int ExecuteStore(const std::vector<std::string>& args, const std::function<void(
 
 int CommandLine::Execute(const std::vector<std::string>& args, const std::function<void(std::string_view)>& write,
     CancellationToken cancellation) {
+    if (args.size() == 1 && args[0] == "--version") {
+        write(std::string(SR_PRODUCT_TITLE) + " (" + SR_GIT_COMMIT + ")");
+        return 0;
+    }
     if (args.size() == 1 && (args[0] == "--help" || args[0] == "-h")) {
         Usage(write);
         return 0;

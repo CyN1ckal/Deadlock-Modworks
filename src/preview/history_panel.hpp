@@ -1,6 +1,7 @@
 #pragma once
 
 #include "content_store.hpp"
+#include "startup.hpp"
 
 #include <atomic>
 #include <filesystem>
@@ -36,6 +37,8 @@ public:
     void Refresh();
     // True once after a repair replaced a pack on disk.
     bool TakeRepaired() { return std::exchange(repaired_, false); }
+    // Set after Assemble writes a VPK. Empty after a repair.
+    std::optional<AssembledPack> TakeExportNotice();
 
     // `files_busy` blocks repairs while other work uses the mod archives. `before_repair` runs before a repair
     // replaces a pack, so previews and thumbnails can release it.
@@ -56,6 +59,7 @@ private:
     std::optional<SnapshotId> AssemblySnapshot() const;
     void JoinFinishedWork();
     void HideObservation(const std::string& observation_id);
+    void NoteStatus(std::string text, bool error);
     void ViewSelected(PreviewPanel& preview, const GameReader& read_game, const std::vector<std::string>& game_clip_paths,
         const Shown& shown);
     void CompareSelected(ComparisonView& compare, const Shown& shown, const GameReader& read_game,
@@ -71,6 +75,9 @@ private:
     std::shared_ptr<ContentStore> store_;
     std::string open_error_;
     std::string status_;
+    bool status_error_ = false;
+    std::filesystem::path assemble_output_;
+    bool export_ready_ = false;
     std::vector<ModelRow> models_;
     std::vector<PackRow> packs_;
     std::optional<BlobId> selected_;

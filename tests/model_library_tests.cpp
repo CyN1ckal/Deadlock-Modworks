@@ -1,3 +1,7 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 #include "model_library.hpp"
 #include "kv3.hpp"
 #include "error.hpp"
@@ -7,6 +11,7 @@
 #include <sqlite3.h>
 #include <algorithm>
 #include <map>
+#include <string_view>
 #include <gtest/gtest.h>
 #include <chrono>
 #include <fstream>
@@ -615,5 +620,183 @@ TEST_F(LibraryTest, SharedLibraryVersionTwoRestoresPackagesAndVersionOneDoesNot)
     EXPECT_EQ(legacy.Selected.front().Model, "models/a.vmdl_c");
     EXPECT_TRUE(legacy.Packages.empty());
     EXPECT_NE(FindEntry(VpkArchive::Open(legacy.Sources[1]), "models/hideout/materials/a.vtex_c"), nullptr);
+}
+
+std::vector<uint8_t> FileBytes(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), {}};
+}
+int NameCount(const fs::path& folder, std::string_view piece) {
+    int count = 0;
+    std::error_code error;
+    for (const auto& entry : fs::recursive_directory_iterator(folder, fs::directory_options::skip_permission_denied, error)) {
+        if (error || !entry.is_regular_file()) continue;
+        if (entry.path().filename().string().find(piece) != std::string::npos) ++count;
+    }
+    return count;
+}
+
+TEST_F(LibraryTest, FailedExportLeavesEarlierOutputAndSources) {
+    const auto complete = dir / "complete.vpk";
+    const auto incomplete = dir / "incomplete.vpk";
+    Archive(complete, {{"models/b.vmdl_c", Resource()}});
+    Archive(incomplete, {{"models/a.vmdl_c", Resource({"materials/missing.vmat"})}});
+    const auto first = dir / "first.vpk";
+    EXPECT_EQ(ExportModelLibrary({{complete, "models/b.vmdl_c"}}, {}, first), 1u);
+    const auto first_bytes = FileBytes(first);
+    const auto complete_bytes = FileBytes(complete);
+    const auto incomplete_bytes = FileBytes(incomplete);
+    ASSERT_FALSE(first_bytes.empty());
+
+    EXPECT_THROW(ExportModelLibrary({{incomplete, "models/a.vmdl_c"}}, {}, dir / "second.vpk"), InvalidData);
+    EXPECT_FALSE(fs::exists(dir / "second.vpk"));
+    EXPECT_EQ(FileBytes(first), first_bytes);
+    EXPECT_EQ(FileBytes(complete), complete_bytes);
+    EXPECT_EQ(FileBytes(incomplete), incomplete_bytes);
+
+    const auto blocked = dir / "blocked";
+    const std::vector<uint8_t> marker{9, 9};
+    { std::ofstream out(blocked, std::ios::binary); out.write(reinterpret_cast<const char*>(marker.data()), marker.size()); }
+    EXPECT_THROW(ExportModelLibrary({{complete, "models/b.vmdl_c"}}, {}, blocked / "out.vpk"), std::exception);
+    EXPECT_FALSE(fs::exists(blocked / "out.vpk"));
+    EXPECT_EQ(FileBytes(blocked), marker);
+    EXPECT_EQ(FileBytes(first), first_bytes);
+    EXPECT_EQ(FileBytes(complete), complete_bytes);
+    EXPECT_EQ(NameCount(dir, ".new"), 0);
+}
+
+TEST_F(LibraryTest, SharedExportRefusesCollisionAndCancelledExportPublishesNothing) {
+    const auto source = dir / "one.vpk";
+    Archive(source, {{"models/a.vmdl_c", Resource()}});
+    const LocalModStore store(dir / "store");
+    const auto cached = store.Import(source);
+    store.Save({{cached}, {{cached, "models/a.vmdl_c"}}});
+    const auto source_bytes = FileBytes(source);
+    const auto cached_bytes = FileBytes(cached);
+
+    const auto existing = dir / "shared.db";
+    const std::vector<uint8_t> marker{1, 2, 3, 4};
+    { std::ofstream out(existing, std::ios::binary); out.write(reinterpret_cast<const char*>(marker.data()), marker.size()); }
+    try {
+        store.Export(existing);
+        FAIL() << "Expected an existing export destination to be refused";
+    } catch (const IoError& error) {
+        EXPECT_NE(std::string(error.what()).find("Output already exists"), std::string::npos);
+    }
+    EXPECT_EQ(FileBytes(existing), marker);
+
+    fs::create_directories(dir / "occupied");
+    { std::ofstream out(dir / "occupied" / "keep.txt", std::ios::binary); out.write("k", 1); }
+    EXPECT_THROW(store.Export(dir / "occupied"), IoError);
+    EXPECT_EQ(FileBytes(dir / "occupied" / "keep.txt"), std::vector<uint8_t>{'k'});
+
+    CancellationSource cancelled;
+    cancelled.Cancel();
+    EXPECT_THROW(store.Export(dir / "cancelled.db", cancelled.Token()), OperationCancelled);
+    EXPECT_FALSE(fs::exists(dir / "cancelled.db"));
+    const LocalModStore empty(dir / "empty-store");
+    EXPECT_THROW(empty.Export(dir / "empty-cancelled.db", cancelled.Token()), OperationCancelled);
+    EXPECT_FALSE(fs::exists(dir / "empty-cancelled.db"));
+    EXPECT_FALSE(fs::exists(dir / "empty-store"));
+
+    const auto blocked = dir / "blocked";
+    { std::ofstream out(blocked, std::ios::binary); out.write("b", 1); }
+    EXPECT_THROW(store.Export(blocked / "out.db"), std::exception);
+    EXPECT_FALSE(fs::exists(blocked / "out.db"));
+    EXPECT_EQ(FileBytes(blocked), std::vector<uint8_t>{'b'});
+    EXPECT_EQ(Count(store, "snapshots"), 1);
+    EXPECT_EQ(FileBytes(source), source_bytes);
+    EXPECT_EQ(FileBytes(cached), cached_bytes);
+
+    const auto fresh = dir / "fresh.db";
+    store.Export(fresh);
+    EXPECT_EQ(QueryInt(fresh, "PRAGMA user_version"), 2);
+    EXPECT_EQ(NameCount(dir, "library-"), 0);
+    EXPECT_EQ(NameCount(dir, ".tmp"), 0);
+    EXPECT_EQ(FileBytes(existing), marker);
+}
+
+TEST_F(LibraryTest, SaveFailureLeavesThePreviousLibrary) {
+    const auto source = dir / "source.vpk";
+    const auto project = dir / "library.json";
+    Archive(source, {{"a.txt", std::vector<uint8_t>{1}}});
+    ModelLibrary{{source}, {}}.Save(project);
+    const auto before = FileBytes(project);
+    ASSERT_FALSE(before.empty());
+    const auto saving = fs::path(project.wstring() + L".saving");
+
+    HANDLE lock = CreateFileW(project.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(lock, INVALID_HANDLE_VALUE);
+    EXPECT_THROW((ModelLibrary{{source}, {{source, "models/a.vmdl_c"}}}.Save(project)), IoError);
+    CloseHandle(lock);
+
+    EXPECT_EQ(FileBytes(project), before);
+    EXPECT_FALSE(fs::exists(saving));
+    EXPECT_TRUE(ModelLibrary::Load(project).Selected.empty());
+
+    ModelLibrary{{source}, {{source, "models/a.vmdl_c"}}}.Save(project);
+    EXPECT_FALSE(fs::exists(saving));
+    const auto loaded = ModelLibrary::Load(project);
+    ASSERT_EQ(loaded.Selected.size(), 1u);
+    EXPECT_EQ(loaded.Selected.front().Model, "models/a.vmdl_c");
+}
+
+TEST_F(LibraryTest, FailedImportKeepsAnEarlierSnapshot) {
+    const auto good = dir / "good.vpk";
+    const auto bad = dir / "bad.vpk";
+    Archive(good, {{"a.txt", std::vector<uint8_t>{1, 2}}});
+    Archive(bad, {{"a.txt", std::vector<uint8_t>{3}}});
+    const LocalModStore store(dir / "store");
+    const auto cached = store.Import(good);
+
+    CancellationSource cancelled;
+    cancelled.Cancel();
+    EXPECT_THROW(store.Import(bad, cancelled.Token()), OperationCancelled);
+    EXPECT_EQ(Count(store, "snapshots"), 1);
+
+    std::vector<uint8_t> bytes = FileBytes(bad);
+    uint32_t tree_size = 0;
+    std::memcpy(&tree_size, bytes.data() + 8, 4);
+    bytes[28 + tree_size] ^= 0xff;
+    { std::ofstream out(bad, std::ios::binary); out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size()); }
+    EXPECT_THROW(store.Import(bad), InvalidData);
+    EXPECT_EQ(Count(store, "snapshots"), 1);
+    fs::remove(good);
+    VpkArchive::Open(cached).Validate();
+    EXPECT_EQ(store.Import(cached), cached);
+}
+
+// Path only. DefaultRoot does not open the directory, and this test must not touch the live library.
+TEST(Library, DefaultDataRootIsDeadlockModManager) {
+    const fs::path root = LocalModStore::DefaultRoot();
+    const std::wstring text = root.wstring();
+    EXPECT_EQ(root.filename().wstring(), L"DeadlockModManager");
+    EXPECT_NE(text.find(L"\\DeadlockModManager"), std::wstring::npos);
+    EXPECT_EQ(text.find(L"DeadlockModworks"), std::wstring::npos);
+}
+
+// Opens only the directory passed in. The decoy path and DefaultRoot() stay closed.
+TEST(Library, ExplicitDataRootIsWhatTheStoreOpens) {
+    const fs::path root = fs::temp_directory_path() / ("modworks-data-root-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const fs::path decoy = fs::temp_directory_path() / ("modworks-data-root-decoy-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { std::error_code error; fs::remove_all(path, error); }
+    } cleanup{root};
+    fs::create_directories(root);
+
+    const fs::path chosen = ResolveDataRoot(root, decoy.wstring().c_str());
+    EXPECT_EQ(chosen, root);
+    {
+        LocalModStore store(chosen);
+        EXPECT_EQ(store.Root(), fs::absolute(root).lexically_normal());
+        EXPECT_EQ(store.Root().wstring().find(L"DeadlockModManager"), std::wstring::npos);
+        EXPECT_TRUE(store.Load().Sources.empty());
+        EXPECT_TRUE(fs::is_regular_file(store.Database()));
+        EXPECT_EQ(store.Database().parent_path().parent_path().lexically_normal(), store.Root());
+    }
+    EXPECT_FALSE(fs::exists(decoy));
+    EXPECT_EQ(ResolveDataRoot(std::nullopt, root.wstring().c_str()), root);
+    EXPECT_EQ(ResolveDataRoot(std::nullopt, L""), LocalModStore::DefaultRoot());
 }
 }

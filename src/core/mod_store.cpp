@@ -737,9 +737,8 @@ ModelLibrary LocalModStore::Load(CancellationToken cancellation, const StoreProg
         if (const auto found = paths.find(id); found != paths.end()) result.Packages.push_back(found->second);
     if (const auto game = opened.Db.Setting("game_archive")) {
         const fs::path path = Widen(*game);
-        // A library shared from another computer keeps its game path, which only applies where it exists.
-        std::error_code error;
-        if (fs::is_regular_file(path, error)) result.GameArchive = path;
+        // Kept when the file is missing so the UI can say the install moved. This does not clear the setting.
+        if (!game->empty()) result.GameArchive = path;
     }
     if (notice) *notice = problems;
     return result;
@@ -783,8 +782,13 @@ void LocalModStore::Merge(const fs::path& other, CancellationToken cancellation)
 }
 
 void LocalModStore::Export(const fs::path& destination, CancellationToken cancellation) const {
+    cancellation.ThrowIfCancelled();
     if (SamePath(destination, Database())) throw InvalidData("Choose a location other than the library itself.");
     const auto full = fs::absolute(destination).lexically_normal();
+    std::error_code exists_error;
+    if (fs::exists(full, exists_error)) {
+        throw IoError("Output already exists. Choose a new filename; existing files will not be overwritten.");
+    }
     const auto temp = full.parent_path() / Widen("library-" + RandomId() + ".tmp");
     try {
         Opened opened(*this, cancellation);
@@ -845,9 +849,15 @@ void LocalModStore::Export(const fs::path& destination, CancellationToken cancel
             while (thumbnails.Step()) thumbnail.Bind(1, thumbnails.Text(0)).Bind(2, thumbnails.Blob(1)).Run();
             if (const auto game = opened.Db.Setting("game_archive"))
                 Statement(shared.Get(), "INSERT INTO settings(key, value) VALUES('game_archive', ?)").Bind(1, *game).Run();
+            cancellation.ThrowIfCancelled();
             transaction.Commit();
         }
-        if (!MoveFileExW(temp.c_str(), full.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        cancellation.ThrowIfCancelled();
+        std::error_code published;
+        if (fs::exists(full, published)) {
+            throw IoError("Output already exists. Choose a new filename; existing files will not be overwritten.");
+        }
+        if (!MoveFileExW(temp.c_str(), full.c_str(), MOVEFILE_WRITE_THROUGH))
             throw IoError("Could not write " + Narrow(full.wstring()) + ". Windows error " + std::to_string(GetLastError()));
     } catch (...) {
         std::error_code error;

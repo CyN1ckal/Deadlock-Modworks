@@ -1,6 +1,7 @@
 #include "animation_player.hpp"
 
 #include "clip_decoder.hpp"
+#include "theme.hpp"
 
 #include <imgui.h>
 
@@ -88,7 +89,7 @@ bool AnimationPlayer::Draw(const ResourceReader& read) {
         ImGui::TextDisabled("Loading clip...");
     }
     if (!error_.empty()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", error_.c_str());
+        ImGui::TextColored(theme::kError, "%s", error_.c_str());
     }
     return changed;
 }

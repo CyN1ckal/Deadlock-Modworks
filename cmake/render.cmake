@@ -97,6 +97,7 @@ add_library(sr_model_tools STATIC
     src/preview/store_reader.cpp
     src/preview/history_compare.cpp
     src/preview/ui.cpp
+    src/preview/theme.cpp
 )
 target_include_directories(sr_model_tools PUBLIC src/preview)
 target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32 ole32 windowscodecs)
@@ -105,10 +106,21 @@ if(SR_TRACY)
 else()
     target_include_directories(sr_model_tools PRIVATE ${SR_TRACY_ROOT})
 endif()
-target_link_libraries(DeadlockSkeletonRepair PRIVATE sr_model_tools)
-target_compile_definitions(DeadlockSkeletonRepair PRIVATE SR_MODEL_TOOLS)
-add_executable(ModelPreview src/preview/standalone.cpp)
+target_link_libraries(DeadlockModworks PRIVATE sr_model_tools)
+target_compile_definitions(DeadlockModworks PRIVATE SR_MODEL_TOOLS)
+add_executable(ModelPreview
+    src/preview/standalone.cpp
+    "${CMAKE_BINARY_DIR}/generated/app_icon.rc"
+)
 target_link_libraries(ModelPreview PRIVATE sr_model_tools)
+# The loader stays a driver DLL. Delay-load it so a missing vulkan-1.dll can show a message
+# instead of the process exiting before main.
+if(MSVC)
+    foreach(target DeadlockModworks ModelPreview)
+        target_link_options(${target} PRIVATE "/DELAYLOAD:vulkan-1.dll")
+        target_link_libraries(${target} PRIVATE delayimp)
+    endforeach()
+endif()
 
 add_executable(render_tests
     tests/preview_scene_tests.cpp

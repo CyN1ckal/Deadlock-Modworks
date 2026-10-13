@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <span>
@@ -36,6 +37,11 @@ namespace {
 
 constexpr const char* kBusyMessage = "The model library is in use by another process.";
 constexpr const char* kSchemaMessage = "Unsupported model library schema.";
+constexpr const char* kDamagedMessage =
+    "The model library is damaged and was not replaced. Restore catalog.sqlite from a backup.";
+constexpr const char* kLibraryTables[] = {
+    "meta", "blobs", "lineages", "snapshots", "memberships", "observations", "transforms", "edges", "refs",
+};
 constexpr const char* kChunkMessage = "Import the directory VPK, not a chunk file.";
 constexpr const char* kGameArchiveMessage = "That file is the game archive. Choose a mod VPK from the addons folder.";
 constexpr const char* kGameFolderMessage = "Choose a mod outside the game's archive folder, such as a VPK in addons.";
@@ -607,9 +613,24 @@ std::filesystem::path BlobPath(const std::filesystem::path& store, std::string_v
     return store / "blobs" / "sha256" / std::string(hex.substr(0, 2)) / std::string(hex);
 }
 
+bool BlobFileMatches(const std::filesystem::path& path, const std::vector<uint8_t>& payload) {
+    std::error_code error;
+    if (std::filesystem::file_size(path, error) != payload.size() || error) {
+        return false;
+    }
+    return ReadExactFile(path) == payload;
+}
+
 void WriteBlobFile(const std::filesystem::path& store, std::string_view hex, const std::vector<uint8_t>& payload) {
     const std::filesystem::path final_path = BlobPath(store, hex);
-    if (std::filesystem::exists(final_path)) {
+    std::error_code exists_error;
+    const bool present = std::filesystem::exists(final_path, exists_error);
+    // A missing blob is the normal first write. MSVC reports that absence as an error_code.
+    if (exists_error && exists_error != std::errc::no_such_file_or_directory) {
+        throw IoError(std::string("Could not write a model blob. ") + exists_error.message());
+    }
+    // The path is the content hash. A shorter or different file is not that blob.
+    if (present && BlobFileMatches(final_path, payload)) {
         return;
     }
     const std::filesystem::path incoming = store / "incoming";
@@ -639,16 +660,14 @@ void WriteBlobFile(const std::filesystem::path& store, std::string_view hex, con
     }
     file.reset();
 
-    if (std::filesystem::exists(final_path)) {
+    if (!MoveFileExW(temp.c_str(), final_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const DWORD failure = GetLastError();
         DeleteFileW(temp.c_str());
-        return;
-    }
-    if (!MoveFileW(temp.c_str(), final_path.c_str())) {
-        DeleteFileW(temp.c_str());
-        if (std::filesystem::exists(final_path)) {
+        std::error_code error;
+        if (std::filesystem::exists(final_path, error) && !error && BlobFileMatches(final_path, payload)) {
             return;
         }
-        throw IoError("Could not write a model blob. " + Win32Message(GetLastError()));
+        throw IoError("Could not write a model blob. " + Win32Message(failure));
     }
 }
 
@@ -1689,6 +1708,146 @@ int RemoveIncomingFiles(const std::filesystem::path& directory) {
     return static_cast<int>(files.size());
 }
 
+struct ProbeStatement {
+    sqlite3_stmt* stmt = nullptr;
+    ~ProbeStatement() { sqlite3_finalize(stmt); }
+};
+
+std::string ProbeText(sqlite3_stmt* stmt, int column) {
+    const auto* text = sqlite3_column_text(stmt, column);
+    return text != nullptr ? reinterpret_cast<const char*>(text) : std::string();
+}
+
+void ThrowIfProbeBusy(int rc) {
+    if (IsBusy(rc)) {
+        throw IoError(kBusyMessage);
+    }
+}
+
+// A short or non-database file must not be opened for write: SQLite would initialize an empty library over it.
+bool ReadableSqliteHeader(const std::filesystem::path& catalog, bool* unreadable) {
+    std::ifstream input(catalog, std::ios::binary);
+    if (!input) {
+        *unreadable = true;
+        return false;
+    }
+    char header[16] = {};
+    input.read(header, 16);
+    if (input.gcount() != 16) {
+        *unreadable = false;
+        return false;
+    }
+    *unreadable = false;
+    return std::memcmp(header, "SQLite format 3", 15) == 0 && header[15] == '\0';
+}
+
+void RefuseUnreadableCatalog(const std::filesystem::path& catalog) {
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(catalog, error) || error) {
+        return;
+    }
+    const auto size = std::filesystem::file_size(catalog, error);
+    if (!error && size < 100) {
+        throw IoError(kDamagedMessage);
+    }
+    bool unreadable = false;
+    if (!error && !ReadableSqliteHeader(catalog, &unreadable) && !unreadable) {
+        throw IoError(kDamagedMessage);
+    }
+}
+
+void SetQueryOnly(sqlite3* db, bool enabled) {
+    const int rc = sqlite3_exec(db, enabled ? "PRAGMA query_only = ON;" : "PRAGMA query_only = OFF;", nullptr, nullptr, nullptr);
+    ThrowIfProbeBusy(rc);
+    if (rc != SQLITE_OK) {
+        const char* detail = sqlite3_errmsg(db);
+        throw IoError(detail != nullptr && detail[0] != '\0' ? std::string(kDamagedMessage) + " " + detail : kDamagedMessage);
+    }
+}
+
+void ProbeExistingDatabase(sqlite3* db) {
+    ProbeStatement check;
+    const int prepared = sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &check.stmt, nullptr);
+    ThrowIfProbeBusy(prepared);
+    if (prepared != SQLITE_OK) {
+        const char* detail = sqlite3_errmsg(db);
+        throw IoError(detail != nullptr && detail[0] != '\0' ? std::string(kDamagedMessage) + " " + detail : kDamagedMessage);
+    }
+    int rc = sqlite3_step(check.stmt);
+    ThrowIfProbeBusy(rc);
+    std::string status;
+    if (rc == SQLITE_ROW) {
+        status = ProbeText(check.stmt, 0);
+        rc = sqlite3_step(check.stmt);
+        ThrowIfProbeBusy(rc);
+    }
+    if (rc != SQLITE_DONE || status != "ok") {
+        throw IoError(status.empty() || status == "ok" ? std::string(kDamagedMessage) : std::string(kDamagedMessage) + " " + status);
+    }
+
+    std::unordered_set<std::string> tables;
+    ProbeStatement table_rows;
+    const int tables_prepared = sqlite3_prepare_v2(
+        db, "SELECT name FROM sqlite_master WHERE type = 'table'", -1, &table_rows.stmt, nullptr);
+    ThrowIfProbeBusy(tables_prepared);
+    if (tables_prepared != SQLITE_OK) {
+        throw IoError(kDamagedMessage);
+    }
+    while ((rc = sqlite3_step(table_rows.stmt)) == SQLITE_ROW) {
+        tables.insert(ProbeText(table_rows.stmt, 0));
+    }
+    ThrowIfProbeBusy(rc);
+    if (rc != SQLITE_DONE) {
+        throw IoError(kDamagedMessage);
+    }
+    // Gallery tables can be created before the content schema. That file is empty of models, not damaged.
+    if (!tables.contains("meta")) {
+        for (const char* table : kLibraryTables) {
+            if (std::strcmp(table, "meta") != 0 && tables.contains(table)) {
+                throw IoError(kDamagedMessage);
+            }
+        }
+        return;
+    }
+
+    ProbeStatement version_row;
+    const int version_prepared = sqlite3_prepare_v2(
+        db, "SELECT value FROM meta WHERE key = 'schema_version'", -1, &version_row.stmt, nullptr);
+    ThrowIfProbeBusy(version_prepared);
+    if (version_prepared != SQLITE_OK) {
+        throw IoError(kDamagedMessage);
+    }
+    rc = sqlite3_step(version_row.stmt);
+    ThrowIfProbeBusy(rc);
+    if (rc != SQLITE_ROW) {
+        throw IoError(kDamagedMessage);
+    }
+    const std::string version = ProbeText(version_row.stmt, 0);
+    if (version != "1" && version != "2") {
+        throw InvalidData(kSchemaMessage);
+    }
+    for (const char* table : kLibraryTables) {
+        if (!tables.contains(table)) {
+            throw IoError(kDamagedMessage);
+        }
+    }
+    if (version != "2") {
+        return;
+    }
+    ProbeStatement column;
+    const int column_prepared = sqlite3_prepare_v2(
+        db, "SELECT 1 FROM pragma_table_info('snapshots') WHERE name = 'display_name'", -1, &column.stmt, nullptr);
+    ThrowIfProbeBusy(column_prepared);
+    if (column_prepared != SQLITE_OK) {
+        throw IoError(kDamagedMessage);
+    }
+    rc = sqlite3_step(column.stmt);
+    ThrowIfProbeBusy(rc);
+    if (rc != SQLITE_ROW) {
+        throw IoError(kDamagedMessage);
+    }
+}
+
 }  // namespace
 
 struct ContentStore::State {
@@ -1725,8 +1884,19 @@ ContentStore ContentStore::Open(const std::filesystem::path& directory) {
         throw IoError(std::string("Could not create the model library. ") + error.what());
     }
 
+    const std::filesystem::path catalog = root / "catalog.sqlite";
+    std::error_code exists_error;
+    const bool existed = std::filesystem::is_regular_file(catalog, exists_error);
+    // A new library has no catalog yet. MSVC reports that absence as an error_code.
+    if (exists_error && exists_error != std::errc::no_such_file_or_directory) {
+        throw IoError(std::string("Could not open the model library. ") + exists_error.message());
+    }
+    if (existed) {
+        RefuseUnreadableCatalog(catalog);
+    }
+
     sqlite3* db = nullptr;
-    if (sqlite3_open16((root / "catalog.sqlite").c_str(), &db) != SQLITE_OK) {
+    if (sqlite3_open16(catalog.c_str(), &db) != SQLITE_OK) {
         std::string message = db != nullptr ? sqlite3_errmsg(db) : "Could not open the model library.";
         if (db != nullptr) {
             sqlite3_close(db);
@@ -1734,6 +1904,11 @@ ContentStore ContentStore::Open(const std::filesystem::path& directory) {
         throw IoError(message.empty() ? "Could not open the model library." : message);
     }
     try {
+        if (existed) {
+            SetQueryOnly(db, true);
+            ProbeExistingDatabase(db);
+            SetQueryOnly(db, false);
+        }
         InitializeDatabase(db);
     } catch (...) {
         sqlite3_close(db);

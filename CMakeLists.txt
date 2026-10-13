@@ -1,10 +1,57 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DeadlockSkeletonRepair VERSION 0.1.1 LANGUAGES C CXX)
+project(DeadlockModworks VERSION 0.1.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
-    message(FATAL_ERROR "Deadlock Skeleton Repair builds on Windows x64.")
+    message(FATAL_ERROR "Deadlock Modworks builds on Windows x64.")
 endif()
+
+# Portable zip: static CRT (/MT, /MTd for Debug). vulkan-1.dll stays a driver import.
+# CMP0091 is NEW here. Older subprojects ignore MSVC_RUNTIME_LIBRARY and keep the
+# compiler default /MD, so the per-config flags carry /MT as well.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    foreach(lang C CXX)
+        string(APPEND CMAKE_${lang}_FLAGS_RELEASE " /MT")
+        string(APPEND CMAKE_${lang}_FLAGS_MINSIZEREL " /MT")
+        string(APPEND CMAKE_${lang}_FLAGS_RELWITHDEBINFO " /MT")
+        string(APPEND CMAKE_${lang}_FLAGS_DEBUG " /MTd")
+    endforeach()
+    set(SR_MSVC_RUNTIME "static")
+else()
+    set(SR_MSVC_RUNTIME "dynamic")
+endif()
+
+# One product identity for About, CLI --version, Windows VERSIONINFO, and the package file name.
+set(SR_PRODUCT_NAME "Deadlock Modworks")
+set(SR_PRODUCT_EXECUTABLE "DeadlockModworks")
+set(SR_PACKAGE_ZIP "${SR_PRODUCT_EXECUTABLE}-${PROJECT_VERSION}-win-x64.zip")
+find_package(Git QUIET)
+set(SR_GIT_COMMIT "unknown")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE SR_GIT_COMMIT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE SR_GIT_RESULT
+    )
+    if(NOT SR_GIT_RESULT EQUAL 0 OR SR_GIT_COMMIT STREQUAL "")
+        set(SR_GIT_COMMIT "unknown")
+    endif()
+endif()
+# rc.exe treats a backslash as an escape, so the icon path uses forward slashes.
+file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/assets/branding/modworks.ico" SR_APP_ICON)
+configure_file(cmake/product_version.hpp.in "${CMAKE_BINARY_DIR}/generated/product_version.hpp" @ONLY)
+configure_file(cmake/app.rc.in "${CMAKE_BINARY_DIR}/generated/app.rc" @ONLY)
+configure_file(cmake/app_icon.rc.in "${CMAKE_BINARY_DIR}/generated/app_icon.rc" @ONLY)
+set_source_files_properties(
+    "${CMAKE_BINARY_DIR}/generated/app.rc"
+    "${CMAKE_BINARY_DIR}/generated/app_icon.rc"
+    PROPERTIES OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/branding/modworks.ico")
+file(WRITE "${CMAKE_BINARY_DIR}/product_package_name.txt"
+    "${SR_PRODUCT_EXECUTABLE}.exe\n${SR_PACKAGE_ZIP}\n${PROJECT_VERSION}\n${SR_MSVC_RUNTIME}\n")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,7 +67,8 @@ FetchContent_Declare(
     URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+# OFF keeps gtest on the same static CRT as the app. ON forces the shared CRT and the tests fail to link.
+set(gtest_force_shared_crt OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
@@ -57,6 +105,9 @@ set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
 set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
 set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+# zstd rewrites /MD to /MT only when this is already set. Its cmake_minimum_required
+# predates CMP0091, so the MSVC_RUNTIME_LIBRARY property alone does not reach it.
+set(ZSTD_USE_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
 add_subdirectory(${zstd_SOURCE_DIR}/build/cmake ${CMAKE_BINARY_DIR}/zstd-build EXCLUDE_FROM_ALL)
 
 FetchContent_Declare(
@@ -115,6 +166,7 @@ add_library(skeleton_repair_core STATIC
     src/core/animation_clip.cpp
     src/core/clip_decoder.cpp
     src/core/game_folder.cpp
+    src/core/startup.cpp
     src/core/model_library.cpp
     src/core/content_hash.cpp
     src/core/content_store.cpp
@@ -123,16 +175,17 @@ add_library(skeleton_repair_core STATIC
     src/core/model_versions.cpp
     src/core/version_builder.cpp
 )
-target_include_directories(skeleton_repair_core PUBLIC src/core)
+target_include_directories(skeleton_repair_core PUBLIC src/core "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32 windowscodecs)
 
 # Opens the model tools workspace by default; command-line options run the console workflow.
-add_executable(DeadlockSkeletonRepair
+add_executable(DeadlockModworks
     src/app/main.cpp
     src/app/main_window.cpp
     src/app/app.manifest
+    "${CMAKE_BINARY_DIR}/generated/app.rc"
 )
-target_link_libraries(DeadlockSkeletonRepair PRIVATE skeleton_repair_core shell32 ole32 comctl32)
+target_link_libraries(DeadlockModworks PRIVATE skeleton_repair_core shell32 ole32 comctl32)
 
 add_executable(skeleton_repair_tests
     tests/skeleton_tests.cpp
@@ -153,6 +206,7 @@ add_executable(skeleton_repair_tests
     tests/history_compare_tests.cpp
     tests/character_view_tests.cpp
     tests/command_line_store_tests.cpp
+    tests/startup_tests.cpp
     src/preview/library_model.cpp
     src/preview/character_view.cpp
     src/preview/store_reader.cpp
@@ -164,7 +218,7 @@ target_compile_definitions(skeleton_repair_tests PRIVATE SR_SOURCE_DIR="${CMAKE_
 
 if(MSVC)
     target_compile_options(skeleton_repair_core PRIVATE /W4 /permissive- /utf-8)
-    target_compile_options(DeadlockSkeletonRepair PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(DeadlockModworks PRIVATE /W4 /permissive- /utf-8)
     target_compile_options(skeleton_repair_tests PRIVATE /W4 /permissive- /utf-8)
 endif()
 

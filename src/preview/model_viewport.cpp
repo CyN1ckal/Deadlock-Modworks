@@ -1,5 +1,6 @@
 #include "profile.hpp"
 #include "model_viewport.hpp"
+#include "theme.hpp"
 
 #include <imgui_impl_vulkan.h>
 
@@ -267,6 +268,7 @@ void ModelViewport::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
         return;
     }
     RenderOptions options;
+    options.Background = theme::kClearRgb;
     options.VisibleMeshes = visible_;
     options.ShowSkeleton = settings.ShowSkeleton;
     options.ShowGrid = settings.ShowGrid;

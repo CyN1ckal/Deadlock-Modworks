@@ -5,7 +5,7 @@ The diagram is [architecture.svg](architecture.svg). Regenerate it with `python 
 It is a UML component view of every `#include` under `src/`, arranged in architectural levels by dependency stability. Every arrow points from the module that uses something to the module it uses. All of them point up: a module never depends on anything below it.
 
 - **L0** holds the third-party libraries and the OS. These are the most stable.
-- **L1 and L2** are plain records, interfaces and basic utilities: `content_types`, `library_types`, `resource_reader`, `error`, `strings`, `kv3`, and the `model_tools` and `snapshot_reader` interfaces. Many modules use them, and they rarely change.
+- **L1 and L2** are plain records, interfaces and basic utilities: `content_types`, `library_types`, `resource_reader`, `error`, `strings`, `kv3`, `theme` (Dear ImGui colors only), and the `model_tools` and `snapshot_reader` interfaces. Many modules use them, and they rarely change.
 - **L3 to L6** are the file formats, the store and the repair logic: `vpk`, `resource`, `model_geometry`, `content_store`, `model_versions`, `version_builder`, `clip_decoder`, and `updater`.
 - **L7 to L11** are workflows, rendering, the UI panels and the entry points. They use the most modules and change the most often.
 
