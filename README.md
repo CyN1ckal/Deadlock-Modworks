@@ -2,6 +2,8 @@
 
 Deadlock Modworks 0.1.0 is a Windows app for a local collection of Deadlock mods. It browses skins, inspects and compares models, repairs supported skeleton changes, keeps a version history, shares that library, and assembles selected models into one VPK. Assembly does not install the pack, and it does not cover every kind of mod.
 
+It also downloads Deadlock mods from GameBanana (**Get mods**, **Ctrl+8**) and turns library mods on or off in the game (**Mods**, **Ctrl+7**): you tick mods, set their load order and profiles, and **Apply to game** places them in `game\citadel\addons`. Modworks only changes the files it placed there. See [Mods](docs/USER_GUIDE.md#mods) and [Get mods](docs/USER_GUIDE.md#get-mods).
+
 The program is `DeadlockModworks.exe`. The release artifact is `DeadlockModworks-0.1.0-win-x64.zip`. `v0.1.0` is not tagged, and a GitHub release has not been published. Publishing that zip is still a draft step. Until a maintainer publishes it, use a zip built with the steps in [Releasing](docs/RELEASING.md), or build from source. `scripts/Publish.ps1` was not run for this documentation update, so this commit did not produce a zip.
 
 ![Deadlock Modworks 0.1.0 with an empty library. The page shows Connect game, Add mods, and Open quick start](docs/screenshots/startup-empty-library.png)
@@ -16,7 +18,7 @@ That picture is `docs/screenshots/startup-empty-library.png`, a capture of the r
 
 You can browse the library and add mods without a connected game. Textures stored in the game, comparison, repair, and skin packs that use base-game files need the game archive. A pack made only of other files is copied as stored and does not need the game.
 
-There is no installer, automatic update, code signing, mod marketplace, or one-click install into the game. A clean-machine launch and code signing were not run.
+There is no installer, automatic update, code signing, or GameBanana account sign-in. Downloading from GameBanana needs an internet connection. A clean-machine launch and code signing were not run.
 
 ## First run
 
@@ -27,7 +29,9 @@ There is no installer, automatic update, code signing, mod marketplace, or one-c
 5. Choose **Add mods** or **File > Add mods...** (**Ctrl+O**) and select mod `.vpk` files. The empty page also says you can drop mod VPKs on the window. A drop was not performed.
 6. Double-click a skin to inspect it. Tick its checkbox, or press **Space**, to include it. Open the **VPK builder** tab and choose **Build VPK...** (**Ctrl+B**).
 7. After a pack is assembled, a modal titled **Pack assembled** shows the summary. A library build says `Exported N file to <path>.` or `Exported N files to <path>.` **Assemble...** on **Version history** says `Assembled a pack at <path>.` The modal then says assembly writes a VPK, does not install the pack, and does not guarantee compatibility. The buttons are **Reveal in Explorer**, **Open quick start**, and **Close**. No pack was built for this update, so that modal was not shown.
-8. Close Deadlock and copy the file into `game\citadel\addons` yourself. Do not replace `pak01_dir.vpk` or the game's chunk files. Delete that copy from `addons` to take the pack out. Modworks does not copy it in or out.
+8. Close Deadlock and copy the file into `game\citadel\addons` yourself. Do not replace `pak01_dir.vpk` or the game's chunk files. Delete that copy from `addons` to take the pack out. Modworks does not copy a built pack in or out.
+
+To use mods without building a pack, open **Get mods** (**Ctrl+8**), paste a GameBanana link or search, and choose **Download & enable**. Then open **Mods** (**Ctrl+7**), close Deadlock, and choose **Apply to game**. Untick a mod and apply again to take it out. To install your own pack the same way, choose **Build as mod...** instead of **Build VPK...** and give it a name; building again under that name replaces it.
 
 The same steps, with the failure cases, are in the [quick start](docs/QUICK_START.md). The zip from `Publish.ps1` contains this README, not the `docs` folder. The longer guides are in the source repository.
 

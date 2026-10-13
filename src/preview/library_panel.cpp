@@ -1063,6 +1063,11 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
             "A package copies its other files as stored. Shared files are deduplicated; conflicting files block the export.",
             !locked && pack_ready)) BuildPack(owner, game);
         theme::PopPrimaryButton();
+        if (build_as_mod_) {
+            ImGui::SameLine();
+            if (ui::ToolButton("Build as mod...", "Build the pack into your library as a named mod, which the Mods page can enable "
+                "and apply to the game. Building again under the same name replaces it.", !locked && pack_ready)) build_as_mod_();
+        }
         ImGui::SameLine();
         if (ui::ToolButton("Clear pack", "Remove every skin and package from the pack", !locked && pack_ready)) ClearPack();
         if (game.empty() && skins > 0) {
@@ -1176,6 +1181,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
             ImGui::SameLine();
             if (ImGui::Button("Open quick start") && open_quick_start) open_quick_start();
             ImGui::TextDisabled("You can also drop mod VPKs on the window. Your source files stay available for later builds.");
+            ImGui::TextDisabled("Get mods (Ctrl+8) downloads mods from GameBanana. Mods (Ctrl+7) turns them on in the game.");
         } else if (pack_view && pack_empty) {
             ImGui::TextUnformatted("The pack is empty.");
             ImGui::TextDisabled("Tick skins in the library, include a mod's other files, or right-click them and choose Include in pack.");

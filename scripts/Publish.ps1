@@ -224,7 +224,7 @@ function Test-SystemDll([string]$Name) {
         'crypt32.dll', 'sechost.dll', 'rpcrt4.dll', 'userenv.dll', 'iphlpapi.dll', 'wintrust.dll',
         'imagehlp.dll', 'powrprof.dll', 'normaliz.dll', 'bcryptprimitives.dll', 'msasn1.dll',
         'wldap32.dll', 'dnsapi.dll', 'nsi.dll', 'cryptbase.dll', 'profapi.dll', 'msvcrt.dll',
-        'ucrtbase.dll', 'ntdll.dll', 'psapi.dll', 'oleacc.dll', 'usp10.dll', 'msctf.dll'
+        'ucrtbase.dll', 'ntdll.dll', 'psapi.dll', 'oleacc.dll', 'usp10.dll', 'msctf.dll', 'winhttp.dll'
     )
     if ($system -contains $Name.ToLowerInvariant()) { return $true }
     if ($Name -match '^(?i)(api-ms-win-|ext-ms-)') { return $true }
@@ -482,7 +482,10 @@ $licenseSources = @(
     @{ Source = Join-Path $BuildDirectory '_deps\nlohmann_json-src\LICENSE.MIT'; Name = 'nlohmann-json-LICENSE.MIT' },
     @{ Source = Join-Path $BuildDirectory '_deps\meshoptimizer-src\LICENSE.md'; Name = 'meshoptimizer-LICENSE.md' },
     @{ Source = Join-Path $BuildDirectory '_deps\imgui-src\LICENSE.txt'; Name = 'imgui-LICENSE.txt' },
-    @{ Source = Join-Path $Repository 'third_party\tracy\LICENSE'; Name = 'tracy-LICENSE.txt' }
+    @{ Source = Join-Path $Repository 'third_party\tracy\LICENSE'; Name = 'tracy-LICENSE.txt' },
+    @{ Source = Join-Path $BuildDirectory 'archive-deps\libarchive\src\sr_libarchive_ep\COPYING'; Name = 'libarchive-COPYING.txt' },
+    @{ Source = Join-Path $BuildDirectory 'archive-deps\zlib\src\sr_zlib_ep\LICENSE'; Name = 'zlib-LICENSE.txt' },
+    @{ Source = Join-Path $BuildDirectory 'archive-deps\xz\src\sr_xz_ep\COPYING.0BSD'; Name = 'xz-liblzma-COPYING.0BSD.txt' }
 )
 foreach ($license in $licenseSources) {
     Copy-RequiredFile $license.Source (Join-Path $licenseOutput $license.Name)

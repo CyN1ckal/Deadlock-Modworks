@@ -120,11 +120,11 @@ std::span<const GuideStep> QuickStartSteps() {
         {"Extract", "Extract the zip. No installer or administrator prompt is required."},
         {"Launch", "Start Deadlock Modworks. A normal start does not need a terminal or a build tool."},
         {"Connect", "Connect the game. A Steam install is used when none is saved. You can type a path or browse to game\\citadel."},
-        {"Import", "Add mod VPKs, or drop them on the window. The library can be browsed before a game is connected."},
+        {"Import", "Get mods from GameBanana on the Get mods page, add mod VPKs, or drop them on the window. The library can be browsed before a game is connected."},
         {"Inspect", "Open a skin to view its model. Textures and the original skeleton that live in the game archive need the connected game."},
         {"Select", "Tick the skins and other files that belong in the pack."},
         {"Build", "Build the VPK. Assembly writes a file. It does not install the pack and does not guarantee compatibility."},
-        {"Install or remove", "Install or remove the pack from Deadlock's addons folder yourself. Modworks does not install it."},
+        {"Install or remove", "Turn mods on or off on the Mods page and choose Apply to game while Deadlock is closed. A pack you build is not installed; copy it into the addons folder yourself."},
     };
     return kSteps;
 }
