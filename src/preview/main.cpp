@@ -1581,13 +1581,31 @@ void ApplyTheme(float scale) {
     style.ScaleAllSizes(scale);
 }
 
+void DestroyWindowIcons(HICON icon, HICON icon_small) {
+    if (icon != nullptr) DestroyIcon(icon);
+    if (icon_small != nullptr) DestroyIcon(icon_small);
+}
+
 int Run(const std::vector<std::filesystem::path>& args) {
     [[maybe_unused]] const TracySession tracy_session;
     ImGui_ImplWin32_EnableDpiAwareness();
-    WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, GetModuleHandleW(nullptr), nullptr, nullptr, nullptr, nullptr, L"DeadlockModelPreview", nullptr};
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    // Resource 1 is the ICON in cmake/app.rc.in. Each executable that opens this
+    // window embeds that ICO, and LoadImage selects the frame for these sizes.
+    const HICON icon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    const HICON icon_small = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, instance, icon, nullptr, nullptr, nullptr, L"DeadlockModelPreview", icon_small};
     RegisterClassExW(&wc);
     HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, SR_PRODUCT_TITLE_W, WS_OVERLAPPEDWINDOW, 100, 100, 1440, 960, nullptr, nullptr, wc.hInstance, nullptr);
-    if (!hwnd) throw std::runtime_error("Could not create the model tools window.");
+    if (!hwnd) {
+        UnregisterClassW(wc.lpszClassName, wc.hInstance);
+        DestroyWindowIcons(icon, icon_small);
+        throw std::runtime_error("Could not create the model tools window.");
+    }
+    SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon_small));
 
     SetupVulkan();
     VkWin32SurfaceCreateInfoKHR surface_info{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
@@ -1795,6 +1813,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
     vkDestroyInstance(g_instance, nullptr);
     DestroyWindow(hwnd);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    DestroyWindowIcons(icon, icon_small);
     return exit_code;
 }
 

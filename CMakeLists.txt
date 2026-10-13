@@ -25,8 +25,15 @@ if(GIT_FOUND)
         set(SR_GIT_COMMIT "unknown")
     endif()
 endif()
+# rc.exe treats a backslash as an escape, so the icon path uses forward slashes.
+file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/assets/branding/modworks.ico" SR_APP_ICON)
 configure_file(cmake/product_version.hpp.in "${CMAKE_BINARY_DIR}/generated/product_version.hpp" @ONLY)
 configure_file(cmake/app.rc.in "${CMAKE_BINARY_DIR}/generated/app.rc" @ONLY)
+configure_file(cmake/app_icon.rc.in "${CMAKE_BINARY_DIR}/generated/app_icon.rc" @ONLY)
+set_source_files_properties(
+    "${CMAKE_BINARY_DIR}/generated/app.rc"
+    "${CMAKE_BINARY_DIR}/generated/app_icon.rc"
+    PROPERTIES OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/branding/modworks.ico")
 file(WRITE "${CMAKE_BINARY_DIR}/product_package_name.txt" "${SR_PRODUCT_EXECUTABLE}.exe\n${SR_PACKAGE_ZIP}\n")
 
 set(CMAKE_CXX_STANDARD 20)

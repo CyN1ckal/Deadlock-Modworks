@@ -190,10 +190,72 @@ Stage 1 items 1 and 2 are closed by the run above. These are still open. `v0.1.0
 
 3. Saved docking cannot restore. `src/preview/main.cpp` sets `io.IniFilename = nullptr` and, on the first frame, calls `DockBuilderRemoveNode` and rebuilds the 17% Explorer split. Relaunching always discards a rearranged layout. Reset of that layout is the same first-frame path. There is no separate data-root switch, so this was not exercised against a copy of the live library.
 
-4. The window class sets no icon. `cmake/app.rc.in` is a VERSIONINFO resource only, with no ICON statement. Explorer, the title bar, and Alt-Tab still cannot show a product icon for `DeadlockModworks.exe`.
+4. The embedded icon resource is closed in stage 3 below. Explorer, the title bar, the taskbar, and Alt-Tab were not observed. The GUI was not launched.
 
 5. Interactive GUI acceptance has no safe profile. `LocalModStore::DefaultRoot` remains `%LOCALAPPDATA%\DeadlockModManager` with no command-line or environment override. That compatibility path is intentional for 0.1. On this machine that directory already contains `library.db` (1,221,091,328 bytes), `store\catalog.sqlite` (7,467,008 bytes), `mods`, `cache`, and `thumbnails`. `gallery_settings` already has `legacy_store_merged=1`, `legacy_collection_merged=1`, and `library_db_merged=1`. A launch still materializes sources into `cache` and persists the gallery tables on exit. Viewport, button-level build, and a screenshot stay NOT RUN until a later change can aim the GUI at a disposable directory.
 
 6. `scripts/Publish.ps1` deletes the whole output directory it was given (`Remove-Item -Recurse -Force` on `$OutputDirectory`) before copying the executable. It does not run tests. It was not executed. The public exe and zip names now follow the CMake identity. The CI workflow builds, runs the two test executables, and uploads that ZIP. It does not invoke `architecture_diagram.py` itself. Local CTest registered that test only because Python 3 with `networkx` was found at configure time.
 
 7. The repository root has no `LICENSE`. The owner decision for publication is MIT. Third-party notices do not replace it. The file was intentionally not added in this stage.
+
+## Stage 3 program icon
+
+Worktree: `C:\Users\warri\.ao\data\worktrees\deadlock-model-updater\deadlock-model-updater-11`. Branch `codex/modworks-v0.1`. Started from `75883af` (`feat: name the product Deadlock Modworks 0.1.0`). No reset or rebase. Cherry-pick of `48e60155330cc8afc639387869856e472c9d42ae` (`feat: add Deadlock Modworks icon assets`, from `codex/modworks-v0.1-icon`) applied cleanly as `22c9426078ef913ca5d30ca5af7b490fe802d93a`. That commit adds only `assets/branding/modworks.svg`, `modworks-256.png`, `modworks.ico`, and `README.md`. The artwork was not redrawn.
+
+The GUI was not launched. `DeadlockModworks.exe` and `ModelPreview.exe` were not started. `%LOCALAPPDATA%\DeadlockModManager` was not opened. `scripts/Publish.ps1` was not executed. No tag was created and nothing was pushed.
+
+`cmake/app.rc.in` keeps the CMake version strings and adds `1 ICON` for `assets/branding/modworks.ico`. `ModelPreview` is still named `ModelPreview`. It links `cmake/app_icon.rc.in`, which is the same icon id and not the product `VERSIONINFO`. `src/preview/main.cpp` loads resource 1 into the model-tools window class (`hIcon` and `hIconSm`) and sends `WM_SETICON` for `ICON_BIG` and `ICON_SMALL`. The class atom is still `DeadlockModelPreview`. The window is still created at 100,100 with size 1440x960, `WS_OVERLAPPEDWINDOW`, and `WS_EX_ACCEPTFILES`. Product name, version, theme colors, `io.IniFilename`, and the dock builder were not changed. The repair-only window in `src/app/main_window.cpp` still uses `IDI_APPLICATION`. The product build does not open that window.
+
+Configure ran while `HEAD` was `22c9426078ef913ca5d30ca5af7b490fe802d93a`, so the version comment embeds that revision. The wiring commit is the next one. The next configure embeds whatever `git rev-parse HEAD` returns then.
+
+Commands, from this worktree, exit code 0:
+
+```powershell
+cmake --preset windows-release -DSR_BUILD_MODEL_TOOLS=ON -DSR_TRACY=OFF
+cmake --build --preset windows-release --target DeadlockModworks ModelPreview skeleton_repair_tests render_tests
+cmake --preset windows-release -DSR_BUILD_MODEL_TOOLS=ON -DSR_TRACY=OFF
+cmake --build --preset windows-release --target ModelPreview
+.\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+.\build\release\bin\Release\render_tests.exe --gtest_brief=1
+py -3 scripts/architecture_diagram.py --check
+```
+
+The second configure and `ModelPreview` build moved that target from the full `app.rc` onto the icon-only script. `DeadlockModworks.exe` was not relinked by that second build.
+
+| Command | Result |
+| --- | --- |
+| First configure | Exit 0. Configuring done in 20.8 seconds. Visual Studio 18 2026, Windows SDK 10.0.26100.0, MSVC 19.51.36260.0. `SR_BUILD_MODEL_TOOLS=ON`, `SR_TRACY=OFF`. Vulkan 1.4.357 found, including `glslc`. Tracy profiler disabled |
+| Product and test build | Exit 0 in 131.5 seconds. Targets `DeadlockModworks`, `ModelPreview`, `skeleton_repair_tests`, and `render_tests`. Output `build\release\bin\Release\DeadlockModworks.exe` |
+| Second configure | Exit 0. Configuring done in 4.5 seconds. Same preset and cache flags |
+| `ModelPreview` rebuild | Exit 0. `build\release\bin\Release\ModelPreview.exe` |
+| `skeleton_repair_tests.exe --gtest_brief=1` | 215 tests from 22 suites ran. 215 passed. 5867 ms. Exit 0. The summary had no skipped line |
+| `render_tests.exe --gtest_brief=1` | 50 tests from 11 suites ran. 50 passed. 297 ms. Exit 0. The summary had no skipped line |
+| `architecture_diagram.py --check` | Exit 0. `58 modules: no cycles, layering holds, stable dependencies hold within 0.10 and 1 accepted exception(s).` |
+
+The icon check loaded each exe with `LoadLibraryExW` and `LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE`. That maps the file. It does not start the process. `ExtractIconExW` then read icon index 0 and returned a large icon and a small icon. Those handles were destroyed. `FileVersionInfo` read the version block the same way.
+
+`assets/branding/modworks.ico` is 13,529 bytes and lists 16, 20, 24, 32, 48, 64, 128, and 256.
+
+| Executable | Group icon id 1 | Version block | Shell extract |
+| --- | --- | --- | --- |
+| `DeadlockModworks.exe` | 8 frames, 32 bpp: 16, 20, 24, 32, 48, 64, 128, 256. Group resource 118 bytes | Present, 744 bytes | `ExtractIconExW` count 1. Index 0 returned both a large and a small icon |
+| `ModelPreview.exe` | Same 8 frames and the same widths | Absent. `FileDescription`, `ProductName`, `OriginalFilename`, and `FileVersion` are empty | Same extract result. The target name is still `ModelPreview` |
+
+Windows file properties of `DeadlockModworks.exe`, read without launching it:
+
+| Property | Value |
+| --- | --- |
+| FileDescription | Deadlock Modworks 0.1.0 |
+| FileVersion | 0.1.0.0 |
+| ProductName | Deadlock Modworks |
+| ProductVersion | 0.1.0 |
+| OriginalFilename | DeadlockModworks.exe |
+| InternalName | DeadlockModworks |
+| Comments | build 22c9426078ef913ca5d30ca5af7b490fe802d93a |
+
+| Check | Result (PASS/FAIL/BLOCKED/NOT RUN) | Commit/artifact | Environment | Evidence/notes |
+| --- | --- | --- | --- | --- |
+| Icon resource in `DeadlockModworks.exe` | PASS | `22c9426` plus the wiring in this commit | This worktree, Release, MSVC 19.51.36260.0 | Group icon id 1 has all eight sizes. Version strings still come from CMake. The exe was not started |
+| Icon resource in `ModelPreview.exe` | PASS | Same | Same | Same eight sizes. No product `VERSIONINFO`. The exe was not started |
+| Runtime window icon | NOT RUN | Same | Live library not opened | The model-tools window class loads resource 1 for the large and small icons. The window was not created |
+| Explorer, title bar, taskbar, Alt-Tab | NOT RUN | Same | GUI not launched | Shell extraction shows the resource is readable. A desktop observation was not made |

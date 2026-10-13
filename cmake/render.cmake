@@ -107,7 +107,10 @@ else()
 endif()
 target_link_libraries(DeadlockModworks PRIVATE sr_model_tools)
 target_compile_definitions(DeadlockModworks PRIVATE SR_MODEL_TOOLS)
-add_executable(ModelPreview src/preview/standalone.cpp)
+add_executable(ModelPreview
+    src/preview/standalone.cpp
+    "${CMAKE_BINARY_DIR}/generated/app_icon.rc"
+)
 target_link_libraries(ModelPreview PRIVATE sr_model_tools)
 
 add_executable(render_tests

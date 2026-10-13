@@ -1,3 +1,7 @@
+// Resource 1 is the file icon and the model-tools window icon.
+// src/preview/main.cpp loads this id with LoadImage.
+1 ICON "@SR_APP_ICON@"
+
 #include <winver.h>
 
 VS_VERSION_INFO VERSIONINFO
