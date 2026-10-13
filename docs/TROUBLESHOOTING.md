@@ -1,12 +1,11 @@
 # Troubleshooting
 
-There is no log folder and no **Open logs** or **Copy diagnostic details** command in this version. Collect the text the app already shows. [How to report it](#collecting-diagnostics) is at the end.
+Errors are appended to `<data-root>\logs\modworks.log`. The default data root is `%LOCALAPPDATA%\DeadlockModManager`, so the default file is `%LOCALAPPDATA%\DeadlockModManager\logs\modworks.log`. **Help > Open logs** selects that file in Explorer when it exists. If it does not, the status line says `No log file yet. Errors are written to <path>.` A start with no error does not create the log. **Help > Copy diagnostic details** copies the product title, the build commit, the data root, and the waiting error, or **No error is waiting.** Those two menu items were not clicked. [How to report it](#collecting-diagnostics) is at the end.
 
 ## The window never opens
 
-`DeadlockModworks.exe` imports `vulkan-1.dll` from the graphics driver. The zip does not contain it, and there is no delay-load dialog of our own.
+`vulkan-1.dll` is delay-loaded from the graphics driver. The zip does not contain it. A missing loader is supposed to show a message instead of failing in the static imports. The message is **vulkan-1.dll was not found. Install or update the graphics driver that provides the Vulkan loader, then start Deadlock Modworks again. The model library was not opened.** That dialog was not observed. Do not copy `vulkan-1.dll` out of a Vulkan SDK into the extracted folder. That DLL has to match the driver.
 
-- If Windows says the program cannot start because `vulkan-1.dll` is missing, install the current driver for the GPU and confirm the driver supports Vulkan 1.3. Do not copy `vulkan-1.dll` out of a Vulkan SDK into the extracted folder. That DLL has to match the driver.
 - If the DLL loads and startup still fails, Modworks shows a dialog titled **Deadlock Modworks 0.1.0**. The text is one of:
   - **No Vulkan device was found.**
   - **The Vulkan driver does not support version 1.3.**
@@ -28,7 +27,7 @@ The static runtime means a missing `VCRUNTIME140.dll` or `MSVCP140.dll` is not a
 
 The dialog title is **Select game\citadel\pak01_dir.vpk**. The citadel folder has to contain that file. Choosing a mod VPK, a chunk such as `pak01_000.vpk`, or a shortcut does not connect the game.
 
-Automatic detection reads Steam's library list. If Steam is installed per-user in an unusual place, or the game is on a drive Steam is not showing, use **Choose game archive...**. **Reconnect** opens the last chosen archive again.
+Steam fills the game archive when none is saved: no `--game`, no `gameDirectory` in `store\settings.json`, and no game archive already stored with the library. Automatic detection reads Steam's library list. The manual field, **Connect**, and **Browse...** stay on the explorer. If Steam is installed per-user in an unusual place, or the game is on a drive Steam is not showing, type a path or use **Browse...** / **Choose game archive...**. **Reconnect** opens the last chosen archive again. **Connect game** on an empty library uses the typed path when the field is filled, and otherwise opens the file dialog.
 
 The red or warning text under **GAME** is the error. A missing or unreadable `pak01_dir.vpk` stays on screen until a later open succeeds.
 
@@ -69,7 +68,7 @@ A tree in the gallery, **N source archives could not be read**, lists sources wh
 | **Cancelled.** | **Cancel** or **Tools > Cancel VPK build** stopped the run before a new file was published. |
 | **Could not publish the archive.** or **Could not write ... Windows error N** | The folder is read-only, full, or locked. The previous file at a different path is left as it was. |
 
-A successful line is `Exported N files to <path>. Test the pack in Deadlock.` The pack is still not installed. Copy it by hand. Steps are in [QUICK_START.md](QUICK_START.md).
+A successful line is `Exported N file to <path>.` or `Exported N files to <path>.` **Assemble...** says `Assembled a pack at <path>.` A modal titled **Pack assembled** repeats that summary and says assembly writes a VPK, does not install the pack, and does not guarantee compatibility. Its buttons are **Reveal in Explorer**, **Open quick start**, and **Close**. No pack was built for this note, so that modal was not shown. The pack is still not installed. Copy it by hand. Steps are in [QUICK_START.md](QUICK_START.md).
 
 ## Repair results that are not a fix
 
@@ -90,6 +89,8 @@ Command-line `--repair` is harsher than the library button: it replaces the path
 | Message | What to do |
 | --- | --- |
 | **The model library is damaged and was not replaced. Restore catalog.sqlite from a backup.** | Close Modworks. Replace `store\catalog.sqlite` with a copy made while the app was closed. Do not delete the damaged file and launch in the hope of a new empty library. The app refuses to create a replacement catalog over a file it considers damaged. |
+| **settings.json could not be read. Saved preferences were left unchanged, and the model library was not replaced.** | `store\settings.json` and `store\catalog.sqlite` are left in place. The window continues after the box. Repair the JSON yourself, or remove only that settings file while the app is closed. Do not delete the catalog. `docs/screenshots/startup-corrupt-settings.png` shows the box. |
+| **Deadlock Modworks cannot write its data folder at ... The model library was not replaced.** | The data root is not a writable folder, or `catalog.sqlite` cannot be opened for write. A read-only catalog is not replaced. Exit is 1. Point `--data-root` at a folder you can write, or clear the read-only attribute and start again. `docs/screenshots/startup-readonly-data-root.png` shows the box. |
 | **Unsupported model library schema.** | This build cannot open that catalog. Use the build that wrote it, or restore a catalog from this version. |
 | **The model library is in use by another process.** | Close the other copy. A file lock on `catalog.sqlite` from a backup tool causes the same message. |
 | **Could not find the local app data folder.** | `%LOCALAPPDATA%` is unavailable. Start the app with `--data-root` pointed at a folder you can write. |
@@ -104,11 +105,12 @@ Command-line `--repair` is harsher than the library button: it replaces the path
 
 Include:
 
-1. The version. **Help > About** shows **Deadlock Modworks 0.1.0** and **Build** plus the commit. From a terminal, `DeadlockModworks.exe --version` prints `Deadlock Modworks 0.1.0 (<commit>)`.
+1. The version. **Help > About** shows **Deadlock Modworks 0.1.0** and **Build** plus the commit. From a terminal, `DeadlockModworks.exe --version` prints `Deadlock Modworks 0.1.0 (<commit>)`. **Help > Copy diagnostic details** copies that title, the build, the data root, and the waiting error.
 2. What you did, what you expected, and the exact text you saw. Right-click a status line and choose **Copy message**. Copy the startup dialog if there was one. For repairs, attach the JSON from **Save report...** if the report is not huge and does not contain paths you consider private.
 3. Whether the game was connected, and whether you used `--data-root` or `DEADLOCK_MODWORKS_DATA_ROOT`. The path itself is enough. Do not zip the data root.
 4. Windows version and the GPU name, if the failure is a black window or a Vulkan dialog.
+5. `logs\modworks.log` from that data root, when the file exists. **Help > Open logs** selects it. It is absent after a start that had no error.
 
-Do not send `%LOCALAPPDATA%\DeadlockModManager`, `catalog.sqlite`, `blobs`, or your mod VPKs. Those are your library, not a bug report. A single small VPK is useful only if you choose to share that one file.
+Do not send `%LOCALAPPDATA%\DeadlockModManager`, `catalog.sqlite`, `blobs`, or your mod VPKs. Those are your library, not a bug report. A single small VPK is useful only if you choose to share that one file. The log can contain the data-root path. Send the lines for the failure, not the whole library.
 
-There is no in-app log to attach. If the process is started from a terminal, Vulkan failures also print `[vulkan] VkResult = N` on that terminal before the dialog. A double-click from Explorer does not keep a console.
+If the process is started from a terminal, Vulkan failures also print `[vulkan] VkResult = N` on that terminal before the dialog. A double-click from Explorer does not keep a console. The missing `vulkan-1.dll` dialog was not observed. The loader is delay-loaded, and that message is supposed to appear instead of a failure in the static imports.

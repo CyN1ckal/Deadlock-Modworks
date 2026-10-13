@@ -549,3 +549,11 @@ GUI launches used only `--data-root` directories under this worktree. The empty-
 | First-pack install and remove | NOT RUN | Not this stage | Install steps are summarized only | The quick start text tells the user to install or remove the pack. That action was not performed |
 | 100%, 150%, and 200% UI | NOT RUN | Not resized | The capture is the window at its default 1440x960 | DPI steps were not changed |
 | Clean extracted zip and `Publish.ps1` | NOT RUN | Script not run | Packaging stays with the earlier stage | No zip was extracted and the publisher was not started |
+
+## User docs matched to the startup UI
+
+Written on `codex/modworks-v0.1-docs2` from `68b8ebf2362556d66e0019107d66bbba659e0134`. No C++, CMake, or `scripts/Publish.ps1` was edited. Nothing was pushed, tagged, or published. `Publish.ps1` was not run on this commit. Earlier rows in this file were not rewritten. The milestone 8 list that says the quick start and log commands are absent describes that earlier documentation commit, not the window in `68b8ebf`.
+
+`README.md`, `docs/QUICK_START.md`, `docs/USER_GUIDE.md`, `docs/TROUBLESHOOTING.md`, and `CHANGELOG.md` now name the empty-library buttons **Connect game**, **Add mods**, and **Open quick start**, the **Quick start** and **Pack assembled** modals, **Help > Open logs**, **Help > Copy diagnostic details**, the log path `<data-root>\logs\modworks.log`, delay-loaded `vulkan-1.dll`, a corrupt `store\settings.json` left in place, a read-only catalog that is not replaced, and Steam auto-detect when nothing is saved. `docs/screenshots/startup-empty-library.png` is the README figure because it shows those three buttons.
+
+Still not run for this documentation commit: a clean-machine launch, code signing, a published release or tag `v0.1.0`, a two-model comparison screenshot, a click of the **Quick start** popup, the missing `vulkan-1.dll` dialog, drag-and-drop, a finished **Pack assembled** modal, and `Publish.ps1`.
