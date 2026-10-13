@@ -41,6 +41,7 @@ struct LibrarySettings {
 };
 
 // Missing or corrupt settings.json yields an empty directory and does not throw.
+// A corrupt file is left in place. This does not open or replace the catalog.
 LibrarySettings LoadLibrarySettings(const std::filesystem::path& store_directory);
 void SaveLibrarySettings(const std::filesystem::path& store_directory, const LibrarySettings& settings);
 

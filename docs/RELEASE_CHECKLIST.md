@@ -463,3 +463,59 @@ Side-by-side comparison of two models was not captured. The empty library has no
 | Two-model comparison | NOT RUN | — | No disposable model | The inspector page is empty. No `.vmdl_c` was added |
 | Shortcuts dialog | PASS | `docs/screenshots/shortcuts.png` | F1 | Modal lists View > Workspace and View > Reset layout |
 | Missing `--data-root` value | PASS | `docs/screenshots/data-root-error.png` | Exit 1 | Message box: `--data-root needs a directory.` Store was not opened |
+
+## Milestone 5 fresh startup and first-pack result
+
+Worktree: `C:\Users\warri\.grok\worktrees\repos-deadlock-model-updater\subagent-01a13381-7f6e-7b51-aa6b-1298a851bc88`. Branch `codex/modworks-v0.1-startup`, started from `9d9262df2e5a57e455bf88d81c5399c17b0fbe67`. The commit that contains this section is `feat: guide an empty library and report startup failures`. Nothing was pushed, tagged, merged, or published. `scripts/Publish.ps1` was not run. Schema stays version 2. The damaged-catalog sentence is unchanged.
+
+`LocalModStore::DefaultRoot()` is still `%LOCALAPPDATA%\DeadlockModManager`. Resolution order is still `--data-root`, then `DEADLOCK_MODWORKS_DATA_ROOT`, then that default. The live `library.db` stayed 1,221,091,328 bytes with `LastWriteTimeUtc` `2026-10-12T15:24:28.2335301Z` before and after every launch below. It was not opened, copied, or written.
+
+The launched exe was configured from that parent SHA, so `--version` prints `Deadlock Modworks 0.1.0 (9d9262df2e5a57e455bf88d81c5399c17b0fbe67)`. `vulkan-1.dll` is a delay-load dependency of `DeadlockModworks.exe` and `ModelPreview.exe` (`dumpbin /dependents`). `ModelPreview.exe` was not launched.
+
+Commands, from this worktree. The first `cmake --build --preset windows-release` failed in `tests/startup_tests.cpp` because `std::filesystem::current_path` returns void. After that fix, one startup test saved a library before treating the catalog as read-only. The full preset build below is the later incremental build, exit 0.
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release
+ctest --test-dir build/release -C Release --output-on-failure
+.\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+.\build\release\bin\Release\render_tests.exe --gtest_brief=1
+py -3 scripts/architecture_diagram.py --check
+py -3 scripts/architecture_diagram.py
+```
+
+| Command | Result |
+| --- | --- |
+| Configure | Exit 0. Visual Studio 18 2026, Windows SDK 10.0.26100.0, MSVC 19.51.36260.0. Vulkan 1.4.357 found. Tracy disabled. About 21.8 seconds. No previous `build/release` cache |
+| Release build | Exit 0 on the incremental `cmake --build --preset windows-release` after the test fixes. `DeadlockModworks.exe` and `ModelPreview.exe` under `build\release\bin\Release` |
+| CTest Release | Exit 0. 283 passed, 0 failed, 11.90 seconds. Includes `Library.ExplicitDataRootIsWhatTheStoreOpens`, `dependency_levels`, and the seven startup tests |
+| `skeleton_repair_tests.exe --gtest_brief=1` | Exit 0. 232 tests from 24 suites passed. 7270 ms. No skipped line. 225 of those were already on the parent (224 plus `Library.ExplicitDataRootIsWhatTheStoreOpens`). None of those were removed |
+| `render_tests.exe --gtest_brief=1` | Exit 0. 50 tests from 11 suites passed. 278 ms. No skipped line |
+| `architecture_diagram.py --check` | Exit 0. `60 modules: no cycles, layering holds, stable dependencies hold within 0.10 and 1 accepted exception(s).` |
+| Diagram regenerate | Exit 0. `docs/architecture.svg` rewritten. `startup` is in the graph |
+
+New tests: `StartupTest.DataPathsStayUnderTheRootWhenThePathHasASpace`, `StartupTest.UnicodeDataRootKeepsTheStoreBesideThatRoot`, `StartupTest.GamePathUsesTheCommandLineThenTheSavedPath`, `StartupTest.CorruptSettingsDoNotReplaceTheCatalog`, `StartupTest.ReadOnlyCatalogIsNotReplaced`, `StartupTest.ErrorLogIsUnderTheDataRootAndStartupCanStayQuiet`, `StartupMessages.QuickStartAndGameNeedsStaySpecific`.
+
+GUI launches used only `--data-root` directories under this worktree. The empty-library launch was `DeadlockModworks.exe --data-root build\startup gui путь` with the working directory `build\startup-gui-cwd`. That root has a space and the Cyrillic word путь. A later `WM_CLOSE` exited 0 and left `layout.ini` (577 bytes), `window.ini` (20 bytes), and `store\catalog.sqlite` (155,648 bytes) under that root. The working directory stayed empty. `logs\modworks.log` was not created. `gallery_sources` count was 0. `meta.schema_version` was 2. `gallery_settings.game_archive` was `c:\program files (x86)\steam\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk`.
+
+| Check | Result (PASS/FAIL/BLOCKED/NOT RUN) | Commit/artifact | Environment | Evidence/notes |
+| --- | --- | --- | --- | --- |
+| Empty library actions | PASS | `docs/screenshots/startup-empty-library.png` | Release, disposable root, CopyFromScreen | The library page shows `Your library has no mods yet.`, the paragraph that names which actions need the game archive, `Building a pack does not install it.`, and the buttons `Connect game`, `Add mods`, and `Open quick start`. Explorer says to use those actions and shows `Connect` and `Browse...` |
+| Quick start popup | NOT RUN | Steps are unit-tested | The button was not clicked | `StartupMessages.QuickStartAndGameNeedsStaySpecific` checks the eight step titles and the install wording. The popup itself was not opened |
+| Steam auto-detect when nothing is saved | PASS | Same capture | A Steam Deadlock install is present | The status line says Deadlock connected. The saved archive is `pak01_dir.vpk` under `steamapps\common\Deadlock\game\citadel`. A typed path and `Browse...` stay on the explorer |
+| Library without a connected game | PASS | Missing-game launch | `--game C:\modworks-missing-game\citadel` | The window stayed open. The log says the folder was not found at `C:\modworks-missing-game\citadel\pak01_dir.vpk` and that the model library was not changed. The copied catalog length stayed 4,096 |
+| Data root with a space and a Unicode name | PASS | `build\startup gui путь` | Working directory was a different empty directory | `layout.ini`, `window.ini`, and `store\catalog.sqlite` were created only under that root. The working directory gained no files. Covered again by `StartupTest.DataPathsStayUnderTheRootWhenThePathHasASpace` and `StartupTest.UnicodeDataRootKeepsTheStoreBesideThatRoot` |
+| Read-only catalog | PASS | `docs/screenshots/startup-readonly-data-root.png` | `build\startup ro data`, catalog file attribute ReadOnly | Message box says the data folder cannot be written and `The model library was not replaced.` Exit 1. Catalog length stayed 4,096 and the read-only attribute stayed. `StartupTest.ReadOnlyCatalogIsNotReplaced` also covers a data root that is a file |
+| Corrupt `settings.json` | PASS | `docs/screenshots/startup-corrupt-settings.png` | `{not json` beside a copied catalog | Message box: `settings.json could not be read. Saved preferences were left unchanged, and the model library was not replaced.` The window was still open after the box. The settings text was unchanged. The log under that data root repeats the version, build, data root, and that sentence. `StartupTest.CorruptSettingsDoNotReplaceTheCatalog` keeps one stored source and does not rewrite the corrupt file |
+| Missing `vulkan-1.dll` message | NOT RUN | Delay-load is present | This machine has the loader | `dumpbin` shows `vulkan-1.dll` as a delay-load dependency, not a normal import. The message string is covered by `StartupMessages.QuickStartAndGameNeedsStaySpecific`. The DLL was not hidden, so the message box was not shown |
+| Unsupported device | NOT RUN | Not forced | The empty-library window opened on the installed device | `SetupVulkan` still reports a device failure through the existing message box. No unsupported adapter was exercised |
+| Quiet startup versus an error log | PASS | No log on the empty launch | Errors from the other launches were logged | The empty launch created no `logs\modworks.log`. Corrupt settings, the missing game, and a bad CLI VPK each appended a log under their own data root. `StartupTest.ErrorLogIsUnderTheDataRootAndStartupCanStayQuiet` checks that an empty error writes nothing |
+| Open logs and Copy diagnostic details | NOT RUN | Help menu was not clicked | The log file and `DiagnosticText` are covered | Those two menu items were not used. The written log lines include the product title, the build SHA, the data root, and the error |
+| `--version` and `--help` | PASS | Exit 0 from `build\startup-cli-cwd` | GUI subsystem exe launched in PowerShell | `--version` printed `Deadlock Modworks 0.1.0 (9d9262df2e5a57e455bf88d81c5399c17b0fbe67)` and created no file. `--help` printed the repair commands and the exit-code lines. The live library timestamp did not change |
+| `--data-root` without a directory | PASS | `docs/screenshots/startup-missing-data-root.png` | Exit 1 | Message box: `--data-root needs a directory.` No store was created in the working directory |
+| CLI path still opens the window | PASS | `build\startup cli vpk` | A 9-byte file named `not-a-real-mod.vpk` | The window stayed open. The data-root log says `not-a-real-mod.vpk: VPK directory or embedded data is outside the file.` The source file stayed in the working directory |
+| Drag-and-drop | NOT RUN | No drop was sent | `WM_DROPFILES` still calls `AddPaths` | A real drop onto the window was not performed |
+| Finished pack result | NOT RUN | No pack was built | Assembly wording is unit-tested | No export finished, so `Reveal in Explorer` and the assembled-pack dialog were not shown. `kAssemblyDoesNotInstall` says assembly writes a VPK, does not install the pack, and does not guarantee compatibility. No installer was added |
+| First-pack install and remove | NOT RUN | Not this stage | Install steps are summarized only | The quick start text tells the user to install or remove the pack. That action was not performed |
+| 100%, 150%, and 200% UI | NOT RUN | Not resized | The capture is the window at its default 1440x960 | DPI steps were not changed |
+| Clean extracted zip and `Publish.ps1` | NOT RUN | Script not run | Packaging stays with the earlier stage | No zip was extracted and the publisher was not started |
