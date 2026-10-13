@@ -125,6 +125,33 @@ TEST(ArchiveExtract, EnforcesSizeLimits) {
     EXPECT_THROW(ExtractModArchive(temp.Path / "big.zip", temp.Path / "out", {}, {}, limits), InvalidData);
 }
 
+TEST(ArchiveExtract, SkippedEntriesCountTowardTheLimit) {
+    TempFolder temp;
+    MakeArchive(temp.Path / "notes.zip", {{"readme.txt", std::string(4096, 'r')}, {"a.vpk", "a"}});
+    ExtractLimits limits;
+    limits.MaxEntryBytes = 1024;
+    EXPECT_THROW(ExtractModArchive(temp.Path / "notes.zip", temp.Path / "out", {}, {}, limits), InvalidData);
+
+    MakeArchive(temp.Path / "both.zip", {{"readme.txt", std::string(80, 'r')}, {"a.vpk", std::string(80, 'a')}});
+    limits = {};
+    limits.MaxTotalBytes = 100;
+    EXPECT_THROW(ExtractModArchive(temp.Path / "both.zip", temp.Path / "out2", {}, {}, limits), InvalidData);
+}
+
+TEST(ArchiveExtract, DoesNotOpenDeviceNames) {
+    TempFolder temp;
+    MakeArchive(temp.Path / "devices.zip", {{"NUL.vpk", "discarded"}, {"COM1.vpk", "port"}, {"folder/aux.vpk", "aux"},
+        {"LPT1.vpk", "printer"}, {"ok.vpk", "ok"}});
+    const auto result = ExtractModArchive(temp.Path / "devices.zip", temp.Path / "out");
+    ASSERT_EQ(result.Archives.size(), 1u);
+    EXPECT_EQ(result.Archives[0].filename(), "ok.vpk");
+    EXPECT_EQ(Read(result.Archives[0]), "ok");
+    EXPECT_FALSE(fs::exists(temp.Path / "out" / "NUL.vpk"));
+
+    MakeArchive(temp.Path / "nul.zip", {{"NUL.vpk", "x"}});
+    EXPECT_THROW(ExtractModArchive(temp.Path / "nul.zip", temp.Path / "nul-out"), InvalidData);
+}
+
 TEST(ArchiveExtract, RequiresAnEmptyDestination) {
     TempFolder temp;
     MakeArchive(temp.Path / "mod.zip", {{"a.vpk", "a"}});

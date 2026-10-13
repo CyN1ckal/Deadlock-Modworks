@@ -33,12 +33,23 @@ bool IsChunkName(const std::wstring& name) {
         && std::all_of(stem.end() - 3, stem.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; });
 }
 
-// The file name of an entry, with characters Windows refuses replaced. Empty when nothing usable is left.
+// CON, NUL, COM1 and the other names Windows opens as devices even when they have an extension.
+bool IsReservedDevice(std::wstring_view name) {
+    const auto dot = name.find(L'.');
+    std::wstring base(name.substr(0, dot));
+    while (!base.empty() && (base.back() == L' ' || base.back() == L'.')) base.pop_back();
+    for (auto& c : base) c = static_cast<wchar_t>(std::towupper(c));
+    if (base == L"CON" || base == L"PRN" || base == L"AUX" || base == L"NUL") return true;
+    return base.size() == 4 && (base.starts_with(L"COM") || base.starts_with(L"LPT")) && base[3] >= L'1' && base[3] <= L'9';
+}
+
+// The file name of an entry, with characters Windows refuses replaced. Empty when nothing usable is left,
+// including DOS device names: ofstream would open the device instead of a file in the destination.
 std::wstring SafeFileName(std::wstring name) {
     for (auto& c : name) if (c < 32 || std::wstring_view(L"<>:\"|?*").find(c) != std::wstring_view::npos) c = L'_';
     const auto trim = name.find_last_not_of(L" .");
     name.erase(trim == std::wstring::npos ? 0 : trim + 1);
-    if (name == L"." || name == L"..") return {};
+    if (name == L"." || name == L".." || IsReservedDevice(name)) return {};
     return name;
 }
 
@@ -91,13 +102,31 @@ ExtractedMods ExtractModArchive(const fs::path& archive_path, const fs::path& de
     size_t entries = 0;
     std::vector<char> buffer(1 << 16);
     archive_entry* entry = nullptr;
+    // libarchive inflates an unread entry inside the next header call, with no size cap and no cancel point.
+    const auto skip_body = [&] {
+        if (archive_entry_size_is_set(entry) && archive_entry_size(entry) > 0
+            && static_cast<uint64_t>(archive_entry_size(entry)) > limits.MaxEntryBytes)
+            throw InvalidData("A file in the archive is too large.");
+        uint64_t size = 0;
+        for (;;) {
+            cancellation.ThrowIfCancelled();
+            const la_ssize_t read = archive_read_data(reader.Handle, buffer.data(), buffer.size());
+            if (read == 0) break;
+            if (read < 0) reader.Fail("Could not read an entry in the archive");
+            size += static_cast<uint64_t>(read);
+            total += static_cast<uint64_t>(read);
+            if (size > limits.MaxEntryBytes) throw InvalidData("A file in the archive is too large.");
+            if (total > limits.MaxTotalBytes) throw InvalidData("The archive expands to more data than a mod should.");
+            if (progress) progress(total);
+        }
+    };
     for (;;) {
         cancellation.ThrowIfCancelled();
         const int status = archive_read_next_header(reader.Handle, &entry);
         if (status == ARCHIVE_EOF) break;
         if (status < ARCHIVE_WARN) reader.Fail("The archive is damaged");
         if (++entries > limits.MaxEntries) throw InvalidData("The archive has too many entries.");
-        if (archive_entry_filetype(entry) != AE_IFREG) continue;
+        if (archive_entry_filetype(entry) != AE_IFREG) { skip_body(); continue; }
 
         std::wstring entry_path;
         if (const wchar_t* wide = archive_entry_pathname_w(entry)) entry_path = wide;
@@ -107,7 +136,7 @@ ExtractedMods ExtractModArchive(const fs::path& archive_path, const fs::path& de
         const auto slash = entry_path.find_last_of(L'/');
         const std::wstring folder = slash == std::wstring::npos ? std::wstring() : Lower(entry_path.substr(0, slash));
         const std::wstring name = SafeFileName(slash == std::wstring::npos ? entry_path : entry_path.substr(slash + 1));
-        if (name.empty() || !HasExtension(name, L".vpk")) { ++result.SkippedEntries; continue; }
+        if (name.empty() || !HasExtension(name, L".vpk")) { skip_body(); ++result.SkippedEntries; continue; }
         if (archive_entry_is_encrypted(entry)) throw InvalidData("The archive is password protected.");
         if (archive_entry_size_is_set(entry) && static_cast<uint64_t>(archive_entry_size(entry)) > limits.MaxEntryBytes)
             throw InvalidData("A file in the archive is too large.");
@@ -116,7 +145,7 @@ ExtractedMods ExtractModArchive(const fs::path& archive_path, const fs::path& de
         const auto directory = destination / std::to_wstring(found->second);
         if (inserted) fs::create_directories(directory);
         const auto target = directory / name;
-        if (fs::exists(target, error)) { ++result.SkippedEntries; continue; }  // The same name twice, differing only in case.
+        if (fs::exists(target, error)) { skip_body(); ++result.SkippedEntries; continue; }  // The same name twice, differing only in case.
 
         uint64_t size = 0;
         {

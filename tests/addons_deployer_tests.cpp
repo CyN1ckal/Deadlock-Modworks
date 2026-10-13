@@ -175,6 +175,20 @@ TEST(AddonsDeploy, RemovesLeftoverTemporaryFiles) {
     EXPECT_FALSE(fs::exists(addons / ".modworks-1-1.tmp"));
 }
 
+TEST(AddonsDeploy, PutsAParkedSlotFileBack) {
+    TempFolder temp;
+    Library library(temp.Path / "library");
+    library.Add("a");
+    const auto addons = temp.Path / "addons";
+    DeployAddons(addons, library.List({"a"}));
+    fs::rename(addons / "pak01_dir.vpk", addons / ".modworks-aside-1.tmp");
+    const auto scan = ScanAddons(addons);
+    EXPECT_EQ(Read(addons / "pak01_dir.vpk"), "content of a");
+    ASSERT_EQ(scan.Managed.size(), 1u);
+    EXPECT_EQ(scan.Managed[0].ContentId, "a");
+    EXPECT_FALSE(fs::exists(addons / ".modworks-aside-1.tmp"));
+}
+
 TEST(AddonsDeploy, TreatsADamagedRecordAsForeign) {
     TempFolder temp;
     Library library(temp.Path / "library");
@@ -186,6 +200,51 @@ TEST(AddonsDeploy, TreatsADamagedRecordAsForeign) {
     EXPECT_TRUE(scan.Managed.empty());
     EXPECT_EQ(scan.Foreign, (std::set<int>{1}));
     EXPECT_FALSE(scan.Notes.empty());
+}
+
+TEST(AddonsDeploy, FailedCopyPutsMovedModsBack) {
+    TempFolder temp;
+    Library library(temp.Path / "library");
+    library.Add("a");
+    library.Add("b");
+    const auto addons = temp.Path / "addons";
+    DeployAddons(addons, library.List({"a", "b"}));
+    auto mods = library.List({"b", "a"});
+    mods.push_back(DeployMod{"c", "Mod c", temp.Path / "missing.vpk"});
+    EXPECT_THROW(DeployAddons(addons, mods), IoError);
+    EXPECT_EQ(Contents(addons), (std::map<std::string, std::string>{{"pak01_dir.vpk", "content of a"}, {"pak02_dir.vpk", "content of b"}}));
+    const auto scan = ScanAddons(addons);
+    ASSERT_EQ(scan.Managed.size(), 2u);
+    EXPECT_EQ(scan.Managed[0].ContentId, "a");
+    EXPECT_EQ(scan.Managed[1].ContentId, "b");
+}
+
+TEST(AddonsDeploy, FailedCopyPutsRemovedModsBack) {
+    TempFolder temp;
+    Library library(temp.Path / "library");
+    library.Add("a");
+    library.Add("b");
+    const auto addons = temp.Path / "addons";
+    DeployAddons(addons, library.List({"a", "b"}));
+    EXPECT_THROW(DeployAddons(addons, {DeployMod{"c", "Mod c", temp.Path / "missing.vpk"}}), IoError);
+    EXPECT_EQ(Contents(addons), (std::map<std::string, std::string>{{"pak01_dir.vpk", "content of a"}, {"pak02_dir.vpk", "content of b"}}));
+    EXPECT_EQ(ScanAddons(addons).Managed.size(), 2u);
+}
+
+TEST(AddonsDeploy, CancelDuringCopyPutsMovedModsBack) {
+    TempFolder temp;
+    Library library(temp.Path / "library");
+    library.Add("a");
+    library.Add("b");
+    const auto addons = temp.Path / "addons";
+    DeployAddons(addons, library.List({"a", "b"}));
+    Write(temp.Path / "c.vpk", std::string(1 << 20, 'c'));
+    auto mods = library.List({"b", "a"});
+    mods.push_back(DeployMod{"c", "Mod c", temp.Path / "c.vpk"});
+    CancellationSource cancel;
+    EXPECT_THROW(DeployAddons(addons, mods, cancel.Token(), [&](uint64_t copied, uint64_t) { if (copied > 0) cancel.Cancel(); }), OperationCancelled);
+    EXPECT_EQ(Contents(addons), (std::map<std::string, std::string>{{"pak01_dir.vpk", "content of a"}, {"pak02_dir.vpk", "content of b"}}));
+    EXPECT_EQ(ScanAddons(addons).Managed.size(), 2u);
 }
 
 TEST(AddonsDeploy, CancellingKeepsTheRecordOfWhatIsInPlace) {

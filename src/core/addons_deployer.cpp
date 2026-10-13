@@ -24,6 +24,23 @@ namespace fs = std::filesystem;
 using nlohmann::json;
 
 constexpr const wchar_t* kTempPrefix = L".modworks-";
+// A slot file parked by a deploy that has not finished. The number is the slot it came from.
+constexpr std::wstring_view kAsidePrefix = L".modworks-aside-";
+
+std::optional<int> AsideSlot(std::wstring_view name) {
+    constexpr std::wstring_view suffix = L".tmp";
+    if (!name.starts_with(kAsidePrefix) || !name.ends_with(suffix)) return std::nullopt;
+    const auto number = name.substr(kAsidePrefix.size(), name.size() - kAsidePrefix.size() - suffix.size());
+    if (number.empty() || !std::all_of(number.begin(), number.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; })) return std::nullopt;
+    int slot = 0;
+    for (const wchar_t c : number) slot = slot * 10 + (c - L'0');
+    if (slot < kFirstAddonSlot || slot > kLastAddonSlot) return std::nullopt;
+    return slot;
+}
+
+fs::path AsidePath(const fs::path& addons, int slot) {
+    return addons / (std::wstring(kAsidePrefix) + std::to_wstring(slot) + L".tmp");
+}
 
 int64_t Stamp(const fs::path& path) { return fs::last_write_time(path).time_since_epoch().count(); }
 
@@ -96,6 +113,8 @@ DWORD CALLBACK CopyProgress(LARGE_INTEGER, LARGE_INTEGER transferred, LARGE_INTE
     auto& state = *static_cast<CopyState*>(data);
     if (state.Cancellation->IsCancelled()) return PROGRESS_CANCEL;
     if (*state.Progress) (*state.Progress)(state.Done + static_cast<uint64_t>(transferred.QuadPart), state.Total);
+    // The callback may have cancelled this copy. Stopping here keeps the partial file out of the folder.
+    if (state.Cancellation->IsCancelled()) return PROGRESS_CANCEL;
     return PROGRESS_CONTINUE;
 }
 
@@ -185,12 +204,25 @@ AddonsScan ScanAddons(const fs::path& addons) {
     std::error_code error;
     if (!fs::is_directory(addons, error)) return scan;
     const auto recorded = ReadManifest(addons, scan.Notes);
+    // An interrupted deploy parks a slot file as .modworks-aside-N.tmp. Put it back when that slot is empty,
+    // because it is the only copy. A .modworks-*.tmp that is not an aside is an unfinished copy and can go.
+    std::vector<fs::path> parked, leftovers;
+    for (const auto& entry : fs::directory_iterator(addons)) {
+        if (!entry.is_regular_file(error)) continue;
+        const auto name = entry.path().filename().wstring();
+        if (AsideSlot(name)) parked.push_back(entry.path());
+        else if (name.starts_with(kTempPrefix) && name.ends_with(L".tmp")) leftovers.push_back(entry.path());
+    }
+    for (const auto& path : parked) {
+        const auto dest = addons / Widen(AddonSlotName(*AsideSlot(path.filename().wstring())));
+        if (!fs::exists(dest, error)) fs::rename(path, dest, error);
+    }
+    for (const auto& path : leftovers) fs::remove(path, error);
     std::map<int, std::vector<fs::path>> by_slot;
     for (const auto& entry : fs::directory_iterator(addons)) {
         if (!entry.is_regular_file(error)) continue;
         const auto name = entry.path().filename().wstring();
-        // A temporary copy left by a deploy that was interrupted.
-        if (name.starts_with(kTempPrefix) && name.ends_with(L".tmp")) { fs::remove(entry.path(), error); continue; }
+        if (AsideSlot(name) || (name.starts_with(kTempPrefix) && name.ends_with(L".tmp"))) continue;
         if (const auto slot = AddonSlotOf(Narrow(name))) by_slot[*slot].push_back(entry.path());
     }
     for (const auto& file : recorded) {
@@ -257,41 +289,53 @@ DeployResult DeployAddons(const fs::path& addons, const std::vector<DeployMod>& 
             copies.push_back({slots[i], &enabled[i]});
         }
     }
-    uint64_t total = 0;
-    for (const auto& copy : copies) total += fs::file_size(copy.Mod->Source);
-
     std::vector<AddonFile> done = kept;
-    std::vector<std::pair<fs::path, int>> staged;  // Temporary file and the slot it is for.
-    std::vector<const DeployMod*> staged_mods;
+    // Copies are deleted on failure. Moves and removals are parked under their old slot and renamed back.
+    struct Staged {
+        fs::path Temp;
+        int DestSlot = -1;
+        int OriginSlot = -1;
+        bool Copy = false;
+        bool Placed = false;
+        const DeployMod* Mod = nullptr;
+    };
+    std::vector<Staged> staged;
     int counter = 0;
-    const auto temp_name = [&] { return addons / (std::wstring(kTempPrefix) + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(++counter) + L".tmp"); };
-    // Modworks files that are neither kept nor moved yet. They stay recorded until they are gone.
-    std::vector<AddonFile> pending;
-    for (size_t m = 0; m < record.size(); ++m) if (!used[m] || std::any_of(moves.begin(), moves.end(), [&](const Move& mv) { return mv.From == m; })) pending.push_back(record[m]);
-    const auto drop_pending = [&](int slot) {
-        pending.erase(std::remove_if(pending.begin(), pending.end(), [&](const AddonFile& f) { return f.Slot == slot; }), pending.end());
+    uint64_t total = 0;
+    const auto copy_temp = [&] {
+        return addons / (std::wstring(kTempPrefix) + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(++counter) + L".tmp");
+    };
+    const auto park = [&](int origin) {
+        const auto temp = AsidePath(addons, origin);
+        std::error_code error;
+        fs::remove(temp, error);
+        fs::rename(addons / Widen(AddonSlotName(origin)), temp);
+        return temp;
     };
     try {
         for (size_t m = 0; m < record.size(); ++m) {
             if (used[m]) continue;
             cancellation.ThrowIfCancelled();
-            fs::remove(addons / Widen(AddonSlotName(record[m].Slot)));
-            drop_pending(record[m].Slot);
+            const int origin = record[m].Slot;
+            staged.push_back(Staged{park(origin), -1, origin, false, false, nullptr});
             ++result.Removed;
         }
         for (const auto& move : moves) {
             cancellation.ThrowIfCancelled();
-            const auto temp = temp_name();
-            fs::rename(addons / Widen(AddonSlotName(record[move.From].Slot)), temp);
-            drop_pending(record[move.From].Slot);
-            staged.emplace_back(temp, move.Slot);
-            staged_mods.push_back(move.Mod);
+            const int origin = record[move.From].Slot;
+            staged.push_back(Staged{park(origin), move.Slot, origin, false, false, move.Mod});
             ++result.Moved;
+        }
+        for (const auto& copy : copies) {
+            std::error_code error;
+            const auto size = fs::file_size(copy.Mod->Source, error);
+            if (error) throw IoError("Could not read " + copy.Mod->Name + ".");
+            total += size;
         }
         uint64_t copied = 0;
         for (const auto& copy : copies) {
             cancellation.ThrowIfCancelled();
-            const auto temp = temp_name();
+            const auto temp = copy_temp();
             CopyState state{&cancellation, &progress, copied, total};
             BOOL cancel = FALSE;
             if (!CopyFileExW(copy.Mod->Source.c_str(), temp.c_str(), CopyProgress, &state, &cancel, COPY_FILE_FAIL_IF_EXISTS)) {
@@ -302,24 +346,42 @@ DeployResult DeployAddons(const fs::path& addons, const std::vector<DeployMod>& 
                 throw IoError("Could not copy " + copy.Mod->Name + " into the addons folder. Windows error " + std::to_string(code) + ".");
             }
             copied += fs::file_size(temp);
-            staged.emplace_back(temp, copy.Slot);
-            staged_mods.push_back(copy.Mod);
+            staged.push_back(Staged{temp, copy.Slot, -1, true, false, copy.Mod});
             ++result.Copied;
         }
-        for (size_t i = 0; i < staged.size(); ++i) {
-            const auto target = addons / Widen(AddonSlotName(staged[i].second));
-            if (!MoveFileExW(staged[i].first.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH))
-                throw IoError("Could not place " + staged_mods[i]->Name + " as " + AddonSlotName(staged[i].second) + ". Windows error "
+        for (auto& item : staged) {
+            if (item.DestSlot < 0) continue;
+            const auto target = addons / Widen(AddonSlotName(item.DestSlot));
+            if (!MoveFileExW(item.Temp.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH))
+                throw IoError("Could not place " + item.Mod->Name + " as " + AddonSlotName(item.DestSlot) + ". Windows error "
                     + std::to_string(GetLastError()) + ".");
-            done.push_back(Record(addons, staged[i].second, *staged_mods[i]));
+            item.Placed = true;
+            done.push_back(Record(addons, item.DestSlot, *item.Mod));
+        }
+        for (const auto& item : staged) {
+            if (item.DestSlot >= 0) continue;
+            std::error_code error;
+            if (!fs::remove(item.Temp, error) && fs::exists(item.Temp))
+                throw IoError("Could not remove a mod that is no longer enabled.");
         }
         staged.clear();
     } catch (...) {
         std::error_code error;
-        for (const auto& [temp, slot] : staged) fs::remove(temp, error);
-        auto partial = done;
-        for (const auto& file : pending) if (fs::exists(addons / Widen(AddonSlotName(file.Slot)), error)) partial.push_back(file);
-        try { WriteManifest(addons, partial); } catch (const std::exception&) {}
+        for (auto it = staged.rbegin(); it != staged.rend(); ++it) {
+            if (!it->Placed) continue;
+            fs::rename(addons / Widen(AddonSlotName(it->DestSlot)), it->Temp, error);
+            it->Placed = false;
+        }
+        for (auto& item : staged) {
+            if (item.Copy) {
+                fs::remove(item.Temp, error);
+                continue;
+            }
+            if (!fs::exists(item.Temp, error)) continue;
+            const auto origin = addons / Widen(AddonSlotName(item.OriginSlot));
+            if (!fs::exists(origin, error)) fs::rename(item.Temp, origin, error);
+        }
+        try { WriteManifest(addons, scan.Managed); } catch (const std::exception&) {}
         throw;
     }
     WriteManifest(addons, done);

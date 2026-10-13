@@ -42,4 +42,9 @@ std::string HttpGet(std::string_view url, const HttpOptions& options = {}, Cance
 void HttpDownload(std::string_view url, const std::filesystem::path& destination, const HttpOptions& options = {},
     CancellationToken cancellation = {}, const DownloadProgress& progress = {});
 
+// Decodes one response body. `encoded_length` is Content-Length when the server sent one, and it counts
+// `encoded` rather than the inflated result: gzip's decoded size is a different number.
+std::string DecodeHttpBody(std::string_view encoded, std::string_view content_encoding,
+    std::optional<uint64_t> encoded_length, uint64_t max_bytes);
+
 }  // namespace skeleton_repair

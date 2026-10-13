@@ -74,8 +74,8 @@ using DeployProgress = std::function<void(uint64_t, uint64_t)>;
 
 // Makes the addons folder hold exactly `enabled`, highest priority first, as pakNN_dir.vpk files: mods already in
 // place are kept, moved ones are renamed, new ones are copied, and Modworks files no longer wanted are removed.
-// Foreign files are never touched. The manifest is saved even when this throws partway, so every file Modworks
-// wrote stays recorded. The game must be closed; see IsDeadlockRunning.
+// Foreign files are never touched. A failure puts moved and removed files back and deletes copies that did not
+// finish, then rewrites the manifest to match. The game must be closed; see IsDeadlockRunning.
 DeployResult DeployAddons(const std::filesystem::path& addons, const std::vector<DeployMod>& enabled,
     CancellationToken cancellation = {}, const DeployProgress& progress = {});
 

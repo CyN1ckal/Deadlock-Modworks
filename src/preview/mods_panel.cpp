@@ -102,7 +102,7 @@ void ModsPanel::Poll() {
         for (const auto& note : result.Notes) text += "\n" + note;
         SetStatus(text, false);
     } catch (const OperationCancelled&) {
-        SetStatus("Applying was cancelled. The addons folder holds what was finished.", false);
+        SetStatus("Applying was cancelled. The addons folder was left as it was.", false);
     } catch (const std::exception& error) {
         SetStatus(std::string("Could not apply the mods: ") + error.what(), true);
     }
@@ -450,16 +450,24 @@ void ModsPanel::DrawProfilePopups() {
         ImGui::TextWrapped("Deadlock's gameinfo.gi does not list citadel/addons, so the game would not load any mod placed there.");
         ImGui::TextWrapped("Modworks can add that one line. The original is kept as gameinfo.gi.modworks.bak. A game update may "
             "replace the file again; this page will tell you when that happens.");
-        if (ImGui::Button("Add the line and apply") && check_.Citadel) {
+        // Refresh only updates Running every couple of seconds, and this popup stays open across frames.
+        const bool running = IsDeadlockRunning();
+        if (running) ImGui::TextColored(ui::kWarning, "Close Deadlock first. It keeps its mod files open while it runs.");
+        ImGui::BeginDisabled(running || !check_.Citadel);
+        if (ImGui::Button("Add the line and apply")) {
             try {
-                PatchGameInfo(*check_.Citadel);
-                checked_at_ = {};
-                pending_apply_ = true;
+                if (IsDeadlockRunning()) SetStatus("Close Deadlock first. It keeps its mod files open while it runs.", true);
+                else {
+                    PatchGameInfo(*check_.Citadel);
+                    checked_at_ = {};
+                    pending_apply_ = true;
+                }
             } catch (const std::exception& error) {
                 SetStatus(std::string("Could not change gameinfo.gi: ") + error.what(), true);
             }
             ImGui::CloseCurrentPopup();
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button("Apply without it")) { pending_apply_ = true; ImGui::CloseCurrentPopup(); }
         ImGui::SameLine();

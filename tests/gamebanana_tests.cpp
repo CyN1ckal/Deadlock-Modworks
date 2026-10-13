@@ -5,6 +5,10 @@
 #include "vpk.hpp"
 
 #include <filesystem>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <zlib.h>
 
 #include <gtest/gtest.h>
 
@@ -133,6 +137,35 @@ TEST(HttpUrls, MatchesDomainsAndSubdomainsOnly) {
     EXPECT_TRUE(HostWithin("Images.GameBanana.com", "gamebanana.com"));
     EXPECT_FALSE(HostWithin("evilgamebanana.com", "gamebanana.com"));
     EXPECT_FALSE(HostWithin("gamebanana.com.evil.example", "gamebanana.com"));
+}
+
+std::string Gzip(std::string_view text) {
+    z_stream stream{};
+    if (deflateInit2(&stream, Z_BEST_SPEED, Z_DEFLATED, 16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+        throw std::runtime_error("gzip");
+    std::string out(deflateBound(&stream, static_cast<uLong>(text.size())), '\0');
+    stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(text.data()));
+    stream.avail_in = static_cast<uInt>(text.size());
+    stream.next_out = reinterpret_cast<Bytef*>(out.data());
+    stream.avail_out = static_cast<uInt>(out.size());
+    const int rc = deflate(&stream, Z_FINISH);
+    const auto produced = static_cast<size_t>(stream.total_out);
+    deflateEnd(&stream);
+    if (rc != Z_STREAM_END) throw std::runtime_error("gzip");
+    out.resize(produced);
+    return out;
+}
+
+TEST(HttpBody, KeepsGzipWhenContentLengthIsTheCompressedSize) {
+    const std::string plain(200, 'm');
+    const auto gzip = Gzip(plain);
+    ASSERT_LT(gzip.size(), plain.size());
+    EXPECT_EQ(DecodeHttpBody(gzip, "gzip", gzip.size(), 1 << 20), plain);
+    EXPECT_EQ(DecodeHttpBody(gzip, "GZip", gzip.size(), 1 << 20), plain);
+    EXPECT_THROW(DecodeHttpBody(gzip, "gzip", plain.size(), 1 << 20), IoError);
+    EXPECT_EQ(DecodeHttpBody(plain, "", plain.size(), 1 << 20), plain);
+    EXPECT_THROW(DecodeHttpBody(plain, "", plain.size() + 5, 1 << 20), IoError);
+    EXPECT_THROW(DecodeHttpBody(gzip, "gzip", gzip.size(), 8), InvalidData);
 }
 
 // Talks to gamebanana.com, so it only runs with --gtest_also_run_disabled_tests.

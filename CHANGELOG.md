@@ -11,6 +11,13 @@
 - `mods.json` in the data root keeps enabled mods, load order, profiles and download sources.
 - zlib 1.3.1, XZ Utils (liblzma) 5.8.1 and libarchive 3.8.1 are built from pinned, hash-checked sources. Their licenses are in `THIRD_PARTY_NOTICES.md` and the package's `licenses` folder.
 
+### Fixed
+
+- **Apply to game** puts moved and removed mods back when a later copy fails or you cancel, instead of deleting them.
+- A gzip download is kept. The compressed `Content-Length` is no longer compared to the decoded file.
+- Archive extraction stops on a skipped file that expands past the size limit, and it does not open DOS device names such as `NUL.vpk`.
+- **Add the line and apply** does not change `gameinfo.gi` while Deadlock is running.
+
 ### Changed
 
 - The quick start's Import and Install or remove steps describe **Get mods** and **Apply to game**. Building a pack still does not install it.

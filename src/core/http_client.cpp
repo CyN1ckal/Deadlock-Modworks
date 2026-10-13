@@ -9,9 +9,12 @@
 #include <windows.h>
 #include <winhttp.h>
 
+#include <zlib.h>
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -69,6 +72,7 @@ bool Allowed(const HttpOptions& options, std::string_view host) {
 struct Response {
     Handle Session, Connection, Request;
     std::optional<uint64_t> Length;
+    std::string ContentEncoding;
 };
 
 Response Open(std::string_view url, const HttpOptions& options, CancellationToken& cancellation) {
@@ -77,9 +81,8 @@ Response Open(std::string_view url, const HttpOptions& options, CancellationToke
     response.Session = Handle(WinHttpOpen(agent.c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
     if (!response.Session.Value) Fail("Could not start a network session.");
     WinHttpSetTimeouts(response.Session.Value, 15000, 15000, 30000, 60000);
-    DWORD decompression = WINHTTP_DECOMPRESSION_FLAG_ALL;
-    WinHttpSetOption(response.Session.Value, WINHTTP_OPTION_DECOMPRESSION, &decompression, sizeof(decompression));
-
+    // Decompression stays off. WinHTTP would return the decoded body while Content-Length stayed compressed,
+    // and a complete gzip response would look truncated. The body is inflated in ReadBody instead.
     std::string current(url);
     for (int hop = 0; hop <= kMaxRedirects; ++hop) {
         cancellation.ThrowIfCancelled();
@@ -92,6 +95,7 @@ Response Open(std::string_view url, const HttpOptions& options, CancellationToke
         response.Request = Handle(WinHttpOpenRequest(response.Connection.Value, L"GET", target.c_str(), nullptr,
             WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
         if (!response.Request.Value) Fail("Could not request " + parsed->Host + ".");
+        WinHttpAddRequestHeaders(response.Request.Value, L"Accept-Encoding: gzip, deflate\r\n", static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD);
         DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
         WinHttpSetOption(response.Request.Value, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
         if (!WinHttpSendRequest(response.Request.Value, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
@@ -113,29 +117,131 @@ Response Open(std::string_view url, const HttpOptions& options, CancellationToke
         if (!length.empty() && std::all_of(length.begin(), length.end(), [](unsigned char c) { return std::isdigit(c); }))
             response.Length = std::stoull(length);
         if (response.Length && *response.Length > options.MaxBytes) throw InvalidData("The download is larger than Modworks accepts.");
+        response.ContentEncoding = Narrow(Header(response.Request.Value, WINHTTP_QUERY_CONTENT_ENCODING));
         return response;
     }
     throw IoError("The link redirected too many times.");
 }
 
-// Reads the body in pieces until the server ends it.
+void RequireFullBody(std::optional<uint64_t> encoded_length, uint64_t encoded_received) {
+    if (encoded_length && encoded_received != *encoded_length) throw IoError("The download ended early. Try again.");
+}
+
+std::string EncodingName(std::string_view header) {
+    const auto end = header.find_first_of(";,");
+    auto token = header.substr(0, end);
+    while (!token.empty() && std::isspace(static_cast<unsigned char>(token.front()))) token.remove_prefix(1);
+    while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back()))) token.remove_suffix(1);
+    std::string lower(token);
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lower;
+}
+
+// Inflates a gzip or zlib-wrapped deflate body. Identity responses do not construct one.
+struct Inflate {
+    z_stream Stream{};
+    bool On = false;
+    explicit Inflate(bool gzip) {
+        if (inflateInit2(&Stream, gzip ? 16 + MAX_WBITS : MAX_WBITS) != Z_OK) throw IoError("Could not decompress the download.");
+        On = true;
+    }
+    ~Inflate() { if (On) inflateEnd(&Stream); }
+    Inflate(const Inflate&) = delete;
+    Inflate& operator=(const Inflate&) = delete;
+};
+
+struct BodyDecoder {
+    std::unique_ptr<Inflate> Compressed;
+    explicit BodyDecoder(std::string_view content_encoding) {
+        const auto name = EncodingName(content_encoding);
+        if (name.empty() || name == "identity") return;
+        if (name == "gzip" || name == "x-gzip") Compressed = std::make_unique<Inflate>(true);
+        else if (name == "deflate") Compressed = std::make_unique<Inflate>(false);
+        else throw InvalidData("The download uses " + name + " compression, which Modworks cannot read.");
+    }
+    bool Identity() const { return !Compressed; }
+
+    template <typename Sink>
+    void Emit(const char* data, size_t size, uint64_t max_decoded, uint64_t& decoded, Sink&& sink) {
+        decoded += size;
+        if (decoded > max_decoded) throw InvalidData("The download is larger than Modworks accepts.");
+        if (size) sink(data, size);
+    }
+
+    template <typename Sink>
+    void Consume(const char* data, size_t size, uint64_t max_decoded, uint64_t& decoded, Sink&& sink) {
+        if (!Compressed) { Emit(data, size, max_decoded, decoded, sink); return; }
+        size_t offset = 0;
+        std::vector<char> out(1 << 16);
+        while (offset < size) {
+            const uInt chunk = static_cast<uInt>(std::min(size - offset, static_cast<size_t>(1u << 20)));
+            auto& stream = Compressed->Stream;
+            stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data + offset));
+            stream.avail_in = chunk;
+            offset += chunk;
+            while (stream.avail_in > 0) {
+                stream.next_out = reinterpret_cast<Bytef*>(out.data());
+                stream.avail_out = static_cast<uInt>(out.size());
+                const int rc = inflate(&stream, Z_NO_FLUSH);
+                if (rc != Z_OK && rc != Z_STREAM_END) throw IoError("The download could not be decompressed.");
+                Emit(out.data(), out.size() - stream.avail_out, max_decoded, decoded, sink);
+                if (rc == Z_STREAM_END) return;
+            }
+        }
+    }
+
+    template <typename Sink>
+    void Finish(uint64_t max_decoded, uint64_t& decoded, Sink&& sink) {
+        if (!Compressed) return;
+        auto& stream = Compressed->Stream;
+        stream.next_in = nullptr;
+        stream.avail_in = 0;
+        std::vector<char> out(1 << 16);
+        for (;;) {
+            stream.next_out = reinterpret_cast<Bytef*>(out.data());
+            stream.avail_out = static_cast<uInt>(out.size());
+            const int rc = inflate(&stream, Z_FINISH);
+            Emit(out.data(), out.size() - stream.avail_out, max_decoded, decoded, sink);
+            if (rc == Z_STREAM_END) return;
+            if (rc != Z_OK || stream.avail_out == out.size()) throw IoError("The download could not be decompressed.");
+        }
+    }
+};
+
+// Reads the body in pieces until the server ends it. Content-Length is compared to the encoded bytes.
 template <typename Sink>
 void ReadBody(Response& response, const HttpOptions& options, CancellationToken& cancellation, const DownloadProgress& progress, Sink&& sink) {
+    BodyDecoder decoder(response.ContentEncoding);
     std::vector<char> buffer(1 << 16);
-    uint64_t received = 0;
+    uint64_t raw = 0, decoded = 0;
+    const auto report = [&] { if (progress) progress(decoded, decoder.Identity() ? response.Length : std::nullopt); };
     for (;;) {
         cancellation.ThrowIfCancelled();
         DWORD read = 0;
         if (!WinHttpReadData(response.Request.Value, buffer.data(), static_cast<DWORD>(buffer.size()), &read)) Fail("The download was interrupted.");
         if (read == 0) break;
-        received += read;
-        if (received > options.MaxBytes) throw InvalidData("The download is larger than Modworks accepts.");
-        sink(buffer.data(), read);
-        if (progress) progress(received, response.Length);
+        raw += read;
+        if (raw > options.MaxBytes) throw InvalidData("The download is larger than Modworks accepts.");
+        decoder.Consume(buffer.data(), read, options.MaxBytes, decoded, sink);
+        report();
     }
-    if (response.Length && received != *response.Length) throw IoError("The download ended early. Try again.");
+    decoder.Finish(options.MaxBytes, decoded, sink);
+    RequireFullBody(response.Length, raw);
+    report();
 }
 }  // namespace
+
+std::string DecodeHttpBody(std::string_view encoded, std::string_view content_encoding,
+    std::optional<uint64_t> encoded_length, uint64_t max_bytes) {
+    RequireFullBody(encoded_length, encoded.size());
+    BodyDecoder decoder(content_encoding);
+    std::string out;
+    uint64_t decoded = 0;
+    const auto sink = [&](const char* data, size_t size) { out.append(data, size); };
+    if (!encoded.empty()) decoder.Consume(encoded.data(), encoded.size(), max_bytes, decoded, sink);
+    decoder.Finish(max_bytes, decoded, sink);
+    return out;
+}
 
 std::optional<HttpsUrl> ParseHttpsUrl(std::string_view url) {
     constexpr std::string_view scheme = "https://";
