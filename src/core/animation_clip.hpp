@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bone_transform.hpp"
 #include "skeleton.hpp"
 
 #include <cstdint>
@@ -8,13 +9,6 @@
 #include <vector>
 
 namespace skeleton_repair {
-
-// A bone transform relative to its parent.
-struct BoneTransform {
-    Vec3 Translation;
-    Quat Rotation;
-    float Scale = 1;
-};
 
 // A compiled AG2 animation clip (.vnmclip_c). Each track animates one bone of the clip's
 // animation skeleton, in that skeleton's bone order.
