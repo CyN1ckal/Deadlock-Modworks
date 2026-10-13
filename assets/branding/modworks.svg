@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Flat Modworks mark. No stroke, gradient, or text. -->
+  <rect width="256" height="256" rx="30.72" fill="#141B23"/>
+  <!-- Rear tiles, offset upward behind the outer strokes. -->
+  <rect x="38" y="40" width="46" height="28" fill="#659BC3"/>
+  <rect x="172" y="40" width="46" height="28" fill="#659BC3"/>
+  <!-- Inner strokes meeting at a low center point. -->
+  <polygon points="66,62 114,62 128,190" fill="#4682B4"/>
+  <polygon points="190,62 142,62 128,190" fill="#4682B4"/>
+  <!-- Outer strokes, in front of the tiles. -->
+  <rect x="38" y="62" width="46" height="146" fill="#E6EDF3"/>
+  <rect x="172" y="62" width="46" height="146" fill="#E6EDF3"/>
+</svg>
