@@ -1,3 +1,5 @@
+> **Historical.** Written October 11, 2026, before Deadlock Modworks 0.1. The storage description and test counts below are a checkpoint from that day, not the current app. Do not treat them as release evidence. The library that ships is described in [USER_GUIDE.md](USER_GUIDE.md). What was actually run is recorded in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+
 # Mod manager checkpoint
 
 Work paused at the user's request on October 11, 2026. The local mod store is work in progress; finish verification before treating it as complete.
