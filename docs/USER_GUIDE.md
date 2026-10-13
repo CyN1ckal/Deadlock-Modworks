@@ -18,6 +18,8 @@ The window title is **Deadlock Modworks 0.1.0**. The menu bar is **File**, **Edi
 | **Skin repairs** | Ctrl+4 | Analyze and repair supported skeleton changes |
 | **Model inspector** | Ctrl+5 | One model: **Preview** and **Compare versions** |
 | **Multi view** | Ctrl+6 | Up to four models of one character |
+| **Mods** | Ctrl+7 | Enabled mods, load order, profiles, and **Apply to game** |
+| **Get mods** | Ctrl+8 | Browse, search and download Deadlock mods from GameBanana |
 
 **View > Explorer** (**Ctrl+Shift+E**) shows or hides the explorer. **View > Workspace** focuses the workspace. **View > Status bar** shows or hides the bar along the bottom. **View > Back** (**Alt+Left**) returns to the previous page. **View > Reset layout** puts the explorer on the left and the workspace on the right again. The tooltip says mods, the catalog, and thumbnails stay. It does not clear the library and it does not move the window. **View > Refresh library** (**F5**) reopens every source and reloads thumbnails.
 
@@ -39,7 +41,7 @@ These are the rows in the **Keyboard shortcuts** dialog.
 | Ctrl+B | Build the pack as a VPK |
 | Ctrl+F | Search skins, packages and sources |
 | F5 | Reopen every source and reload thumbnails |
-| Ctrl+1 ... Ctrl+6 | Library, builder, history, repairs, inspector, multi view |
+| Ctrl+1 ... Ctrl+8 | Library, builder, history, repairs, inspector, multi view, mods, get mods |
 | Alt+Left | Back to the previous page |
 | Ctrl+Shift+E | Show or hide the explorer |
 | View > Workspace | Focus the workspace |
@@ -206,6 +208,44 @@ Right-click a version for **View**, **Compare with A**, **Compare with game**, *
 
 There is no command that makes an older version the gallery's current source. **View** and **Compare A/B** still open it. **Assemble...** can write a new VPK from a selected copy.
 
+## Get mods
+
+**Get mods** (**Ctrl+8**, or **File > Get mods from GameBanana**) reads Deadlock mods from GameBanana's public API. It needs an internet connection and nothing else; no GameBanana account is used.
+
+- The field at the top takes a GameBanana mod link, such as `https://gamebanana.com/mods/691764`, a `.../mods/download/...` link, a mod manager link that ends in `,Mod,<id>`, or a bare mod id. Anything else is searched as text. An empty field shows every Deadlock mod.
+- Without a search, the page browses with a sort (**Most downloaded**, **Most liked**, **Most viewed**, **Newest**, **Recently updated**) and a category. The arrows on the right change pages.
+- Mods whose authors set a content rating show **Rated content** instead of their preview. **Show rated previews** shows them.
+- A mod already in your library carries an **In library** badge.
+
+Click a mod to see its screenshots, its description and its files, newest first. Each file has **Download & enable** and **Download**. A download:
+
+1. is fetched over HTTPS from gamebanana.com only, and checked against GameBanana's MD5 when the mod lists one;
+2. is opened if it is a zip, 7z or rar archive. Only the `.vpk` files inside are written. Readme files, images and nested archives are skipped, and paths inside the archive cannot place a file outside a temporary folder under `<data-root>\downloads`, which is removed afterwards. A plain `.vpk` file is used as it is;
+3. is stored in the library like any added mod, named after the GameBanana mod, and added to the collection.
+
+**Download & enable** also enables it in the current profile on the **Mods** page. Neither button changes the game folder. A file that is not a zip, 7z, rar or VPK, and an archive without a mod VPK, report that the mod needs to be installed by hand from its page. Downloads share the status bar's progress and **Cancel** with imports, and wait while other library work runs.
+
+## Mods
+
+**Mods** (**Ctrl+7**) lists every mod in the library with a checkbox. A ticked mod is enabled in the current profile.
+
+- **Load order.** The list is the load order. Drag a mod, use the arrows, or right-click it for **Move to top** and **Move to bottom**. The number beside an enabled mod is its position. When two enabled mods contain the same file, the one higher in the list wins. Such mods show **overrides** or **overridden**; hover it to see which mods share files and how many.
+- **Profiles.** **Profile** switches between named sets of enabled mods. **New** starts a profile, optionally with the mods enabled now. **Rename** and **Delete** change the current one. Every profile shares the one load order. The last profile cannot be deleted.
+- **Enable all** and **Disable all** change the current profile. The explorer's right-click menu on a source has **Enable for the game** or **Disable for the game** too.
+- Right-click a mod for **Show skins in library**, **Open GameBanana page** for downloaded mods, and the path items. **Source** says **GameBanana** or **Local file**.
+
+Nothing reaches the game until **Apply to game**. It needs a connected game and Deadlock closed. It makes `game\citadel\addons` hold exactly the enabled mods, as `pak01_dir.vpk`, `pak02_dir.vpk` and so on in load order: mods already in place stay, moved ones are renamed, new ones are copied, and Modworks files that are no longer enabled are removed. The page then says whether the addons folder matches the enabled mods, or **Changes not applied yet** when it does not.
+
+Modworks records the files it wrote in `addons\.modworks.json`. **It never writes, renames or deletes any other file in `addons`.** Mods installed by hand or by another mod manager are listed under **Other files in addons**, and their numbers are skipped, so they keep loading where they are. A Modworks file that was changed by hand is treated the same way from then on. Deadlock loads at most `pak01` to `pak99`.
+
+Deadlock only reads `addons` when `game\citadel\gameinfo.gi` lists `Game citadel/addons` in its search paths. The page warns when the line is missing, and **Apply to game** then offers **Add the line and apply**, which keeps the original as `gameinfo.gi.modworks.bak`, or **Apply without it**. A game update can replace `gameinfo.gi` again.
+
+Enabled mods, the load order, profiles and download sources are saved in `<data-root>\mods.json`. A damaged `mods.json` is left as it is and the page says so; changes made in that session are not saved over it. **Share library...** does not include it.
+
+The VPK builder works as before. **Apply to game** does not install a pack you build; copy it into `addons` yourself, or add it to the library and enable it like any mod.
+
+These pages were exercised with a disposable data root and a stand-in game folder: browsing, a pasted link, and **Download & enable** followed by **Apply to game** with the mod `haze black recolor`, next to a foreign `pak03_dir.vpk` that stayed untouched. They were not run against a real Deadlock install, so loading in game was not observed.
+
 ## Sharing a library
 
 **File > Share library...**, or **Share...** under **LIBRARY**, writes one `.db` file. The tooltip says it saves mods, pack selections, and thumbnails. Nothing is written if the destination already exists. On success the status line says `Saved your whole library to <path>. Others can add it with Add library.` The menu item that adds it is **Add shared library...**, not a menu named Add library. The explorer button is **Add shared...**.
@@ -225,6 +265,8 @@ The default root is `%LOCALAPPDATA%\DeadlockModManager`. Pass `--data-root <dire
 | `cache\` | VPKs rebuilt from the library so the gallery can open them. Safe to delete while Modworks is closed. The next launch rebuilds what the collection still needs. |
 | `store\catalog.sqlite` | The catalog: file identities, versions, the collection, pack selections, the connected game archive, and thumbnails. |
 | `store\blobs\sha256\` | File bytes, one blob per SHA-256. |
+| `mods.json` | Enabled mods, load order, profiles and GameBanana sources for the **Mods** page. |
+| `downloads\` | Temporary folders for GameBanana downloads. Each is removed when its import ends. |
 | `library.db`, `library.json`, `library.backup.json`, `mods\`, `thumbnails\` | Older releases. Read once if present, then left on disk. |
 
 **File > Open library folder** opens `store`, not the data root. The explorer prints that `store` path under **LIBRARY**.

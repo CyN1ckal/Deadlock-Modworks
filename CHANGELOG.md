@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Get mods** (**Ctrl+8**): browse, sort, filter and search Deadlock mods on GameBanana, or open a pasted mod link, then **Download** or **Download & enable** one of its files. Downloads are HTTPS-only from gamebanana.com, checked against GameBanana's MD5, and zip, 7z and rar archives are opened with libarchive. Only the `.vpk` files inside are written, and archive paths cannot leave the temporary folder.
+- **Mods** (**Ctrl+7**): enable library mods per profile, set the load order by dragging, see which enabled mods override each other's files, and **Apply to game**, which places the enabled mods in `game\citadel\addons` as `pakNN_dir.vpk`. Modworks records its files in `addons\.modworks.json` and never touches other files there. It checks `gameinfo.gi` for the addons search path and, when asked, adds it with a backup.
+- `mods.json` in the data root keeps enabled mods, load order, profiles and download sources.
+- zlib 1.3.1, XZ Utils (liblzma) 5.8.1 and libarchive 3.8.1 are built from pinned, hash-checked sources. Their licenses are in `THIRD_PARTY_NOTICES.md` and the package's `licenses` folder.
+
+### Changed
+
+- The quick start's Import and Install or remove steps describe **Get mods** and **Apply to game**. Building a pack still does not install it.
+- Repairs wait while mods are applied, because both use the stored mod files.
+
 ## 0.1.0 — not tagged, not published
 
 The commits below are `8470d845c656fba0c60bcf02644fbb7537a6070a` through `68b8ebf2362556d66e0019107d66bbba659e0134`, plus the documentation commit that describes the empty-library actions. Nothing in this list has been pushed, and `v0.1.0` has not been tagged. A GitHub release does not exist yet. The draft workflow in `.github/workflows/release.yml` has not been run. `scripts/Publish.ps1` was not run on this documentation commit.

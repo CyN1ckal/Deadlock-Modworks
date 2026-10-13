@@ -23,6 +23,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - Dear ImGui — https://github.com/ocornut/imgui — MIT License. Version 1.91.9b-docking.
 - Tracy — https://github.com/wolfpld/tracy — BSD 3-Clause License. Version 0.13.1.
 - SQLite — https://www.sqlite.org — Public domain. Version 3.54.0.
+- libarchive — https://www.libarchive.org — BSD 2-Clause (see its COPYING). Version 3.8.1. Reads downloaded zip, 7z and rar mods.
+- zlib — https://zlib.net — zlib License. Version 1.3.1. Used by libarchive for zip.
+- liblzma from XZ Utils — https://tukaani.org/xz/ — BSD Zero Clause (0BSD). Version 5.8.1. Used by libarchive for 7z.
 
 The portable package copies each of those license files into `licenses/`. SQLite is in the public domain and has no license file.
 

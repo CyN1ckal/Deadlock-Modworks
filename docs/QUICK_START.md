@@ -42,9 +42,11 @@ You can browse the library and add mods without a connected game. Textures store
 
 ## Import
 
-Add mod VPKs, or drop them on the window. The library can be browsed before a game is connected.
+Get mods from GameBanana on the Get mods page, add mod VPKs, or drop them on the window. The library can be browsed before a game is connected.
 
-Use any of these:
+To get a mod from GameBanana, open **Get mods** (**Ctrl+8**), paste the mod's link or search for it, open it, and choose **Download & enable** on the file you want. The [user guide](USER_GUIDE.md#get-mods) has the details.
+
+To add VPKs you already have, use any of these:
 
 - **Add mods** on an empty library
 - **File > Add mods...** (**Ctrl+O**)
@@ -105,7 +107,17 @@ The status line still accepts a right-click **Copy message**. **File > Open libr
 
 ## Install or remove
 
-Install or remove the pack from Deadlock's addons folder yourself. Modworks does not install it.
+Turn mods on or off on the Mods page and choose Apply to game while Deadlock is closed. A pack you build is not installed; copy it into the addons folder yourself.
+
+### Mods from your library
+
+1. Open **Mods** (**Ctrl+7**). Tick the mods you want. Drag them to set the load order; the higher mod wins when two change the same file.
+2. Close Deadlock and choose **Apply to game**. If `gameinfo.gi` does not load the addons folder, the prompt offers to add that line and keeps a backup.
+3. Start Deadlock. To take a mod out, untick it and choose **Apply to game** again.
+
+Modworks only touches the `pakNN_dir.vpk` files it placed, which it records in `addons\.modworks.json`. Mods you or another manager put in `addons` stay where they are. See [USER_GUIDE.md](USER_GUIDE.md#mods).
+
+### A pack you built
 
 Close Deadlock first. Copy only the exported `.vpk` into:
 
