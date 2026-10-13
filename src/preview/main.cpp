@@ -30,6 +30,7 @@
 #include "mod_store.hpp"
 #include "product_version.hpp"
 #include "background.hpp"
+#include "theme.hpp"
 #include "ui.hpp"
 
 #include <imgui.h>
@@ -69,6 +70,128 @@ ImGui_ImplVulkanH_Window g_window;
 constexpr uint32_t kMinImageCount = 2;
 bool g_swapchain_rebuild = false;
 std::vector<std::filesystem::path> g_dropped;
+// OS window rectangle. Separate from layout.ini so View > Reset layout does not move the window.
+std::filesystem::path g_window_ini;
+
+struct ShellPlacement {
+    int x = 100;
+    int y = 100;
+    int width = 1440;
+    int height = 960;
+    bool maximized = false;
+};
+
+RECT PrimaryWorkOrigin() {
+    RECT work{0, 0, 0, 0};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    return work;
+}
+
+// `screen` is in screen coordinates. A sliver on a monitor counts as visible.
+bool RectMeetsMonitor(RECT screen) {
+    struct Probe {
+        RECT target;
+        bool hit = false;
+    } probe{screen};
+    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR, HDC, LPRECT monitor, LPARAM param) -> BOOL {
+        auto* probe = reinterpret_cast<Probe*>(param);
+        RECT overlap{};
+        if (IntersectRect(&overlap, &probe->target, monitor)
+            && overlap.right - overlap.left >= 80 && overlap.bottom - overlap.top >= 48) {
+            probe->hit = true;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&probe));
+    return probe.hit;
+}
+
+ShellPlacement LoadShellPlacement(const std::filesystem::path& path) {
+    ShellPlacement place;
+    std::ifstream in(path);
+    int maximized = 0;
+    if (!in || !(in >> place.x >> place.y >> place.width >> place.height >> maximized)) return {};
+    if (place.width < 640 || place.height < 480) return {};
+    const RECT work = PrimaryWorkOrigin();
+    const RECT screen{place.x + work.left, place.y + work.top,
+        place.x + work.left + place.width, place.y + work.top + place.height};
+    if (!RectMeetsMonitor(screen)) return {};
+    place.maximized = maximized != 0;
+    return place;
+}
+
+void SaveShellPlacement(HWND hwnd) {
+    if (g_window_ini.empty() || hwnd == nullptr) return;
+    WINDOWPLACEMENT placement{sizeof(placement)};
+    if (!GetWindowPlacement(hwnd, &placement)) return;
+    const int width = placement.rcNormalPosition.right - placement.rcNormalPosition.left;
+    const int height = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
+    if (width < 640 || height < 480) return;
+    std::ofstream out(g_window_ini, std::ios::trunc);
+    if (!out) return;
+    out << placement.rcNormalPosition.left << ' ' << placement.rcNormalPosition.top << ' '
+        << width << ' ' << height << ' ' << (placement.showCmd == SW_SHOWMAXIMIZED ? 1 : 0) << '\n';
+}
+
+std::wstring EnvironmentValue(const wchar_t* name) {
+    const DWORD needed = GetEnvironmentVariableW(name, nullptr, 0);
+    if (needed <= 1) return {};
+    std::wstring value(static_cast<size_t>(needed), L'\0');
+    const DWORD written = GetEnvironmentVariableW(name, value.data(), needed);
+    if (written == 0 || written >= needed) return {};
+    value.resize(written);
+    return value;
+}
+
+bool ShellWindowInSettings(ImGuiID id) {
+    ImGuiContext& context = *ImGui::GetCurrentContext();
+    for (ImGuiWindowSettings* settings = context.SettingsWindows.begin(); settings != nullptr;
+        settings = context.SettingsWindows.next_chunk(settings)) {
+        if (settings->ID == id) return true;
+    }
+    return false;
+}
+
+// A previous session stored Explorer or Workspace. A missing file, or one without those windows, is not a layout.
+bool HasSavedShellLayout() {
+    return ShellWindowInSettings(ImHashStr("Explorer")) || ShellWindowInSettings(ImHashStr("Workspace"));
+}
+
+void BuildDefaultDock(ImGuiID dockspace) {
+    ImGui::DockBuilderRemoveNode(dockspace);
+    ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
+    ImGuiID right = 0;
+    const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.17f, nullptr, &right);
+    ImGui::DockBuilderDockWindow("Explorer", left);
+    ImGui::DockBuilderDockWindow("Workspace", right);
+    ImGui::DockBuilderFinish(dockspace);
+    ImGui::MarkIniSettingsDirty();
+}
+
+bool OverlapsWorkArea(ImVec2 min, ImVec2 max) {
+    const ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+    if (platform.Monitors.Size == 0) return true;
+    for (int i = 0; i < platform.Monitors.Size; ++i) {
+        const ImGuiPlatformMonitor& monitor = platform.Monitors[i];
+        const float left = std::max(min.x, monitor.WorkPos.x);
+        const float top = std::max(min.y, monitor.WorkPos.y);
+        const float right = std::min(max.x, monitor.WorkPos.x + monitor.WorkSize.x);
+        const float bottom = std::min(max.y, monitor.WorkPos.y + monitor.WorkSize.y);
+        if (right - left >= 32.f && bottom - top >= 32.f) return true;
+    }
+    return false;
+}
+
+// Floating shell windows only. Docked windows stay inside the workspace.
+void BringShellOnScreen(const char* name, ImVec2 offset) {
+    ImGuiWindow* window = ImGui::FindWindowByName(name);
+    if (window == nullptr || window->DockIsActive) return;
+    const ImVec2 corner(window->Pos.x + window->Size.x, window->Pos.y + window->Size.y);
+    if (OverlapsWorkArea(window->Pos, corner)) return;
+    const ImVec2 work = ImGui::GetMainViewport()->WorkPos;
+    ImGui::SetWindowPos(name, ImVec2(work.x + offset.x, work.y + offset.y), ImGuiCond_Always);
+    ImGui::MarkIniSettingsDirty(window);
+}
 
 void CheckVk(VkResult result) {
     if (result == VK_SUCCESS) {
@@ -257,6 +380,7 @@ LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         }
         break;
     case WM_DESTROY:
+        SaveShellPlacement(hwnd);
         PostQuitMessage(0);
         return 0;
     }
@@ -491,6 +615,9 @@ struct App {
     // Set while a page shown from code waits for its tab to become selected.
     bool PageRequested = true;
     bool ShowExplorer = true;
+    bool FocusExplorer = false;
+    bool FocusWorkspace = false;
+    bool ResetLayout = false;
     bool ShowStatusBar = true;
     bool OpenShortcuts = false;
     bool OpenAbout = false;
@@ -528,6 +655,8 @@ struct App {
     std::vector<std::filesystem::path> ModPaths;
     std::filesystem::path ActiveMod;
     bool StandaloneModel = false;
+    std::filesystem::path DataRoot;
+    std::filesystem::path LayoutIni;
     std::optional<LocalModStore> Store;
     std::filesystem::path ConfiguredGame;
     // Set when the game was chosen on the command line, so the saved game does not replace it.
@@ -782,19 +911,21 @@ struct App {
         Repair.SetSources(Game ? Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring()) : "", std::move(paths));
     }
 
-    static std::filesystem::path ContentDirectory() {
-        try { return LocalModStore(LocalModStore::DefaultRoot()).ContentDirectory(); }
+    static std::filesystem::path ContentDirectoryFor(const std::filesystem::path& root) {
+        try { return LocalModStore(root).ContentDirectory(); }
         catch (const std::exception&) { return {}; }
     }
 
-    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Multi(device), Builder(device, Archives), History(ContentDirectory()) {
+    explicit App(const VulkanDevice& device, const std::filesystem::path& data_root)
+        : Panel(device), Compare(device), Multi(device), Builder(device, Archives, data_root),
+          History(ContentDirectoryFor(data_root)), DataRoot(data_root), LayoutIni(data_root / L"layout.ini") {
         Multi.SetArchives(Archives);
         Builder.SetMultiViewHandler([this](const LibraryModel& model) {
             Multi.Open(model, Builder.Models());
             ShowPage(Page::Multi);
         });
         try {
-            Store.emplace(LocalModStore::DefaultRoot());
+            Store.emplace(DataRoot);
             StartRestore();
         } catch (const std::exception& error) {
             SaveError = error.what();
@@ -992,7 +1123,10 @@ struct App {
         if (!PackBusy() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_B, global)) { ShowPage(Page::Pack); Builder.BuildPack(hwnd, GamePath()); }
         if (!PackBusy() && ImGui::Shortcut(ImGuiKey_F5, global)) Builder.Reload(ModPaths);
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_F, global)) FindSkins();
-        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, global)) ShowExplorer = !ShowExplorer;
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, global)) {
+            ShowExplorer = !ShowExplorer;
+            if (ShowExplorer) FocusExplorer = true;
+        }
         if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_LeftArrow, global)) ShowPage(PreviousPage);
         if (ImGui::Shortcut(ImGuiKey_F1, global)) OpenShortcuts = true;
         const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect, Page::Multi};
@@ -1045,9 +1179,12 @@ struct App {
             }
             if (ImGui::MenuItem("Back", "Alt+Left")) ShowPage(PreviousPage);
             ImGui::Separator();
-            ImGui::MenuItem("Explorer", "Ctrl+Shift+E", &ShowExplorer);
+            if (ImGui::MenuItem("Explorer", "Ctrl+Shift+E", &ShowExplorer) && ShowExplorer) FocusExplorer = true;
+            if (ImGui::MenuItem("Workspace")) FocusWorkspace = true;
             ImGui::MenuItem("Status bar", nullptr, &ShowStatusBar);
             ImGui::Separator();
+            if (ImGui::MenuItem("Reset layout")) ResetLayout = true;
+            ImGui::SetItemTooltip("Puts the explorer on the left and the workspace on the right. Mods, the catalog and thumbnails stay.");
             if (ImGui::MenuItem("Refresh library", "F5", false, !PackBusy())) Builder.Reload(ModPaths);
             ImGui::EndMenu();
         }
@@ -1180,6 +1317,9 @@ struct App {
         ZoneScopedN("Explorer");
         if (!ShowExplorer) return;
         DockWithoutTab();
+        const bool focus = std::exchange(FocusExplorer, false);
+        if (focus) ImGui::SetNextWindowFocus();
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, theme::kPanel);
         ImGui::Begin("Explorer", &ShowExplorer, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
         const auto& style = ImGui::GetStyle();
         const auto right_aligned = [&](const char* labels) {
@@ -1314,6 +1454,8 @@ struct App {
             ImGui::PopStyleColor();
         }
         ImGui::End();
+        ImGui::PopStyleColor();
+        if (focus) BringShellOnScreen("Explorer", {40.f, 40.f});
     }
 
     // Releases every read of the mod archives before a repair replaces them.
@@ -1363,6 +1505,9 @@ struct App {
     void DrawWorkspace(HWND hwnd) {
         ZoneScopedN("Workspace");
         DockWithoutTab();
+        const bool focus = std::exchange(FocusWorkspace, false);
+        if (focus) ImGui::SetNextWindowFocus();
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, theme::kPanel);
         ImGui::Begin("Workspace", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
         DrawPageTabs();
         if (CurrentPage == Page::Gallery || CurrentPage == Page::Pack) {
@@ -1436,6 +1581,8 @@ struct App {
             ImGui::EndDisabled();
         }
         ImGui::End();
+        ImGui::PopStyleColor();
+        if (focus) BringShellOnScreen("Workspace", {48.f, 48.f});
     }
 
     void DrawDialogs() {
@@ -1451,7 +1598,9 @@ struct App {
                 {"Ctrl+O", "Add mods"}, {"Ctrl+Shift+O", "Add every mod in a folder"}, {"Ctrl+G", "Choose the game archive"},
                 {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins, packages and sources"}, {"F5", "Reopen every source and reload thumbnails"},
                 {"Ctrl+1 ... Ctrl+6", "Library, builder, history, repairs, inspector, multi view"}, {"Alt+Left", "Back to the previous page"},
-                {"Ctrl+Shift+E", "Show or hide the explorer"}, {"Double-click", "Inspect a skin, list a package's files, or view a version"},
+                {"Ctrl+Shift+E", "Show or hide the explorer"}, {"View > Workspace", "Focus the workspace"},
+                {"View > Reset layout", "Restore the explorer and workspace split"},
+                {"Double-click", "Inspect a skin, list a package's files, or view a version"},
                 {"Enter / Space", "Inspect a skin or list a package's files / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
                 {"Drag / right-drag / wheel", "Orbit / pan / zoom a viewport"}, {"F", "Frame the model in the hovered viewport"},
                 {"Right-click", "More actions on skins, sources, versions, results and viewports"}, {"F1", "This list"},
@@ -1484,102 +1633,6 @@ struct App {
     }
 };
 
-// A compact dark theme in the style of a desktop IDE: neutral greys, one blue accent, thin borders and tight spacing.
-void ApplyTheme(float scale) {
-    ImGui::StyleColorsDark();
-    auto& style = ImGui::GetStyle();
-    style.WindowPadding = {6, 6};
-    style.FramePadding = {6, 3};
-    style.CellPadding = {4, 2};
-    style.ItemSpacing = {6, 4};
-    style.ItemInnerSpacing = {4, 4};
-    style.TouchExtraPadding = {0, 0};
-    style.IndentSpacing = 14;
-    style.ScrollbarSize = 10;
-    style.GrabMinSize = 8;
-    style.WindowRounding = 0;
-    style.ChildRounding = 2;
-    style.FrameRounding = 2;
-    style.PopupRounding = 3;
-    style.ScrollbarRounding = 3;
-    style.GrabRounding = 2;
-    style.TabRounding = 2;
-    style.WindowBorderSize = 0;
-    style.ChildBorderSize = 1;
-    style.PopupBorderSize = 1;
-    style.FrameBorderSize = 0;
-    style.TabBorderSize = 0;
-    style.TabBarBorderSize = 1;
-    style.TabBarOverlineSize = 2;
-    style.SeparatorTextBorderSize = 1;
-    style.SeparatorTextPadding = {8, 2};
-    style.DockingSeparatorSize = 1;
-    style.WindowMenuButtonPosition = ImGuiDir_None;
-    style.SelectableTextAlign = {0, .5f};
-    style.HoverDelayShort = .25f;
-    style.HoverDelayNormal = .5f;
-
-    const ImVec4 background{.118f, .122f, .133f, 1.f};
-    const ImVec4 panel{.153f, .157f, .169f, 1.f};
-    const ImVec4 raised{.200f, .208f, .224f, 1.f};
-    const ImVec4 hover{.255f, .263f, .282f, 1.f};
-    const ImVec4 line{.235f, .243f, .259f, 1.f};
-    const ImVec4 accent = ui::kAccent;
-    const ImVec4 selection{.176f, .247f, .345f, 1.f};
-    auto* colors = style.Colors;
-    colors[ImGuiCol_Text] = {.874f, .882f, .898f, 1.f};
-    colors[ImGuiCol_TextDisabled] = {.525f, .541f, .569f, 1.f};
-    colors[ImGuiCol_WindowBg] = background;
-    colors[ImGuiCol_ChildBg] = {0, 0, 0, 0};
-    colors[ImGuiCol_PopupBg] = {.168f, .173f, .184f, .98f};
-    colors[ImGuiCol_Border] = line;
-    colors[ImGuiCol_BorderShadow] = {0, 0, 0, 0};
-    colors[ImGuiCol_FrameBg] = panel;
-    colors[ImGuiCol_FrameBgHovered] = raised;
-    colors[ImGuiCol_FrameBgActive] = hover;
-    colors[ImGuiCol_TitleBg] = panel;
-    colors[ImGuiCol_TitleBgActive] = panel;
-    colors[ImGuiCol_TitleBgCollapsed] = panel;
-    colors[ImGuiCol_MenuBarBg] = panel;
-    colors[ImGuiCol_ScrollbarBg] = {0, 0, 0, 0};
-    colors[ImGuiCol_ScrollbarGrab] = {.30f, .31f, .33f, 1.f};
-    colors[ImGuiCol_ScrollbarGrabHovered] = {.38f, .39f, .41f, 1.f};
-    colors[ImGuiCol_ScrollbarGrabActive] = {.45f, .46f, .48f, 1.f};
-    colors[ImGuiCol_CheckMark] = accent;
-    colors[ImGuiCol_SliderGrab] = {accent.x, accent.y, accent.z, .8f};
-    colors[ImGuiCol_SliderGrabActive] = accent;
-    colors[ImGuiCol_Button] = raised;
-    colors[ImGuiCol_ButtonHovered] = hover;
-    colors[ImGuiCol_ButtonActive] = selection;
-    // Shared by selected rows and collapsing headers, so it stays muted.
-    colors[ImGuiCol_Header] = selection;
-    colors[ImGuiCol_HeaderHovered] = {.22f, .23f, .25f, 1.f};
-    colors[ImGuiCol_HeaderActive] = {.21f, .30f, .43f, 1.f};
-    colors[ImGuiCol_Separator] = line;
-    colors[ImGuiCol_SeparatorHovered] = accent;
-    colors[ImGuiCol_SeparatorActive] = accent;
-    colors[ImGuiCol_ResizeGrip] = {0, 0, 0, 0};
-    colors[ImGuiCol_ResizeGripHovered] = {accent.x, accent.y, accent.z, .5f};
-    colors[ImGuiCol_ResizeGripActive] = accent;
-    colors[ImGuiCol_Tab] = panel;
-    colors[ImGuiCol_TabHovered] = raised;
-    colors[ImGuiCol_TabSelected] = background;
-    colors[ImGuiCol_TabSelectedOverline] = accent;
-    colors[ImGuiCol_TabDimmed] = panel;
-    colors[ImGuiCol_TabDimmedSelected] = background;
-    colors[ImGuiCol_TabDimmedSelectedOverline] = line;
-    colors[ImGuiCol_DockingPreview] = {accent.x, accent.y, accent.z, .4f};
-    colors[ImGuiCol_DockingEmptyBg] = background;
-    colors[ImGuiCol_TableHeaderBg] = panel;
-    colors[ImGuiCol_TableBorderStrong] = line;
-    colors[ImGuiCol_TableBorderLight] = {.19f, .196f, .21f, 1.f};
-    colors[ImGuiCol_TableRowBg] = {0, 0, 0, 0};
-    colors[ImGuiCol_TableRowBgAlt] = {1, 1, 1, .02f};
-    colors[ImGuiCol_TextSelectedBg] = {accent.x, accent.y, accent.z, .35f};
-    colors[ImGuiCol_NavCursor] = accent;
-    colors[ImGuiCol_ModalWindowDimBg] = {0, 0, 0, .45f};
-    style.ScaleAllSizes(scale);
-}
 
 void DestroyWindowIcons(HICON icon, HICON icon_small) {
     if (icon != nullptr) DestroyIcon(icon);
@@ -1588,6 +1641,32 @@ void DestroyWindowIcons(HICON icon, HICON icon_small) {
 
 int Run(const std::vector<std::filesystem::path>& args) {
     [[maybe_unused]] const TracySession tracy_session;
+    std::optional<std::filesystem::path> data_root_flag;
+    std::optional<std::filesystem::path> game_folder;
+    std::optional<std::string> clip;
+    std::vector<std::filesystem::path> positional;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == L"--data-root") {
+            if (i + 1 >= args.size()) throw std::runtime_error("--data-root needs a directory.");
+            data_root_flag = args[++i];
+        } else if (args[i] == L"--game" && i + 1 < args.size()) {
+            game_folder = args[++i];
+        } else if (args[i] == L"--clip" && i + 1 < args.size()) {
+            clip = VpkArchive::Normalize(Narrow(args[++i].wstring()));
+        } else {
+            positional.push_back(args[i]);
+        }
+    }
+    const std::wstring data_root_env = EnvironmentValue(L"DEADLOCK_MODWORKS_DATA_ROOT");
+    const std::filesystem::path data_root = std::filesystem::absolute(
+        ResolveDataRoot(data_root_flag, data_root_env.empty() ? nullptr : data_root_env.c_str())).lexically_normal();
+    std::error_code directory_error;
+    std::filesystem::create_directories(data_root, directory_error);
+    // ImGui stores this pointer and does not copy it. The string has to outlive the context.
+    const std::string layout_ini = Narrow((data_root / L"layout.ini").wstring());
+    const ShellPlacement placement = LoadShellPlacement(data_root / L"window.ini");
+    const RECT work = PrimaryWorkOrigin();
+
     ImGui_ImplWin32_EnableDpiAwareness();
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     // Resource 1 is the ICON in cmake/app.rc.in. Each executable that opens this
@@ -1596,14 +1675,20 @@ int Run(const std::vector<std::filesystem::path>& args) {
         GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
     const HICON icon_small = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON,
         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    // Matches the workspace clear so a resize does not flash white or the old grey.
+    const HBRUSH background = CreateSolidBrush(RGB(0x14, 0x1B, 0x23));
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, instance, icon, nullptr, nullptr, nullptr, L"DeadlockModelPreview", icon_small};
+    wc.hbrBackground = background;
     RegisterClassExW(&wc);
-    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, SR_PRODUCT_TITLE_W, WS_OVERLAPPEDWINDOW, 100, 100, 1440, 960, nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, SR_PRODUCT_TITLE_W, WS_OVERLAPPEDWINDOW,
+        placement.x + work.left, placement.y + work.top, placement.width, placement.height, nullptr, nullptr, wc.hInstance, nullptr);
     if (!hwnd) {
         UnregisterClassW(wc.lpszClassName, wc.hInstance);
+        DeleteObject(background);
         DestroyWindowIcons(icon, icon_small);
         throw std::runtime_error("Could not create the model tools window.");
     }
+    g_window_ini = data_root / L"window.ini";
     SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
     SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon_small));
 
@@ -1616,16 +1701,16 @@ int Run(const std::vector<std::filesystem::path>& args) {
     RECT client{};
     GetClientRect(hwnd, &client);
     SetupWindow(surface, client.right - client.left, client.bottom - client.top);
-    ShowWindow(hwnd, SW_SHOWDEFAULT);
+    ShowWindow(hwnd, placement.maximized ? SW_SHOWMAXIMIZED : SW_SHOWDEFAULT);
     UpdateWindow(hwnd);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = nullptr;
+    io.IniFilename = layout_ini.c_str();
     const float scale = ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd);
-    ApplyTheme(scale);
+    theme::Apply(scale);
     wchar_t windows_folder[MAX_PATH]{};
     GetWindowsDirectoryW(windows_folder, MAX_PATH);
     const auto font = std::filesystem::path(windows_folder) / L"Fonts" / L"segoeui.ttf";
@@ -1658,19 +1743,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
 
     int exit_code = 0;
     {
-        App app(g_device);
-        std::optional<std::filesystem::path> game_folder;
-        std::optional<std::string> clip;
-        std::vector<std::filesystem::path> positional;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (args[i] == L"--game" && i + 1 < args.size()) {
-                game_folder = args[++i];
-            } else if (args[i] == L"--clip" && i + 1 < args.size()) {
-                clip = VpkArchive::Normalize(Narrow(args[++i].wstring()));
-            } else {
-                positional.push_back(args[i]);
-            }
-        }
+        App app(g_device, data_root);
         // A game restored from the saved library may still be connecting; only detect one when none is configured.
         if (!game_folder && app.ConfiguredGame.empty()) {
             try {
@@ -1766,22 +1839,27 @@ int Run(const std::vector<std::filesystem::path>& args) {
             // The menu and status bars take their rows before the dockspace fills the rest of the window.
             app.DrawMenuBar(hwnd);
             app.DrawStatusBar(hwnd);
-            const ImGuiID dockspace = ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_NoWindowMenuButton);
-            if (first_frame) {
-                // Explorer on the left, pages filling the workspace. Neither shows a dock tab, since the pages have their own.
-                ImGui::DockBuilderRemoveNode(dockspace);
-                ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
-                ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
-                ImGuiID right = 0;
-                const ImGuiID left = ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Left, 0.17f, nullptr, &right);
-                ImGui::DockBuilderDockWindow("Explorer", left);
-                ImGui::DockBuilderDockWindow("Workspace", right);
-                ImGui::DockBuilderFinish(dockspace);
-                first_frame = false;
+            bool reset_layout = false;
+            if (app.ResetLayout) {
+                app.ResetLayout = false;
+                app.ShowExplorer = true;
+                app.FocusExplorer = true;
+                app.FocusWorkspace = true;
+                std::error_code remove_error;
+                std::filesystem::remove(app.LayoutIni, remove_error);
+                reset_layout = true;
             }
+            const ImGuiID dockspace = ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_NoWindowMenuButton);
+            // Rebuild only when nothing was saved, or the user asked. A saved floating layout is left alone.
+            if (reset_layout || (first_frame && !HasSavedShellLayout())) BuildDefaultDock(dockspace);
 
             app.DrawExplorer(hwnd);
             app.DrawWorkspace(hwnd);
+            if (first_frame) {
+                BringShellOnScreen("Explorer", {40.f, 40.f});
+                BringShellOnScreen("Workspace", {48.f, 48.f});
+                first_frame = false;
+            }
             app.DrawDialogs();
             app.Persist();
 
@@ -1791,7 +1869,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
             }
             ImDrawData* draw_data = ImGui::GetDrawData();
             if (draw_data->DisplaySize.x > 0 && draw_data->DisplaySize.y > 0) {
-                g_window.ClearValue.color = {{0.118f, 0.122f, 0.133f, 1.0f}};
+                g_window.ClearValue.color = {{theme::kClearRgb[0], theme::kClearRgb[1], theme::kClearRgb[2], 1.0f}};
                 FrameRender(draw_data, [&](VkCommandBuffer command_buffer) {
                     app.Panel.Record(command_buffer);
                     app.Compare.Record(command_buffer);
@@ -1813,6 +1891,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
     vkDestroyInstance(g_instance, nullptr);
     DestroyWindow(hwnd);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    DeleteObject(background);
     DestroyWindowIcons(icon, icon_small);
     return exit_code;
 }

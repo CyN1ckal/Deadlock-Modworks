@@ -774,4 +774,29 @@ TEST(Library, DefaultDataRootIsDeadlockModManager) {
     EXPECT_NE(text.find(L"\\DeadlockModManager"), std::wstring::npos);
     EXPECT_EQ(text.find(L"DeadlockModworks"), std::wstring::npos);
 }
+
+// Opens only the directory passed in. The decoy path and DefaultRoot() stay closed.
+TEST(Library, ExplicitDataRootIsWhatTheStoreOpens) {
+    const fs::path root = fs::temp_directory_path() / ("modworks-data-root-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const fs::path decoy = fs::temp_directory_path() / ("modworks-data-root-decoy-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { std::error_code error; fs::remove_all(path, error); }
+    } cleanup{root};
+    fs::create_directories(root);
+
+    const fs::path chosen = ResolveDataRoot(root, decoy.wstring().c_str());
+    EXPECT_EQ(chosen, root);
+    {
+        LocalModStore store(chosen);
+        EXPECT_EQ(store.Root(), fs::absolute(root).lexically_normal());
+        EXPECT_EQ(store.Root().wstring().find(L"DeadlockModManager"), std::wstring::npos);
+        EXPECT_TRUE(store.Load().Sources.empty());
+        EXPECT_TRUE(fs::is_regular_file(store.Database()));
+        EXPECT_EQ(store.Database().parent_path().parent_path().lexically_normal(), store.Root());
+    }
+    EXPECT_FALSE(fs::exists(decoy));
+    EXPECT_EQ(ResolveDataRoot(std::nullopt, root.wstring().c_str()), root);
+    EXPECT_EQ(ResolveDataRoot(std::nullopt, L""), LocalModStore::DefaultRoot());
+}
 }

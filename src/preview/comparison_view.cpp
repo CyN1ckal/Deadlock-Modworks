@@ -18,13 +18,13 @@ ImVec4 Unpack(uint32_t rgba) {
 ImVec4 OutcomeColor(ModelOutcome outcome) {
     switch (outcome) {
     case ModelOutcome::Updated:
-    case ModelOutcome::Current: return ImVec4(0.45f, 0.85f, 0.45f, 1.0f);
-    case ModelOutcome::Repairable: return ImVec4(0.4f, 0.8f, 1.0f, 1.0f);
-    case ModelOutcome::NeedsReview: return ImVec4(1.0f, 0.65f, 0.25f, 1.0f);
-    case ModelOutcome::Failed: return ImVec4(1.0f, 0.4f, 0.35f, 1.0f);
+    case ModelOutcome::Current: return ui::kGood;
+    case ModelOutcome::Repairable: return ui::kAccent;
+    case ModelOutcome::NeedsReview: return ui::kWarning;
+    case ModelOutcome::Failed: return ui::kError;
     case ModelOutcome::Skipped: break;
     }
-    return ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+    return ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
 }
 
 const char* ChangeName(BoneChange change) {
@@ -243,7 +243,7 @@ void ComparisonView::DrawDiff() {
     if (!Skeleton(left_) || !Skeleton(right_)) {
         ImGui::TextDisabled("%s: not available on both sides.", kind);
     } else if (skeleton_diff_.Identical()) {
-        ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "%s: identical (%zu bones).", kind, skeleton_diff_.Same);
+        ImGui::TextColored(ui::kGood, "%s: identical (%zu bones).", kind, skeleton_diff_.Same);
     } else {
         ImGui::Text("%s:", kind);
         ImGui::SameLine();

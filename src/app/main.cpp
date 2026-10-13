@@ -29,6 +29,13 @@ BOOL WINAPI OnConsoleControl(DWORD type) {
     return FALSE;
 }
 
+#ifdef SR_MODEL_TOOLS
+// These open the model-tools window. They are not repair-CLI commands.
+bool IsGuiFlag(const std::string& arg) {
+    return arg == "--data-root" || arg == "--game" || arg == "--clip";
+}
+#endif
+
 // Files dropped onto the executable open the window with those mods selected.
 bool AreModFiles(const std::vector<std::string>& args) {
     return std::all_of(args.begin(), args.end(), [](const std::string& arg) {
@@ -69,16 +76,19 @@ int main() {
     }
     LocalFree(argv);
 
-    if (AreModFiles(args)) {
-        ReleaseOwnConsole();
 #ifdef SR_MODEL_TOOLS
+    if (AreModFiles(args) || std::any_of(args.begin(), args.end(), IsGuiFlag)) {
+        ReleaseOwnConsole();
         std::vector<std::filesystem::path> paths;
         for (const auto& arg : args) paths.emplace_back(skeleton_repair::Widen(arg));
         return skeleton_repair::RunModelTools(paths);
-#else
-        return skeleton_repair::RunMainWindow(args);
-#endif
     }
+#else
+    if (AreModFiles(args)) {
+        ReleaseOwnConsole();
+        return skeleton_repair::RunMainWindow(args);
+    }
+#endif
 
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(&OnConsoleControl, TRUE);

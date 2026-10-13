@@ -3,6 +3,7 @@
 #include "character_view.hpp"
 #include "strings.hpp"
 #include "texture.hpp"
+#include "theme.hpp"
 #include "ui.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -126,14 +127,10 @@ std::filesystem::path Dialog(void* owner, FileKind kind) {
     if (!(save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))) return {};
     return buffer;
 }
-std::filesystem::path DefaultLegacyThumbnails() {
-    try { return LegacyThumbnailFolder(LocalModStore::DefaultRoot()); }
-    catch (const std::exception&) { return {}; }
 }
-}
-LibraryPanel::LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives)
-    : device_(device), archives_(std::move(archives)), legacy_thumbnails_(DefaultLegacyThumbnails()) {
-    try { store_.emplace(LocalModStore::DefaultRoot()); } catch (const std::exception&) {}
+LibraryPanel::LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives, const std::filesystem::path& data_root)
+    : device_(device), archives_(std::move(archives)), legacy_thumbnails_(LegacyThumbnailFolder(data_root)) {
+    try { store_.emplace(data_root); } catch (const std::exception&) {}
     const unsigned count = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
     for (unsigned i = 0; i < count; ++i) workers_.emplace_back([this] { RunThumbnailWorker(); });
 }
@@ -312,6 +309,7 @@ ThumbnailPixels LibraryPanel::RenderThumbnail(const PreparedModel& model) {
     renderer_->Resize(kThumbnailSize, kThumbnailSize);
     const auto visible = DefaultVisibility(model.Scene, 0);
     RenderOptions options;
+    options.Background = theme::kClearRgb;
     options.VisibleMeshes = visible;
     options.ShowSkeleton = false;
     options.ShowGrid = false;
@@ -1035,9 +1033,11 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         ImGui::TextUnformatted(pack_label.c_str());
         ImGui::SameLine();
         const bool pack_ready = skins > 0 || packages > 0;
+        theme::PushPrimaryButton();
         if (ui::ToolButton("Build VPK...", "Export the pack as one VPK (Ctrl+B). Skin dependencies are included automatically. "
             "A package copies its other files as stored. Shared files are deduplicated; conflicting files block the export.",
             !locked && pack_ready)) BuildPack(owner, game);
+        theme::PopPrimaryButton();
         ImGui::SameLine();
         if (ui::ToolButton("Clear pack", "Remove every skin and package from the pack", !locked && pack_ready)) ClearPack();
         if (game.empty() && skins > 0) {
@@ -1132,7 +1132,9 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         } else if (no_sources) {
             ImGui::TextUnformatted("Your library has no mods yet.");
             ImGui::TextDisabled("Add or drop mod VPKs (Ctrl+O). Your source files stay available for future builds.");
+            theme::PushPrimaryButton();
             if (ImGui::Button("Add mods...")) add();
+            theme::PopPrimaryButton();
         } else if (pack_view && pack_empty) {
             ImGui::TextUnformatted("The pack is empty.");
             ImGui::TextDisabled("Tick skins in the library, include a mod's other files, or right-click them and choose Include in pack.");

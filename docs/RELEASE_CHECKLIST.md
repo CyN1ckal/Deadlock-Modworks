@@ -396,3 +396,70 @@ Synthetic fixtures only. No Deadlock install and no network.
 | `render_tests` | NOT RUN | Not built this stage | No rendering or shared-header edit | A Vulkan SDK miss did not occur. Configure found Vulkan 1.4.357. `skeleton_repair_tests` does not link it |
 | `scripts/Publish.ps1`, package, clean-machine launch | NOT RUN | This stage did not run the script | Stage 7 on the other parent replaced the recursive delete | Clean-machine launch is still NOT RUN. The package SHA from stage 7 is not a storage-stage result |
 | Marketplace, installer, deployment manager, new brand data directory | NOT RUN | Not implemented | Schema stays version 2. Default root stays `DeadlockModManager` | Those are outside this storage stage |
+
+## Stage 4 theme and saved layout
+
+Worktree: `C:\Users\warri\.grok\worktrees\repos-deadlock-model-updater\subagent-01a1335d-3509-7e20-b30e-a9d4eecaf84b`. Branch `codex/modworks-v0.1-theme`, started from `4ff8308130a0e482dccd0d1c9afcc34f2562edde`. The commit that contains this section is `feat: apply the steel-blue workspace theme and restore saved layout`. Nothing was pushed, tagged, or published. `scripts/Publish.ps1` was not run.
+
+`LocalModStore::DefaultRoot()` is still `%LOCALAPPDATA%\DeadlockModManager`. The GUI resolves `--data-root`, then `DEADLOCK_MODWORKS_DATA_ROOT`, then that default. The live `library.db` stayed 1,221,091,328 bytes with `LastWriteTimeUtc` `2026-10-12T15:24:28.2335301Z` before and after every launch below.
+
+Final tokens, sRGB, also commented in `src/preview/theme.hpp`. Contrast is WCAG relative luminance against the named surface.
+
+| Token | Value | Measured pair |
+| --- | --- | --- |
+| Workspace / clear | `#141B23` | Primary text `#E6EDF3` is 14.68:1 |
+| Panel | `#1D2833` | Primary text 12.66:1. Secondary text `#9BAEBE` is 6.55:1 |
+| Border | `#344657` | 1px dividers and control borders |
+| Accent mark | `#4682B4` | Borders, docking preview, scrollbar active. Not a text color and not a button fill (`#E6EDF3` on it is 3.48:1) |
+| Focus / text accent / selection border | `#659BC3` | 5.01:1 on the panel, 5.81:1 on the workspace |
+| Raised control | `#2A3948`, hover `#3A4C5E`, pressed `#243244` | Ordinary buttons |
+| Muted selection | `#1E3C56`, hover `#2A4E70`, active `#345E86` | Selected, hovered, and pressed stay apart |
+| Primary action | fill `#2A5678`, hover `#346888`, pressed `#1E4460`, text `#E6EDF3` | 6.58:1, 5.10:1, and 8.67:1. Used for `Add mods...` and `Build VPK...` |
+| Disabled text | `#8B9DAB` | 5.35:1 on the panel, darker than `#9BAEBE` |
+| Success / warning / failure | `#6BCC85` / `#F2B357` / `#F56B66` | 7.55:1, 8.09:1, and 5.11:1 on the panel. Text stays labeled |
+| Viewport and swapchain clear | `#141B23` (`20/255, 27/255, 35/255`) | Same as the workspace. The Win32 class brush is `RGB(0x14, 0x1B, 0x23)` |
+
+Density at 100% before the one `ScaleAllSizes` call: window padding 6, control padding 6x3, item spacing 6x4, 1px dividers, radii 0–3. Segoe UI stays 15px times the DPI scale.
+
+Commands, from this worktree, after a fresh `build/release` configure (no previous cache):
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release
+ctest --test-dir build/release -C Release --output-on-failure
+.\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+.\build\release\bin\Release\render_tests.exe --gtest_brief=1
+py -3 scripts/architecture_diagram.py --check
+py -3 scripts/architecture_diagram.py
+```
+
+| Command | Result |
+| --- | --- |
+| Configure | Exit 0. Visual Studio 18 2026, Windows SDK 10.0.26100.0, MSVC 19.51.36260.0. Vulkan 1.4.357 found. Tracy disabled. About 19.4 seconds |
+| Release build | Exit 0. `DeadlockModworks.exe` and `ModelPreview.exe` under `build\release\bin\Release` |
+| CTest Release | Exit 0. 267 passed, 0 failed, 11.50 seconds. Includes `Library.ExplicitDataRootIsWhatTheStoreOpens` and `dependency_levels` |
+| `skeleton_repair_tests.exe --gtest_brief=1` | Exit 0. 216 tests from 22 suites passed. 5884 ms. No skipped line |
+| `render_tests.exe --gtest_brief=1` | Exit 0. 50 tests from 11 suites passed. 259 ms. No skipped line |
+| `architecture_diagram.py --check` | Exit 0. `59 modules: no cycles, layering holds, stable dependencies hold within 0.10 and 1 accepted exception(s).` |
+| Diagram regenerate | Exit 0. `docs/architecture.svg` rewritten. `theme` is in the graph |
+
+The GUI was launched only as `DeadlockModworks.exe --data-root build\theme-gui-data` (an empty directory under this worktree). `ModelPreview.exe` was not launched. The disposable root received `layout.ini` (785 bytes, Explorer docked at about 19% on the first run), `window.ini`, and `store\catalog.sqlite` (155,648 bytes). No live library file was copied there.
+
+A second launch kept an edited Explorer size of `480,739` instead of rebuilding the 17% split. The catalog length stayed 155,648. `DeadlockModworks.exe --data-root` with no directory exited 1 and showed `--data-root needs a directory.` The live library timestamp did not change.
+
+Side-by-side comparison of two models was not captured. The empty library has no `.vmdl_c` to open, and no game asset was copied in.
+
+| Check | Result (PASS/FAIL/BLOCKED/NOT RUN) | Commit/artifact | Environment | Evidence/notes |
+| --- | --- | --- | --- | --- |
+| Data-root override | PASS | This commit | Release, MSVC 19.51.36260.0, Windows 11 10.0.26200 | `Library.ExplicitDataRootIsWhatTheStoreOpens` passed. The GUI catalog was created only under `build\theme-gui-data` |
+| Theme tokens and clear color | PASS | This commit | Same | Tokens in the table above. Captures show the steel-blue shell, panel, and primary `Add mods...` button |
+| Saved dock layout | PASS | This commit | Same | `layout.ini` kept Explorer and Workspace. A relaunch preserved Explorer width 480 instead of resetting to the default split |
+| Reset layout keeps the library | PASS | This commit | Menu item was not clicked | `ResetLayout` calls `std::filesystem::remove` only on `layout.ini`, then rebuilds the dock. A relaunch left `store\catalog.sqlite` at 155,648 bytes |
+| Library page | PASS | `docs/screenshots/library.png` | Disposable root, CopyFromScreen | Empty library, explorer on the left, `Add mods...` |
+| VPK builder | PASS | `docs/screenshots/builder.png` | Ctrl+2 | Empty pack, `Build VPK...` |
+| Version history | PASS | `docs/screenshots/history.png` | Ctrl+3 | Models and packs tables, no rows |
+| Skin repairs | PASS | `docs/screenshots/repairs.png` | Ctrl+4 | Ready to analyze, 0 archives |
+| Model inspector | PASS | `docs/screenshots/inspector.png` | Ctrl+5 | Empty inspector. No model was loaded |
+| Two-model comparison | NOT RUN | — | No disposable model | The inspector page is empty. No `.vmdl_c` was added |
+| Shortcuts dialog | PASS | `docs/screenshots/shortcuts.png` | F1 | Modal lists View > Workspace and View > Reset layout |
+| Missing `--data-root` value | PASS | `docs/screenshots/data-root-error.png` | Exit 1 | Message box: `--data-root needs a directory.` Store was not opened |
