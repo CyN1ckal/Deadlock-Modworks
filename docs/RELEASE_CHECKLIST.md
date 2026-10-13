@@ -557,3 +557,35 @@ Written on `codex/modworks-v0.1-docs2` from `68b8ebf2362556d66e0019107d66bbba659
 `README.md`, `docs/QUICK_START.md`, `docs/USER_GUIDE.md`, `docs/TROUBLESHOOTING.md`, and `CHANGELOG.md` now name the empty-library buttons **Connect game**, **Add mods**, and **Open quick start**, the **Quick start** and **Pack assembled** modals, **Help > Open logs**, **Help > Copy diagnostic details**, the log path `<data-root>\logs\modworks.log`, delay-loaded `vulkan-1.dll`, a corrupt `store\settings.json` left in place, a read-only catalog that is not replaced, and Steam auto-detect when nothing is saved. `docs/screenshots/startup-empty-library.png` is the README figure because it shows those three buttons.
 
 Still not run for this documentation commit: a clean-machine launch, code signing, a published release or tag `v0.1.0`, a two-model comparison screenshot, a click of the **Quick start** popup, the missing `vulkan-1.dll` dialog, drag-and-drop, a finished **Pack assembled** modal, and `Publish.ps1`.
+
+## Candidate package on the merged branch
+
+Run from `C:\Users\warri\.ao\data\worktrees\deadlock-model-updater\grok-theme` on `codex/modworks-v0.1` at `1ea93729cdae9558a3de43a302d8d509ff51ae3c`. Visual Studio 18 2026, MSVC 19.51.36260.0, Windows SDK 10.0.26100.0, Vulkan SDK 1.4.357.0. Nothing was pushed, tagged, or published. The live `%LOCALAPPDATA%\DeadlockModManager\library.db` stayed 1,221,091,328 bytes with `LastWriteTimeUtc` `2026-10-12T15:24:28.2335301Z`.
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release
+ctest --test-dir build/release -C Release --output-on-failure
+py -3 scripts/architecture_diagram.py --check
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Publish.ps1
+```
+
+| Command | Result |
+| --- | --- |
+| Configure and Release build | Exit 0. `DeadlockModworks.exe` under `build\release\bin\Release` |
+| CTest Release | 283 passed, 0 failed, 12.72 seconds |
+| `architecture_diagram.py --check` | Exit 0. `60 modules: no cycles, layering holds, stable dependencies hold within 0.10 and 1 accepted exception(s).` |
+| `Publish.ps1` | Exit 0. Reused `build\release`. Staged under `build\package-staging`. Did not delete the build directory |
+
+| Item | Value |
+| --- | --- |
+| Zip | `dist\DeadlockModworks-0.1.0-win-x64.zip` |
+| Bytes | 4,279,808 |
+| SHA-256 | `11dd61d0d2860f3da8f29b89209836d4193fe9e9d2b447640a8209187e318c84` |
+| Sidecar | `dist\DeadlockModworks-0.1.0-win-x64.zip.sha256` |
+| Contents | `DeadlockModworks.exe`, `LICENSE`, `README.md`, `THIRD_PARTY_NOTICES.md`, `PACKAGE_MANIFEST.txt`, and `licenses\` for Dear ImGui, lz4, meshoptimizer, nlohmann/json, Tracy, ValveResourceFormat, and zstd |
+| Extracted `--version` | Exit 0. `Deadlock Modworks 0.1.0 (1ea93729cdae9558a3de43a302d8d509ff51ae3c)`. `DEADLOCK_MODWORKS_DATA_ROOT` was an empty directory under the worktree and stayed empty |
+
+`Publish.ps1` reported runtime `static` and imports `SHELL32.dll`, `ole32.dll`, `bcrypt.dll`, `ADVAPI32.dll`, `COMDLG32.dll`, `KERNEL32.dll`, `USER32.dll`, `GDI32.dll`, `IMM32.dll`, `vulkan-1.dll`. No `VCRUNTIME` or `MSVCP` import.
+
+This is a local candidate, not a published release. Still NOT RUN: a clean machine without Visual Studio or the Vulkan SDK, code signing, tag `v0.1.0`, the draft GitHub release workflow, a representative installed-mod import/preview/repair/export, a two-model comparison capture, the missing-loader dialog, an unsupported device, drag-and-drop, the **Pack assembled** modal, install and remove of a pack, and 100/150/200 percent UI. Do not tag or publish until those gates that the owner still requires are done.
