@@ -1,6 +1,6 @@
 #pragma once
 
-#include "content_store.hpp"
+#include "snapshot_reader.hpp"
 
 #include <functional>
 #include <optional>
@@ -18,7 +18,7 @@ const MembershipRow* VersionMembership(const std::vector<MembershipRow>& rows, c
 std::vector<std::string> ClipsUnderModel(std::string_view model_path, const std::vector<std::string>& candidates);
 
 // Snapshot bytes first, then the live game archive. Does not open an observation path.
-std::optional<std::vector<uint8_t>> ReadSnapshotThenGame(const ContentStore& store, const SnapshotId* snapshot,
+std::optional<std::vector<uint8_t>> ReadSnapshotThenGame(const SnapshotReader& store, const SnapshotId* snapshot,
     const std::string& path, const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& game);
 
 }  // namespace skeleton_repair

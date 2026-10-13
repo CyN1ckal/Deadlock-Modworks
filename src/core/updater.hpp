@@ -9,7 +9,7 @@
 
 namespace skeleton_repair {
 
-class ContentStore;
+class RepairJournal;
 
 struct UpdateProgress {
     int Completed = 0;
@@ -29,7 +29,7 @@ public:
     static UpdateReport Update(const std::string& game_directory, const std::string& mod_vpk,
         const std::optional<std::string>& output_path, bool replace_source, bool make_backup,
         const std::function<void(const UpdateProgress&)>& progress = {}, CancellationToken cancellation = {},
-        bool analyze_only = false, ContentStore* store = nullptr, const std::optional<std::string>& only_model = {});
+        bool analyze_only = false, RepairJournal* journal = nullptr, const std::optional<std::string>& only_model = {});
 };
 
 }  // namespace skeleton_repair

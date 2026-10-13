@@ -3,7 +3,7 @@
 #include "animation.hpp"
 #include "archive_transaction.hpp"
 #include "content_hash.hpp"
-#include "content_store.hpp"
+#include "repair_journal.hpp"
 #include "error.hpp"
 #include "kv3.hpp"
 #include "model.hpp"
@@ -561,7 +561,7 @@ UpdateReport HeroModelUpdater::Analyze(const std::string& game_directory, const 
 UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const std::string& mod_vpk,
     const std::optional<std::string>& output_path, bool replace_source, bool make_backup,
     const std::function<void(const UpdateProgress&)>& progress, CancellationToken cancellation, bool analyze_only,
-    ContentStore* store, const std::optional<std::string>& only_model) {
+    RepairJournal* journal, const std::optional<std::string>& only_model) {
     if (IsBlank(game_directory)) {
         throw std::invalid_argument("Game folder is required.");
     }
@@ -845,8 +845,8 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
     cancellation.ThrowIfCancelled();
     const std::wstring final_path = replace_source ? mod_full : *destination;
     std::optional<SnapshotId> input_snapshot;
-    if (store != nullptr) {
-        input_snapshot = store->ImportVpk(std::filesystem::path(mod_full), cancellation);
+    if (journal != nullptr) {
+        input_snapshot = journal->ImportVpk(std::filesystem::path(mod_full), cancellation);
     }
     ReportProgress(progress, static_cast<int>(plans.size()), static_cast<int>(plans.size()), "Writing and validating the repaired VPK...");
     const std::optional<std::filesystem::path> backup = ArchiveTransaction::Write(
@@ -862,8 +862,8 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
     if (backup) {
         analysis.BackupPath = Narrow(backup->wstring());
     }
-    if (store != nullptr) {
-        store->RecordRepair(MakeRepairRequest(*input_snapshot, analysis, plans, edits, game, cancellation), cancellation);
+    if (journal != nullptr) {
+        journal->RecordRepair(MakeRepairRequest(*input_snapshot, analysis, plans, edits, game, cancellation), cancellation);
     }
     ReportProgress(progress, static_cast<int>(plans.size()), static_cast<int>(plans.size()),
         analysis.BackupPath ? "Repaired VPK. Original backup: " + *analysis.BackupPath : "Wrote " + *analysis.OutputPath + ".");

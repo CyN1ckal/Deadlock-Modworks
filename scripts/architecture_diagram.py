@@ -55,7 +55,10 @@ ca = {n: G.in_degree(n) for n in G}
 ce = {n: sum(1 for d in G.successors(n) if pkg[d] != 'ext') for n in G}
 inst = {n: (ce[n] / (ca[n] + ce[n]) if ca[n] + ce[n] else 0.0) for n in G}
 R = nx.transitive_reduction(G)
-REAL = ('preview/main', 'model_tools')
+# Abstractions and the modules that implement them. Drawn as «interface» boxes and realization arrows.
+REALIZES = {('preview/main', 'model_tools'), ('content_store', 'repair_journal'), ('content_store', 'snapshot_reader')}
+INTERFACES = {b for _, b in REALIZES}
+R.add_edges_from(e for e in REALIZES if G.has_edge(*e))  # always draw a realization, even when a longer path implies it
 
 # ---------- layering: longest path to a sink; externals pinned to level 0 ----------
 level = {}
@@ -191,7 +194,7 @@ for (a, b) in R.edges():
     x0, y0, x1, y1 = outp[(a, b)], y[a], inp[(a, b)], y[b] + BH
     k_ = min(LH * 0.55, (y0 - y1) / 2)
     d = f'M{x0:.1f},{y0} C{x0:.1f},{y0 - k_:.1f} {x1:.1f},{y1 + k_:.1f} {x1:.1f},{y1}'
-    if (a, b) == REAL:
+    if (a, b) in REALIZES:
         w(f'<path d="{d}" fill="none" stroke="#2c6b4a" stroke-width="1.6" stroke-dasharray="6 3" marker-end="url(#real)"/>')
     else:
         w(f'<path d="{d}" class="u" marker-end="url(#use)"><title>{a} uses {b}</title></path>')
@@ -203,7 +206,7 @@ def esc(s): return s.replace('&', '&amp;').replace('<', '&lt;')
 for n in G:
     p = pkg[n]; f, s = FILL[p]; x0 = x[n] - BW / 2; y0 = y[n]
     w(f'<g><title>{esc(n)}</title><rect x="{x0:.1f}" y="{y0}" width="{BW}" height="{BH}" rx="3" fill="{f}" stroke="{s}" stroke-width="1.3"/>')
-    stereo = '«library»' if p == 'ext' else ('«interface»' if n == 'model_tools' else '«component»')
+    stereo = '«library»' if p == 'ext' else ('«interface»' if n in INTERFACES else '«component»')
     if p == 'ext':
         w(f'<text x="{x[n]:.1f}" y="{y0 + 22}" fill="{s}" font-size="10.5" text-anchor="middle" font-style="italic">{stereo}</text>')
         w(f'<text x="{x[n]:.1f}" y="{y0 + 41}" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">{esc(n)}</text>')

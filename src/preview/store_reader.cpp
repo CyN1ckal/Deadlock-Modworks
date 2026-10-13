@@ -42,7 +42,7 @@ std::vector<std::string> ClipsUnderModel(std::string_view model_path, const std:
     return clips;
 }
 
-std::optional<std::vector<uint8_t>> ReadSnapshotThenGame(const ContentStore& store, const SnapshotId* snapshot,
+std::optional<std::vector<uint8_t>> ReadSnapshotThenGame(const SnapshotReader& store, const SnapshotId* snapshot,
     const std::string& path, const std::function<std::optional<std::vector<uint8_t>>(const std::string&)>& game) {
     if (snapshot != nullptr && !snapshot->Value.empty()) {
         try {

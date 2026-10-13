@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -45,4 +47,45 @@ TEST(StoreReader, PreferredSnapshotWinsOtherwiseLatestObservation) {
     const skeleton_repair::MembershipRow* fallback = skeleton_repair::VersionMembership(rows, &missing);
     ASSERT_NE(fallback, nullptr);
     EXPECT_EQ(fallback->Snapshot.Value, "bbb");
+}
+
+namespace {
+
+// A snapshot reader with no store behind it. The second path throws, like a blob that is listed but unreadable.
+class FakeSnapshots final : public skeleton_repair::SnapshotReader {
+public:
+    std::optional<std::vector<uint8_t>> ReadSnapshotPath(
+        const skeleton_repair::SnapshotId& snapshot, std::string_view path) const override {
+        if (path == "materials/broken.vtex_c") {
+            throw std::runtime_error("blob missing");
+        }
+        const auto found = Files.find(snapshot.Value + "/" + std::string(path));
+        if (found == Files.end()) {
+            return std::nullopt;
+        }
+        return found->second;
+    }
+
+    std::map<std::string, std::vector<uint8_t>> Files;
+};
+
+}  // namespace
+
+TEST(StoreReader, SnapshotBytesWinThenGameThenNothing) {
+    FakeSnapshots snapshots;
+    snapshots.Files["aaa/models/hero.vmdl_c"] = {1, 2};
+    skeleton_repair::SnapshotId snapshot;
+    snapshot.Value = "aaa";
+    const auto game = [](const std::string& path) -> std::optional<std::vector<uint8_t>> {
+        if (path == "models/only_in_game.vmdl_c" || path == "materials/broken.vtex_c") {
+            return std::vector<uint8_t>{9};
+        }
+        return std::nullopt;
+    };
+
+    EXPECT_EQ(skeleton_repair::ReadSnapshotThenGame(snapshots, &snapshot, "models/hero.vmdl_c", game), (std::vector<uint8_t>{1, 2}));
+    EXPECT_EQ(skeleton_repair::ReadSnapshotThenGame(snapshots, &snapshot, "models/only_in_game.vmdl_c", game), (std::vector<uint8_t>{9}));
+    EXPECT_EQ(skeleton_repair::ReadSnapshotThenGame(snapshots, &snapshot, "materials/broken.vtex_c", game), (std::vector<uint8_t>{9}));
+    EXPECT_EQ(skeleton_repair::ReadSnapshotThenGame(snapshots, nullptr, "models/hero.vmdl_c", game), std::nullopt);
+    EXPECT_EQ(skeleton_repair::ReadSnapshotThenGame(snapshots, &snapshot, "models/missing.vmdl_c", {}), std::nullopt);
 }
