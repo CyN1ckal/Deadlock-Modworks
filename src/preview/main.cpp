@@ -19,7 +19,7 @@
 #include "comparison_view.hpp"
 #include "multi_view.hpp"
 #include "history_panel.hpp"
-#include "model_versions.hpp"
+#include "version_builder.hpp"
 #include "preview_panel.hpp"
 #include "strings.hpp"
 #include "vpk.hpp"

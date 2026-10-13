@@ -118,6 +118,8 @@ add_library(skeleton_repair_core STATIC
     src/core/content_hash.cpp
     src/core/content_store.cpp
     src/core/mod_store.cpp
+    src/core/model_versions.cpp
+    src/core/version_builder.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
 target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32 windowscodecs)

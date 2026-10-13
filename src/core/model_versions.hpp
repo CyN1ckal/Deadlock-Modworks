@@ -43,8 +43,7 @@ struct VersionData {
     std::optional<std::vector<GeometryBone>> AnimationSkeleton;
 };
 
-// Mod, repaired and game versions of one model. "Repaired" runs ModelMigration and
-// AnimationSkeletonMigration directly; the full update also fixes dependent resources and renames.
+// Mod, repaired and game versions of one model. BuildModelVersions in version_builder.hpp fills it in.
 struct ModelVersions {
     std::string ModelPath;
     std::optional<std::string> SkeletonPath;
@@ -54,8 +53,6 @@ struct ModelVersions {
 
     const VersionData& Get(ModelVersion version) const { return Versions[static_cast<size_t>(version)]; }
 };
-
-ModelVersions BuildModelVersions(const ModelSources& sources);
 
 // "<first m_vecNmSkeletonRefs entry>_c", normalized like VPK paths, or nothing.
 std::optional<std::string> AnimationSkeletonPath(const ModelGeometry& model);

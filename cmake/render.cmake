@@ -75,7 +75,6 @@ add_library(sr_render STATIC
     src/render/preview_scene.cpp
     src/render/model_renderer.cpp
     src/render/model_comparison.cpp
-    src/render/model_versions.cpp
     src/render/preview_materials.cpp
     src/render/skeleton_pose.cpp
     ${SR_SHADER_OUTPUTS}
