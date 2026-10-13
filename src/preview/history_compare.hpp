@@ -1,6 +1,6 @@
 #pragma once
 
-#include "content_store.hpp"
+#include "content_types.hpp"
 #include "report.hpp"
 
 #include <filesystem>

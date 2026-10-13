@@ -1,6 +1,8 @@
 // Model preview tool: opens a .vmdl_c or a VPK and shows the decoded model with PreviewPanel.
 // Window and swapchain setup follow Dear ImGui's example_win32_vulkan.
 
+#include "profile.hpp"
+
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -15,8 +17,9 @@
 #include "model_geometry.hpp"
 #include "model_renderer.hpp"
 #include "comparison_view.hpp"
+#include "multi_view.hpp"
 #include "history_panel.hpp"
-#include "model_versions.hpp"
+#include "version_builder.hpp"
 #include "preview_panel.hpp"
 #include "strings.hpp"
 #include "vpk.hpp"
@@ -147,6 +150,7 @@ void SetupWindow(VkSurfaceKHR surface, int width, int height) {
 }
 
 void FrameRender(ImDrawData* draw_data, const std::function<void(VkCommandBuffer)>& record_offscreen) {
+    ZoneScopedN("GPU submit");
     ImGui_ImplVulkanH_Window* wd = &g_window;
     VkSemaphore acquired = wd->FrameSemaphores[wd->SemaphoreIndex].ImageAcquiredSemaphore;
     VkSemaphore complete = wd->FrameSemaphores[wd->SemaphoreIndex].RenderCompleteSemaphore;
@@ -196,6 +200,7 @@ void FrameRender(ImDrawData* draw_data, const std::function<void(VkCommandBuffer
 }
 
 void FramePresent() {
+    ZoneScopedN("Present");
     if (g_swapchain_rebuild) {
         return;
     }
@@ -313,6 +318,12 @@ std::filesystem::path GamePak(const std::filesystem::path& chosen) {
 }
 
 using ArchivePtr = std::shared_ptr<const IndexedArchive>;
+
+// The game directory is huge, so both the open and the clip list stay off the UI thread.
+struct LoadedGame {
+    ArchivePtr Archive;
+    std::vector<std::string> Clips;
+};
 
 // How the game resolves a mod's files: the mod archive overrides the game's.
 // The reader holds its own archive references, so worker threads can use it while the UI changes archives.
@@ -472,7 +483,7 @@ Inspection InspectModelFile(const std::filesystem::path& path) {
 // Archives, the model list, and the two views that show the selection.
 // Archives are opened and models decoded on worker threads; this thread only applies finished results and uploads them.
 struct App {
-    enum class Page { Gallery, Pack, History, Inspect, Repair };
+    enum class Page { Gallery, Pack, History, Inspect, Repair, Multi };
     Page CurrentPage = Page::Gallery;
     Page PreviousPage = Page::Gallery;
     // Set while a page shown from code waits for its tab to become selected.
@@ -485,6 +496,9 @@ struct App {
     std::shared_ptr<ArchiveCache> Archives = std::make_shared<ArchiveCache>();
     PreviewPanel Panel;
     ComparisonView Compare;
+    MultiView Multi;
+    // Set when a repair or rename drops viewport uploads. The next finished import reloads them.
+    bool MultiSuspended = false;
     ArchivePtr Mod;
     std::string ModName;
     std::string Selected;
@@ -492,7 +506,12 @@ struct App {
     std::string GameName;
     std::string GameError;
     std::filesystem::path GameLoading;
-    LatestTask<ArchivePtr> GameLoader;
+    LatestTask<LoadedGame> GameLoader;
+    // Parent of the connected game archive. Filled when the archive finishes opening.
+    std::string GameDirectory;
+    // Last library revision and game path written by Persist. Snapshotting the pack every frame is not required.
+    uint64_t saved_revision_ = 0;
+    std::filesystem::path saved_game_;
     LatestTask<Inspection> Inspector;
     std::optional<std::string> PendingClip;
     // A model to inspect once its archive has been imported, from the command line.
@@ -558,13 +577,20 @@ struct App {
         SyncSources();
     }
 
+    void NoteSaved() {
+        saved_revision_ = Builder.Revision();
+        saved_game_ = ConfiguredGame;
+    }
+
     void Persist(bool force = false) {
+        ZoneScopedN("Persist library");
         if (!Store || ImportBusy() || !CanPersist) return;
+        if (!force && Builder.Revision() == saved_revision_ && ConfiguredGame == saved_game_) return;
         const auto current = Builder.Snapshot(ModPaths, ConfiguredGame);
-        if (SavedState && *SavedState == current) return;
+        if (SavedState && *SavedState == current) { NoteSaved(); return; }
         if (!force && !SaveError.empty() && ImGui::GetTime() - LastSaveAttempt < 5) return;
         LastSaveAttempt = ImGui::GetTime();
-        try { Store->Save(current); SavedState = current; SaveError.clear(); }
+        try { Store->Save(current); SavedState = current; SaveError.clear(); NoteSaved(); }
         catch (const std::exception& error) { SaveError = error.what(); }
     }
 
@@ -666,6 +692,7 @@ struct App {
         if (replace) starting.Sources.clear();
         ImportWorker = std::async(std::launch::async, [root = Store->Root(), incoming, starting = std::move(starting),
             token = ImportCancellation.Token(), completed = &ImportedCount, checkpoints = CanPersist]() mutable {
+            ZoneScopedN("Import mods");
             ImportResult result{std::move(starting), {}, {}};
             LocalModStore store(root);
             for (const auto& source : incoming.Sources) {
@@ -687,21 +714,33 @@ struct App {
                     for (auto& model : result.Library.Selected) if (skeleton_repair::EqualsIgnoreCase(
                         Narrow(std::filesystem::absolute(model.Archive).lexically_normal().wstring()),
                         Narrow(std::filesystem::absolute(source).lexically_normal().wstring()))) model.Archive = cached;
+                    for (auto& package : result.Library.Packages) if (same(package, source)) package = cached;
                     auto checkpoint = result.Library;
-                    std::erase_if(checkpoint.Selected, [&](const auto& model) { return std::none_of(checkpoint.Sources.begin(), checkpoint.Sources.end(),
-                        [&](const auto& path) { return skeleton_repair::EqualsIgnoreCase(Narrow(path.wstring()), Narrow(model.Archive.wstring())); }); });
+                    const auto listed = [](const std::vector<std::filesystem::path>& paths, const std::filesystem::path& path) {
+                        return std::none_of(paths.begin(), paths.end(), [&](const auto& other) {
+                            return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(path.wstring()));
+                        });
+                    };
+                    std::erase_if(checkpoint.Selected, [&](const auto& model) { return listed(checkpoint.Sources, model.Archive); });
+                    std::erase_if(checkpoint.Packages, [&](const auto& package) { return listed(checkpoint.Sources, package); });
                     if (checkpoints) store.Save(checkpoint);
                 } catch (const OperationCancelled&) { result.Errors += "Import cancelled. Completed imports were kept.\n"; break; }
                 catch (const std::exception& error) { result.Errors += Narrow(source.filename().wstring()) + ": " + error.what() + "\n"; }
                 ++*completed;
             }
-            std::erase_if(result.Library.Selected, [&](const auto& model) { return std::none_of(result.Library.Sources.begin(), result.Library.Sources.end(),
-                [&](const auto& source) { return skeleton_repair::EqualsIgnoreCase(Narrow(source.wstring()), Narrow(model.Archive.wstring())); }); });
+            const auto listed = [](const std::filesystem::path& path, const std::vector<std::filesystem::path>& paths) {
+                return std::none_of(paths.begin(), paths.end(), [&](const auto& other) {
+                    return skeleton_repair::EqualsIgnoreCase(Narrow(other.wstring()), Narrow(path.wstring()));
+                });
+            };
+            std::erase_if(result.Library.Selected, [&](const auto& model) { return listed(model.Archive, result.Library.Sources); });
+            std::erase_if(result.Library.Packages, [&](const auto& package) { return listed(package, result.Library.Sources); });
             return result;
         });
     }
 
     void PollImport() {
+        ZoneScopedN("Poll import");
         if (!ImportBusy() || ImportWorker.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
         try {
             const auto result = ImportWorker.get();
@@ -729,6 +768,10 @@ struct App {
         }
         // Imports and merges add models to the version history too.
         History.Refresh();
+        if (MultiSuspended) {
+            MultiSuspended = false;
+            Multi.Reload();
+        }
     }
 
     void SyncSources() {
@@ -742,7 +785,12 @@ struct App {
         catch (const std::exception&) { return {}; }
     }
 
-    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Builder(device, Archives), History(ContentDirectory()) {
+    explicit App(const VulkanDevice& device) : Panel(device), Compare(device), Multi(device), Builder(device, Archives), History(ContentDirectory()) {
+        Multi.SetArchives(Archives);
+        Builder.SetMultiViewHandler([this](const LibraryModel& model) {
+            Multi.Open(model, Builder.Models());
+            ShowPage(Page::Multi);
+        });
         try {
             Store.emplace(LocalModStore::DefaultRoot());
             StartRestore();
@@ -759,26 +807,40 @@ struct App {
     void OpenGame(const std::filesystem::path& chosen) {
         Game.reset();
         GameClips.clear();
+        GameDirectory.clear();
         GameName.clear();
         GameError.clear();
         GameLoading = GamePak(chosen);
         ConfiguredGame = std::filesystem::absolute(GameLoading).lexically_normal();
         // The game directory has hundreds of thousands of entries, so it is parsed off the UI thread.
-        GameLoader.Start([archives = Archives, pak = GameLoading](CancellationToken) { return archives->Get(pak); });
+        GameLoader.Start([archives = Archives, pak = GameLoading](CancellationToken) {
+            ZoneScopedN("Open game archive");
+            LoadedGame loaded;
+            loaded.Archive = archives->Get(pak);
+            {
+                ZoneScopedN("Collect game clips");
+                for (const VpkEntry& entry : loaded.Archive->Archive().Entries()) {
+                    if (EndsWith(entry.FullPath, ".vnmclip_c")) loaded.Clips.push_back(entry.FullPath);
+                }
+            }
+            return loaded;
+        });
         SyncSources();
     }
 
     void PollGame() {
+        ZoneScopedN("Poll game");
         try {
-            const auto game = GameLoader.Take();
-            if (!game) return;
-            Game = *game;
+            const auto loaded = GameLoader.Take();
+            if (!loaded) return;
+            Game = loaded->Archive;
+            GameClips = std::move(loaded->Clips);
             GameName = Narrow(GameLoading.wstring());
-            for (const VpkEntry& entry : Game->Archive().Entries()) {
-                if (EndsWith(entry.FullPath, ".vnmclip_c")) GameClips.push_back(entry.FullPath);
-            }
+            GameDirectory = Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring());
+            Multi.SetGame(Game);
         } catch (const std::exception& error) {
             GameError = Narrow(GameLoading.wstring()) + ": " + error.what();
+            Multi.SetGame(nullptr);
         }
         // The comparison and textures depend on the game, so reload the model being inspected.
         if (!ActiveMod.empty()) StartInspect(ActiveMod, Selected);
@@ -817,6 +879,7 @@ struct App {
     }
 
     void PollInspect() {
+        ZoneScopedN("Poll inspect");
         std::optional<Inspection> result;
         try {
             result = Inspector.Take();
@@ -930,14 +993,15 @@ struct App {
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, global)) ShowExplorer = !ShowExplorer;
         if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_LeftArrow, global)) ShowPage(PreviousPage);
         if (ImGui::Shortcut(ImGuiKey_F1, global)) OpenShortcuts = true;
-        const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect};
-        const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5};
+        const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect, Page::Multi};
+        const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5, ImGuiKey_6};
         for (size_t i = 0; i < std::size(pages); ++i) {
             if (ImGui::Shortcut(ImGuiMod_Ctrl | keys[i], global)) ShowPage(pages[i]);
         }
     }
 
     void DrawMenuBar(HWND hwnd) {
+        ZoneScopedN("Menu");
         if (!ImGui::BeginMainMenuBar()) return;
         HandleShortcuts(hwnd);
         if (ImGui::BeginMenu("File")) {
@@ -972,7 +1036,8 @@ struct App {
         if (ImGui::BeginMenu("View")) {
             const struct { const char* Label; const char* Keys; Page Value; } pages[] = {
                 {"Mod library", "Ctrl+1", Page::Gallery}, {"VPK builder", "Ctrl+2", Page::Pack}, {"Version history", "Ctrl+3", Page::History},
-                {"Skin repairs", "Ctrl+4", Page::Repair}, {"Model inspector", "Ctrl+5", Page::Inspect}};
+                {"Skin repairs", "Ctrl+4", Page::Repair}, {"Model inspector", "Ctrl+5", Page::Inspect},
+                {"Multi view", "Ctrl+6", Page::Multi}};
             for (const auto& page : pages) {
                 if (ImGui::MenuItem(page.Label, page.Keys, CurrentPage == page.Value)) ShowPage(page.Value);
             }
@@ -1032,6 +1097,7 @@ struct App {
     }
 
     void DrawStatusBar(HWND hwnd) {
+        ZoneScopedN("Status bar");
         if (!ShowStatusBar) return;
         const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
         if (ImGui::BeginViewportSideBar("##statusbar", ImGui::GetMainViewport(), ImGuiDir_Down, ImGui::GetFrameHeight(), flags)
@@ -1040,7 +1106,9 @@ struct App {
             const char* label = nullptr;
             GameState(color, label);
             ImGui::PushStyleColor(ImGuiCol_Text, color);
-            const bool open = ImGui::BeginMenu((std::string("\xE2\x97\x8F ") + label + "###game").c_str());
+            char game_menu[96];
+            std::snprintf(game_menu, sizeof(game_menu), "\xE2\x97\x8F %s###game", label);
+            const bool open = ImGui::BeginMenu(game_menu);
             ImGui::PopStyleColor();
             if (!open) ImGui::SetItemTooltip("%s", Game ? GameName.c_str() : GameLoading.empty() ? "Choose the game archive to connect" : Narrow(GameLoading.wstring()).c_str());
             if (open) {
@@ -1107,6 +1175,7 @@ struct App {
     }
 
     void DrawExplorer(HWND hwnd) {
+        ZoneScopedN("Explorer");
         if (!ShowExplorer) return;
         DockWithoutTab();
         ImGui::Begin("Explorer", &ShowExplorer, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
@@ -1141,25 +1210,38 @@ struct App {
                 Builder.SetSourceFilter({});
                 if (CurrentPage != Page::Pack) ShowPage(Page::Gallery);
             }
-            count_column(Builder.ModelCount());
+            count_column(Builder.ListedCount());
         }
         std::optional<std::filesystem::path> remove;
         for (const auto& path : ModPaths) {
-            const auto name = Narrow(path.filename().wstring());
+            const LibraryPanel::SourceInfo* info = Builder.FindSource(path);
+            const std::string local_name = info ? std::string{} : Narrow(path.filename().wstring());
+            const std::string local_key = info ? std::string{} : Narrow(path.wstring());
+            const std::string& name = info ? info->Name : local_name;
+            const std::string& key = info ? info->Full : local_key;
             if (!filter.PassFilter(name.c_str())) continue;
-            const auto key = Narrow(path.wstring());
             ImGui::PushID(key.c_str());
             if (ImGui::Selectable(name.c_str(), active == path)) {
                 Builder.SetSourceFilter(active == path ? std::filesystem::path{} : path);
                 if (CurrentPage != Page::Pack) ShowPage(Page::Gallery);
             }
-            ImGui::SetItemTooltip("%s\nClick to show its skins. Right-click for more.", key.c_str());
+            const size_t skins = info ? info->Skins : Builder.ModelsIn(path);
+            const size_t files = info ? info->Files : Builder.PackageFiles(path);
+            const std::string local_tip = info ? std::string{} : key;
+            const std::string& tip = info ? info->Tip : local_tip;
+            ImGui::SetItemTooltip("%s", tip.c_str());
             if (ImGui::BeginPopupContextItem("source_menu")) {
                 ImGui::TextDisabled("%s", name.c_str());
                 ImGui::Separator();
                 if (ImGui::MenuItem("Show skins")) { Builder.SetSourceFilter(path); ShowPage(Page::Gallery); }
-                if (ImGui::MenuItem("Include every skin in the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, true);
-                if (ImGui::MenuItem("Remove every skin from the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, false);
+                if (skins > 0) {
+                    if (ImGui::MenuItem("Include every skin in the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, true);
+                    if (ImGui::MenuItem("Remove every skin from the pack", nullptr, false, !PackBusy())) Builder.IncludeSource(path, false);
+                }
+                if (files > 0) {
+                    if (ImGui::MenuItem("Include other files in the pack", nullptr, false, !PackBusy())) Builder.IncludePackage(path, true);
+                    if (ImGui::MenuItem("Remove other files from the pack", nullptr, false, !PackBusy())) Builder.IncludePackage(path, false);
+                }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Rename...", nullptr, false, !FilesBusy() && Store.has_value())) {
                     RenameTarget = path;
@@ -1173,7 +1255,7 @@ struct App {
                 if (ImGui::MenuItem("Remove from library", nullptr, false, !FilesBusy())) remove = path;
                 ImGui::EndPopup();
             }
-            count_column(Builder.ModelsIn(path));
+            count_column(skins > 0 ? skins : files);
             ImGui::PopID();
         }
         if (ModPaths.empty()) {
@@ -1239,6 +1321,8 @@ struct App {
         Mod.reset();
         Panel.ShowError("", "");
         Compare.ShowError("", "");
+        Multi.Release();
+        MultiSuspended = true;
     }
 
     // The page tabs. A tab the user clicks becomes the page; a page shown from code selects its tab.
@@ -1249,10 +1333,11 @@ struct App {
         const std::string inspect_label = (ModName.empty() ? std::string("Model inspector") : "Inspect: " + ModName) + "###inspect";
         const struct { const char* Label; const char* Tooltip; Page Value; } tabs[] = {
             {"Mod library###gallery", "Browse every skin in your library (Ctrl+1)", Page::Gallery},
-            {pack_label, "Choose skins and export them as one VPK (Ctrl+2)", Page::Pack},
+            {pack_label, "Choose skins and other files, then export them as one VPK (Ctrl+2)", Page::Pack},
             {"Version history###history", "Every stored copy of each model, and how repairs changed it (Ctrl+3)", Page::History},
             {"Skin repairs###repair", "Check and repair your mods after game updates (Ctrl+4)", Page::Repair},
             {inspect_label.c_str(), "Textures, animations and skeleton of one model (Ctrl+5)", Page::Inspect},
+            {"Multi view###multi", "Several models of one character, with one shared camera (Ctrl+6)", Page::Multi},
         };
         Page visible = CurrentPage;
         for (const auto& tab : tabs) {
@@ -1274,6 +1359,7 @@ struct App {
     }
 
     void DrawWorkspace(HWND hwnd) {
+        ZoneScopedN("Workspace");
         DockWithoutTab();
         ImGui::Begin("Workspace", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
         DrawPageTabs();
@@ -1283,9 +1369,13 @@ struct App {
                 Repair.Busy() || ImportBusy(), Repair.Busy() || GameLoader.Busy(), CurrentPage == Page::Pack, [&] { AddMods(hwnd); },
                 [&](const ModelLibrary& library) { StartImport(library, true); },
                 [&](const std::filesystem::path& other) { StartMerge(other); },
-                [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); ShowPage(Page::Inspect); });
+                [&](const LibraryModel& model) { StartInspect(model.Archive, model.Model); ShowPage(Page::Inspect); },
+                [&](const LibraryModel& model) {
+                    ShowPage(Page::Repair);
+                    Repair.AnalyzeModel(Narrow(model.Archive.wstring()), model.Model);
+                });
         } else if (CurrentPage == Page::History) {
-            const std::string game_directory = Game ? Narrow(GamePath().parent_path().wstring()) : std::string();
+            const std::string& game_directory = GameDirectory;
             History.Draw(hwnd, Panel, [game = Game](const std::string& path) { return game ? game->Read(path) : std::nullopt; }, GameClips,
                 Compare, game_directory, Repair.Busy() || Builder.Busy() || ImportBusy(),
                 [&](bool compare) {
@@ -1309,6 +1399,16 @@ struct App {
                     ui::CopyMenuItem("Copy source path", Narrow(ActiveMod.wstring()));
                     if (ImGui::MenuItem("Reveal source in Explorer")) ui::RevealInExplorer(ActiveMod);
                     if (ImGui::MenuItem("Show source in library")) { Builder.SetSourceFilter(ActiveMod); ShowPage(Page::Gallery); }
+                    if (ImGui::MenuItem("Multi view", nullptr, false, CharacterOfModel(Selected).has_value())) {
+                        Multi.Open({ActiveMod, Selected}, Builder.Models());
+                        ShowPage(Page::Multi);
+                    }
+                    ImGui::SetItemTooltip("Show this character's models together, with one shared camera.");
+                    if (ImGui::MenuItem("Analyze this model", nullptr, false, Game && !FilesBusy() && !Selected.empty())) {
+                        ShowPage(Page::Repair);
+                        Repair.AnalyzeModel(Narrow(ActiveMod.wstring()), Selected);
+                    }
+                    ImGui::SetItemTooltip("Check this model and its animation skeleton against the installed game.");
                 }
                 ImGui::EndPopup();
             }
@@ -1326,6 +1426,8 @@ struct App {
                 }
                 ImGui::EndTabBar();
             }
+        } else if (CurrentPage == Page::Multi) {
+            Multi.Draw(Builder.Models());
         } else {
             ImGui::BeginDisabled(Builder.Busy() || ImportBusy());
             Repair.Draw(hwnd, [&] { ReleaseArchives(); });
@@ -1335,6 +1437,7 @@ struct App {
     }
 
     void DrawDialogs() {
+        ZoneScopedN("Dialogs");
         if (std::exchange(OpenShortcuts, false)) ImGui::OpenPopup("Keyboard shortcuts");
         if (std::exchange(OpenAbout, false)) ImGui::OpenPopup("About");
         const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -1344,10 +1447,10 @@ struct App {
         if (ImGui::BeginPopupModal("Keyboard shortcuts", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             static const char* const kShortcuts[][2] = {
                 {"Ctrl+O", "Add mods"}, {"Ctrl+Shift+O", "Add every mod in a folder"}, {"Ctrl+G", "Choose the game archive"},
-                {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins"}, {"F5", "Reopen every source and reload thumbnails"},
-                {"Ctrl+1 ... Ctrl+5", "Library, builder, history, repairs, inspector"}, {"Alt+Left", "Back to the previous page"},
-                {"Ctrl+Shift+E", "Show or hide the explorer"}, {"Double-click", "Inspect a skin, view a version"},
-                {"Enter / Space", "Inspect the clicked skin / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
+                {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins, packages and sources"}, {"F5", "Reopen every source and reload thumbnails"},
+                {"Ctrl+1 ... Ctrl+6", "Library, builder, history, repairs, inspector, multi view"}, {"Alt+Left", "Back to the previous page"},
+                {"Ctrl+Shift+E", "Show or hide the explorer"}, {"Double-click", "Inspect a skin, list a package's files, or view a version"},
+                {"Enter / Space", "Inspect a skin or list a package's files / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
                 {"Drag / right-drag / wheel", "Orbit / pan / zoom a viewport"}, {"F", "Frame the model in the hovered viewport"},
                 {"Right-click", "More actions on skins, sources, versions, results and viewports"}, {"F1", "This list"},
             };
@@ -1369,6 +1472,9 @@ struct App {
             ImGui::TextUnformatted("Deadlock Mod Manager");
             ImGui::TextDisabled("Browse skins, build packs, inspect models and repair skeleton changes.");
             ImGui::TextDisabled("Dear ImGui %s, Vulkan 1.3", ImGui::GetVersion());
+#ifdef TRACY_ENABLE
+            ImGui::TextDisabled("Tracy is announcing this window. Connect tracy-profiler, or open 127.0.0.1 port 8086.");
+#endif
             if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
@@ -1473,6 +1579,7 @@ void ApplyTheme(float scale) {
 }
 
 int Run(const std::vector<std::filesystem::path>& args) {
+    [[maybe_unused]] const TracySession tracy_session;
     ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, WndProc, 0, 0, GetModuleHandleW(nullptr), nullptr, nullptr, nullptr, nullptr, L"DeadlockModelPreview", nullptr};
     RegisterClassExW(&wc);
@@ -1568,11 +1675,15 @@ int Run(const std::vector<std::filesystem::path>& args) {
         bool done = false;
         bool first_frame = true;
         while (!done) {
-            MSG msg;
-            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-                done = done || msg.message == WM_QUIT;
+            ZoneScopedN("Frame");
+            {
+                ZoneScopedN("Message pump");
+                MSG msg;
+                while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                    done = done || msg.message == WM_QUIT;
+                }
             }
             if (done) {
                 app.Repair.Cancel();
@@ -1580,9 +1691,11 @@ int Run(const std::vector<std::filesystem::path>& args) {
             }
             if (IsIconic(hwnd)) {
                 Sleep(10);
+                FrameMark;
                 continue;
             }
             if (g_swapchain_rebuild) {
+                ZoneScopedN("Swapchain");
                 RECT rect{};
                 GetClientRect(hwnd, &rect);
                 const int width = rect.right - rect.left;
@@ -1596,14 +1709,18 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 }
             }
 
-            ImGui_ImplVulkan_NewFrame();
-            ImGui_ImplWin32_NewFrame();
-            ImGui::NewFrame();
+            {
+                ZoneScopedN("ImGui new frame");
+                ImGui_ImplVulkan_NewFrame();
+                ImGui_ImplWin32_NewFrame();
+                ImGui::NewFrame();
+            }
 
             app.Builder.Poll();
             app.PollImport();
             app.PollGame();
             app.PollInspect();
+            app.Multi.Poll();
             app.StartPendingRename();
 
             // A repair from the version history may replace one of the gallery's stored copies too.
@@ -1616,6 +1733,10 @@ int Run(const std::vector<std::filesystem::path>& args) {
                 if (app.Store) app.StartImport(app.Builder.Snapshot(app.ModPaths, app.ConfiguredGame), false);
             }
             if (repaired && !app.ActiveMod.empty()) app.StartInspect(app.ActiveMod, app.Selected);
+            if (repaired) {
+                app.MultiSuspended = false;
+                app.Multi.Reload();
+            }
             if (!g_dropped.empty()) {
                 if (!app.FilesBusy()) app.AddPaths(g_dropped);
                 g_dropped.clear();
@@ -1643,16 +1764,21 @@ int Run(const std::vector<std::filesystem::path>& args) {
             app.DrawDialogs();
             app.Persist();
 
-            ImGui::Render();
+            {
+                ZoneScopedN("ImGui render");
+                ImGui::Render();
+            }
             ImDrawData* draw_data = ImGui::GetDrawData();
             if (draw_data->DisplaySize.x > 0 && draw_data->DisplaySize.y > 0) {
                 g_window.ClearValue.color = {{0.118f, 0.122f, 0.133f, 1.0f}};
                 FrameRender(draw_data, [&](VkCommandBuffer command_buffer) {
                     app.Panel.Record(command_buffer);
                     app.Compare.Record(command_buffer);
+                    app.Multi.Record(command_buffer);
                 });
                 FramePresent();
             }
+            FrameMark;
         }
         CheckVk(vkDeviceWaitIdle(g_device.Device));
     }

@@ -3,7 +3,7 @@
 #include "animation.hpp"
 #include "archive_transaction.hpp"
 #include "content_hash.hpp"
-#include "content_store.hpp"
+#include "repair_journal.hpp"
 #include "error.hpp"
 #include "kv3.hpp"
 #include "model.hpp"
@@ -41,6 +41,23 @@ bool EndsWithOrdinal(std::string_view text, std::string_view suffix) {
 
 bool EndsWithIgnoreCase(std::string_view text, std::string_view suffix) {
     return text.size() >= suffix.size() && EqualsIgnoreCase(text.substr(text.size() - suffix.size()), suffix);
+}
+
+// The animation skeleton compiled beside a hero model, or the model beside a skeleton.
+std::optional<std::string> PairedRigPath(std::string_view path) {
+    constexpr std::string_view kModelSuffix = ".vmdl_c";
+    constexpr std::string_view kSkeletonSuffix = ".vnmskel_c";
+    if (EndsWithIgnoreCase(path, kModelSuffix)) {
+        std::string paired(path.substr(0, path.size() - kModelSuffix.size()));
+        paired += kSkeletonSuffix;
+        return paired;
+    }
+    if (EndsWithIgnoreCase(path, kSkeletonSuffix)) {
+        std::string paired(path.substr(0, path.size() - kSkeletonSuffix.size()));
+        paired += kModelSuffix;
+        return paired;
+    }
+    return std::nullopt;
 }
 
 bool StartsWithIgnoreCase(std::string_view text, std::string_view prefix) {
@@ -536,19 +553,23 @@ RepairRequest MakeRepairRequest(const SnapshotId& input, const UpdateReport& rep
 }  // namespace
 
 UpdateReport HeroModelUpdater::Analyze(const std::string& game_directory, const std::string& mod_vpk,
-    const std::function<void(const UpdateProgress&)>& progress, CancellationToken cancellation) {
-    return Update(game_directory, mod_vpk, std::nullopt, false, false, progress, cancellation, true);
+    const std::function<void(const UpdateProgress&)>& progress, CancellationToken cancellation,
+    const std::optional<std::string>& only_model) {
+    return Update(game_directory, mod_vpk, std::nullopt, false, false, progress, cancellation, true, nullptr, only_model);
 }
 
 UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const std::string& mod_vpk,
     const std::optional<std::string>& output_path, bool replace_source, bool make_backup,
     const std::function<void(const UpdateProgress&)>& progress, CancellationToken cancellation, bool analyze_only,
-    ContentStore* store) {
+    RepairJournal* journal, const std::optional<std::string>& only_model) {
     if (IsBlank(game_directory)) {
         throw std::invalid_argument("Game folder is required.");
     }
     if (IsBlank(mod_vpk)) {
         throw std::invalid_argument("Mod VPK is required.");
+    }
+    if (only_model && IsBlank(*only_model)) {
+        throw std::invalid_argument("Model path is required.");
     }
     if (!analyze_only && !replace_source && (!output_path || IsBlank(*output_path))) {
         throw std::invalid_argument("Output VPK is required.");
@@ -623,6 +644,15 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
             mod_heroes.push_back(entry);
         }
     }
+    // Bone checks still see every model in the archive. `mod_heroes` is what this run checks.
+    const std::vector<VpkEntry> archive_heroes = mod_heroes;
+    if (only_model) {
+        const std::optional<std::string> paired = PairedRigPath(*only_model);
+        std::erase_if(mod_heroes, [&](const VpkEntry& entry) {
+            return !EqualsIgnoreCase(entry.FullPath, *only_model)
+                && !(paired && EqualsIgnoreCase(entry.FullPath, *paired));
+        });
+    }
     std::vector<std::string> available;
     available.reserve(game.Entries().size() + mod.Entries().size());
     for (const VpkEntry& entry : game.Entries()) {
@@ -694,7 +724,7 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
         if (!edits[i] || !edits[i]->Bytes || !edits[i]->BoneAliases || edits[i]->BoneAliases->empty()) {
             continue;
         }
-        for (const VpkEntry& model_entry : mod_heroes) {
+        for (const VpkEntry& model_entry : archive_heroes) {
             if (!HeroPaths::IsHeroModel(model_entry.FullPath)) {
                 continue;
             }
@@ -778,9 +808,21 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
 
     if (mod_heroes.empty()) {
         ModelResult skipped;
-        skipped.Model = Narrow(std::filesystem::path(mod_full).filename().wstring());
         skipped.Outcome = ModelOutcome::Skipped;
-        skipped.Detail = "No supported hero models. This MVP cannot assess this mod.";
+        if (only_model) {
+            skipped.Model = *only_model;
+            bool present = false;
+            for (const VpkEntry& entry : mod.Entries()) {
+                if (EqualsIgnoreCase(entry.FullPath, *only_model)) {
+                    present = true;
+                    break;
+                }
+            }
+            skipped.Detail = present ? "That model is not a supported hero model in this archive." : "That model is not in this archive.";
+        } else {
+            skipped.Model = Narrow(std::filesystem::path(mod_full).filename().wstring());
+            skipped.Detail = "No supported hero models. This MVP cannot assess this mod.";
+        }
         results.push_back(std::move(skipped));
     }
 
@@ -803,8 +845,8 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
     cancellation.ThrowIfCancelled();
     const std::wstring final_path = replace_source ? mod_full : *destination;
     std::optional<SnapshotId> input_snapshot;
-    if (store != nullptr) {
-        input_snapshot = store->ImportVpk(std::filesystem::path(mod_full), cancellation);
+    if (journal != nullptr) {
+        input_snapshot = journal->ImportVpk(std::filesystem::path(mod_full), cancellation);
     }
     ReportProgress(progress, static_cast<int>(plans.size()), static_cast<int>(plans.size()), "Writing and validating the repaired VPK...");
     const std::optional<std::filesystem::path> backup = ArchiveTransaction::Write(
@@ -820,8 +862,8 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
     if (backup) {
         analysis.BackupPath = Narrow(backup->wstring());
     }
-    if (store != nullptr) {
-        store->RecordRepair(MakeRepairRequest(*input_snapshot, analysis, plans, edits, game, cancellation), cancellation);
+    if (journal != nullptr) {
+        journal->RecordRepair(MakeRepairRequest(*input_snapshot, analysis, plans, edits, game, cancellation), cancellation);
     }
     ReportProgress(progress, static_cast<int>(plans.size()), static_cast<int>(plans.size()),
         analysis.BackupPath ? "Repaired VPK. Original backup: " + *analysis.BackupPath : "Wrote " + *analysis.OutputPath + ".");

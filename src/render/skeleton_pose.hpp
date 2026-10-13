@@ -1,6 +1,6 @@
 #pragma once
 
-#include "animation_clip.hpp"
+#include "bone_transform.hpp"
 #include "model_geometry.hpp"
 
 #include <array>

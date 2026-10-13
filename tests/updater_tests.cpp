@@ -395,6 +395,66 @@ void ExpectError(const std::function<void()>& call, const char* message) {
 
 }  // namespace
 
+TEST(Updater, AnalyzeCanCheckOneModel) {
+    constexpr const char* kOther = "models/heroes/other/other.vmdl_c";
+    constexpr const char* kOtherSkeleton = "models/heroes/other/other.vnmskel_c";
+    const auto stock = Animation({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Lod = 1});
+    Pair pair(
+        {{kModel, kOldModel}, {kSkeleton, stock}, {kOther, kOldModel}, {kOtherSkeleton, stock},
+            {"models/props/crate.vmdl_c", std::vector<uint8_t>{1, 2, 3}}},
+        {{kModel, kGameModel}, {kSkeleton, stock}, {kOther, kGameModel}, {kOtherSkeleton, stock}});
+    const std::string mod = Utf8(pair.mod_path);
+
+    const UpdateReport all = HeroModelUpdater::Analyze(pair.game, mod);
+    EXPECT_NE(ResultFor(all, kModel), nullptr);
+    EXPECT_NE(ResultFor(all, kOther), nullptr);
+    EXPECT_EQ(ResultFor(all, "models/props/crate.vmdl_c"), nullptr);
+
+    const auto before = ReadBytes(pair.mod_path);
+    const UpdateReport one = HeroModelUpdater::Analyze(pair.game, mod, {}, {}, kModel);
+    EXPECT_FALSE(one.WroteFile);
+    EXPECT_EQ(ReadBytes(pair.mod_path), before);
+    ASSERT_NE(ResultFor(one, kModel), nullptr);
+    EXPECT_EQ(ResultFor(one, kModel)->Outcome, ModelOutcome::Repairable);
+    EXPECT_NE(ResultFor(one, kSkeleton), nullptr);
+    EXPECT_EQ(ResultFor(one, kOther), nullptr);
+    EXPECT_EQ(ResultFor(one, kOtherSkeleton), nullptr);
+    EXPECT_EQ(one.Results.size(), 2u);
+
+    const UpdateReport missing = HeroModelUpdater::Analyze(pair.game, mod, {}, {}, "models/heroes/test/absent.vmdl_c");
+    ASSERT_EQ(missing.Results.size(), 1u);
+    EXPECT_EQ(missing.Results[0].Model, "models/heroes/test/absent.vmdl_c");
+    EXPECT_EQ(missing.Results[0].Outcome, ModelOutcome::Skipped);
+    EXPECT_EQ(missing.Results[0].Detail, "That model is not in this archive.");
+
+    const UpdateReport prop = HeroModelUpdater::Analyze(pair.game, mod, {}, {}, "models/props/crate.vmdl_c");
+    ASSERT_EQ(prop.Results.size(), 1u);
+    EXPECT_EQ(prop.Results[0].Model, "models/props/crate.vmdl_c");
+    EXPECT_EQ(prop.Results[0].Outcome, ModelOutcome::Skipped);
+    EXPECT_EQ(prop.Results[0].Detail, "That model is not a supported hero model in this archive.");
+
+    ExpectError<std::invalid_argument>([&] { HeroModelUpdater::Analyze(pair.game, mod, {}, {}, "   "); }, "Model path is required.");
+}
+
+TEST(Updater, UpdateRepairsOneModelAndLeavesTheOther) {
+    constexpr const char* kOther = "models/heroes/other/other.vmdl_c";
+    Pair pair(
+        {{kModel, kOldModel}, {kOther, kOldModel}, {"materials/custom.txt", std::vector<uint8_t>{9}}},
+        {{kModel, kGameModel}, {kOther, kGameModel}});
+    const UpdateReport report = HeroModelUpdater::Update(pair.game, Utf8(pair.mod_path), std::nullopt, true, true, {}, {}, false, nullptr, kModel);
+    EXPECT_TRUE(report.WroteFile);
+    ASSERT_NE(ResultFor(report, kModel), nullptr);
+    EXPECT_EQ(ResultFor(report, kModel)->Outcome, ModelOutcome::Updated);
+    EXPECT_EQ(ResultFor(report, kOther), nullptr);
+
+    const VpkArchive archive = VpkArchive::Open(pair.mod_path);
+    EXPECT_NE(EntryBytes(archive, kModel), kOldModel);
+    EXPECT_EQ(EntryBytes(archive, kOther), kOldModel);
+    EXPECT_EQ(EntryBytes(archive, "materials/custom.txt"), (std::vector<uint8_t>{9}));
+    EXPECT_EQ(HeroModelUpdater::Analyze(pair.game, Utf8(pair.mod_path), {}, {}, kModel).Results.at(0).Outcome, ModelOutcome::Current);
+    EXPECT_EQ(HeroModelUpdater::Analyze(pair.game, Utf8(pair.mod_path), {}, {}, kOther).Results.at(0).Outcome, ModelOutcome::Repairable);
+}
+
 TEST(Updater, AnalyzeDetectsReorderWithoutWriting) {
     Pair pair({{kModel, kOldModel}, {"materials/custom.txt", std::vector<uint8_t>{9, 8, 7}}});
     const auto original = ReadBytes(pair.mod_path);

@@ -147,7 +147,24 @@ TEST(Texture, ReportsClampFlags) {
 
 TEST(Texture, RejectsCubeMapsAndUnknownFormats) {
     EXPECT_THROW(DecodeTexture(Texture(kRgba8888, 1, 1, {{Filled(4, 0)}}, 0x10)), InvalidData);
-    EXPECT_THROW(DecodeTexture(Texture(15, 1, 1, {{Filled(4, 0)}})), InvalidData);  // JPEG_RGBA8888
+    EXPECT_THROW(DecodeTexture(Texture(15, 1, 1, {{Filled(4, 0)}})), InvalidData);  // JPEG bytes that are not a JPEG
+    EXPECT_THROW(DecodeTexture(Texture(99, 1, 1, {{Filled(4, 0)}})), InvalidData);
+}
+
+TEST(Texture, DecodesAnEmbeddedPngToItsPixels) {
+    // 1x1 opaque red PNG, compiled as VTexFormat PNG_RGBA8888.
+    const std::vector<uint8_t> png = {137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196,
+        137, 0, 0, 0, 1, 115, 82, 71, 66, 0, 174, 206, 28, 233, 0, 0, 0, 4, 103, 65, 77, 65, 0, 0, 177, 143, 11, 252, 97, 5, 0, 0, 0, 9, 112, 72, 89, 115,
+        0, 0, 14, 195, 0, 0, 14, 195, 1, 199, 111, 168, 100, 0, 0, 0, 13, 73, 68, 65, 84, 24, 87, 99, 248, 207, 192, 240, 31, 0, 5, 0, 1, 255, 166, 92, 155,
+        93, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130};
+    const auto image = DecodeTexture(Texture(16, 1, 1, {{png}}));
+    EXPECT_EQ(image.Format, TextureFormat::RGBA8);
+    EXPECT_EQ(image.Width, 1u);
+    EXPECT_EQ(image.Height, 1u);
+    ASSERT_EQ(image.Mips.size(), 1u);
+    ASSERT_EQ(image.Mips[0].size(), 4u);
+    EXPECT_EQ(image.Mips[0], (std::vector<uint8_t>{255, 0, 0, 255}));
+    EXPECT_THROW(DecodeTexture(Texture(16, 1, 1, {{png}}, 0x10)), InvalidData);
 }
 
 TEST(Texture, RejectsTruncatedPixels) {

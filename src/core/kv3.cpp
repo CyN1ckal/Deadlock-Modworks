@@ -198,31 +198,43 @@ std::vector<uint8_t> DecompressZstd(std::span<const uint8_t> input, int output_s
     return output;
 }
 
-std::vector<uint8_t> DecompressLz4Chain(Lane& sizes, Lane& compressed, int frame, int output_size) {
-    if (frame <= 0 || output_size < 0) {
+// Each blob is cut into frames of at most `frame` bytes. A frame never crosses into the next blob,
+// so a frame can be shorter than both the frame size and the bytes still left in the whole buffer.
+// Later frames stay chained and may refer to earlier blobs.
+std::vector<uint8_t> DecompressLz4Chain(Lane& sizes, Lane& compressed, int frame, std::span<const uint8_t> blob_lengths, int output_size) {
+    if (frame <= 0 || output_size < 0 || blob_lengths.size() % sizeof(int32_t) != 0) {
         throw InvalidData("KV3 LZ4 blob frame is invalid.");
     }
     std::vector<uint8_t> output(static_cast<size_t>(output_size));
     LZ4_streamDecode_t stream{};
     size_t produced = 0;
-    while (!sizes.Done()) {
-        const int compressed_size = sizes.Take<uint16_t>();
-        if (compressed_size <= 0) {
-            throw InvalidData("KV3 LZ4 blob frame is empty.");
+    for (size_t length_at = 0; length_at < blob_lengths.size(); length_at += sizeof(int32_t)) {
+        int32_t blob_length = 0;
+        std::memcpy(&blob_length, blob_lengths.data() + length_at, sizeof(blob_length));
+        if (blob_length < 0 || static_cast<size_t>(blob_length) > output.size() - produced) {
+            throw InvalidData("KV3 blob length is outside the buffer.");
         }
-        const auto input = compressed.TakeBytes(static_cast<size_t>(compressed_size));
-        if (produced > output.size()) {
-            throw InvalidData("KV3 LZ4 blob overran its buffer.");
+        const size_t blob_end = produced + static_cast<size_t>(blob_length);
+        while (produced < blob_end) {
+            if (sizes.Done()) {
+                throw InvalidData("KV3 LZ4 blob frame is empty.");
+            }
+            const int compressed_size = sizes.Take<uint16_t>();
+            if (compressed_size <= 0) {
+                throw InvalidData("KV3 LZ4 blob frame is empty.");
+            }
+            const auto input = compressed.TakeBytes(static_cast<size_t>(compressed_size));
+            const size_t blob_left = blob_end - produced;
+            const int room = static_cast<int>(std::min(static_cast<size_t>(frame), blob_left));
+            const int decoded = LZ4_decompress_safe_continue(&stream, reinterpret_cast<const char*>(input.data()),
+                reinterpret_cast<char*>(output.data() + produced), compressed_size, room);
+            if (decoded <= 0 || static_cast<size_t>(decoded) > blob_left) {
+                throw InvalidData("Failed to decompress an LZ4 KV3 blob.");
+            }
+            produced += static_cast<size_t>(decoded);
         }
-        const int room = static_cast<int>(std::min(static_cast<size_t>(frame), output.size() - produced));
-        const int decoded = LZ4_decompress_safe_continue(&stream, reinterpret_cast<const char*>(input.data()),
-            reinterpret_cast<char*>(output.data() + produced), compressed_size, room);
-        if (decoded != room) {
-            throw InvalidData("Failed to decompress an LZ4 KV3 blob.");
-        }
-        produced += static_cast<size_t>(decoded);
     }
-    if (produced != output.size()) {
+    if (!sizes.Done() || produced != output.size()) {
         throw InvalidData("KV3 LZ4 blob size does not match.");
     }
     return output;
@@ -955,7 +967,7 @@ KvDocument ReadKv3(std::span<const uint8_t> bytes) {
             ctx.blob_lengths = Lane{lengths.data(), lengths.size(), 0};
             CheckTrailer(tail.Take<uint32_t>());
             if (header.compression == Compression::Lz4) {
-                blob_storage = DecompressLz4Chain(tail, file, header.frame, header.size_blobs);
+                blob_storage = DecompressLz4Chain(tail, file, header.frame, lengths, header.size_blobs);
             } else if (header.compression == Compression::Zstd) {
                 if (header.size_block_sizes != 0 || !tail.Done()) {
                     throw InvalidData("KV3 Zstd blob frame table is not supported.");
@@ -1044,7 +1056,7 @@ KvDocument ReadKv3(std::span<const uint8_t> bytes) {
         CheckTrailer(tail.Take<uint32_t>());
         std::vector<uint8_t> blob_storage;
         if (header.compression == Compression::Lz4) {
-            blob_storage = DecompressLz4Chain(tail, file, header.frame, header.size_blobs);
+            blob_storage = DecompressLz4Chain(tail, file, header.frame, lengths, header.size_blobs);
             ctx.blobs = Lane{blob_storage.data(), blob_storage.size(), 0};
             Exhaust(tail, "blob frame table");
             CheckTrailer(file.Take<uint32_t>());

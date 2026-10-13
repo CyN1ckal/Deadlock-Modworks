@@ -1,3 +1,4 @@
+#include "profile.hpp"
 #include "repair_panel.hpp"
 #include "strings.hpp"
 #include "ui.hpp"
@@ -32,6 +33,36 @@ ImVec4 OutcomeColor(ModelOutcome outcome) {
     if (outcome == ModelOutcome::Repairable) return ui::kAccent;
     return ui::kGood;
 }
+bool EndsWithIgnoreCase(std::string_view text, std::string_view suffix) {
+    return text.size() >= suffix.size() && EqualsIgnoreCase(text.substr(text.size() - suffix.size()), suffix);
+}
+struct RepairJob {
+    std::string Archive;
+    // Set when only this model, and its paired rig file, should be written.
+    std::optional<std::string> Model;
+};
+std::vector<RepairJob> RepairJobs(const std::vector<ArchiveReport>& reports, const std::unordered_set<std::string>& partial) {
+    std::vector<RepairJob> jobs;
+    for (const auto& archive : reports) {
+        if (!partial.contains(archive.ModPath)) {
+            if (archive.Report.CanRepair()) jobs.push_back({archive.ModPath, std::nullopt});
+            continue;
+        }
+        std::vector<std::string> repairable;
+        for (const auto& result : archive.Report.Results) {
+            if (result.Outcome == ModelOutcome::Repairable) repairable.push_back(result.Model);
+        }
+        for (const auto& path : repairable) {
+            // The model repair also writes the animation skeleton beside it.
+            if (EndsWithIgnoreCase(path, ".vnmskel_c")) {
+                const std::string model = path.substr(0, path.size() - std::string_view(".vnmskel_c").size()) + ".vmdl_c";
+                if (std::any_of(repairable.begin(), repairable.end(), [&](const std::string& other) { return EqualsIgnoreCase(other, model); })) continue;
+            }
+            jobs.push_back({archive.ModPath, path});
+        }
+    }
+    return jobs;
+}
 }
 
 RepairPanel::~RepairPanel() {
@@ -44,59 +75,107 @@ void RepairPanel::SetSources(std::string game, std::vector<std::string> mods) {
     game_ = std::move(game);
     mods_ = std::move(mods);
     reports_.clear();
+    partial_.clear();
     export_status_.clear();
     progress_ = {};
     status_ = "Ready to analyze. Repairs save a new version in your library and keep the original.";
 }
 
-void RepairPanel::Start(bool repair) {
-    std::vector<std::string> targets;
-    if (repair) {
-        for (const auto& archive : reports_) {
-            if (archive.Report.CanRepair()) targets.push_back(archive.ModPath);
+void RepairPanel::AnalyzeModel(std::string archive, std::string model) {
+    if (busy_ || game_.empty() || archive.empty() || model.empty()) return;
+    Start(false, std::pair{std::move(archive), std::move(model)});
+}
+
+void RepairPanel::Start(bool repair, std::optional<std::pair<std::string, std::string>> one) {
+    std::vector<RepairJob> jobs;
+    bool already_complete = false;
+    if (!repair && one) {
+        jobs.push_back({one->first, one->second});
+        already_complete = !partial_.contains(one->first)
+            && std::any_of(reports_.begin(), reports_.end(), [&](const auto& archive) { return archive.ModPath == one->first; });
+        if (!already_complete) partial_.insert(one->first);
+    } else if (repair && one) {
+        jobs.push_back({one->first, one->second});
+    } else if (repair) {
+        jobs = RepairJobs(reports_, partial_);
+        for (const auto& job : jobs) {
+            if (!job.Model) partial_.erase(job.Archive);
         }
     } else {
-        targets = mods_;
+        for (const auto& mod : mods_) jobs.push_back({mod, std::nullopt});
         reports_.clear();
+        partial_.clear();
     }
-    if (targets.empty()) return;
+    if (jobs.empty()) return;
     if (worker_.joinable()) worker_.join();
     cancellation_ = CancellationSource{};
     done_ = false;
     busy_ = true;
     repairing_ = repair;
     export_status_.clear();
+    const bool one_model = jobs.size() == 1 && jobs.front().Model.has_value();
     {
         std::lock_guard lock(mutex_);
         pending_reports_ = reports_;
         pending_progress_ = {};
-        pending_status_ = repair ? "Repairing supported archives..." : "Analyzing archives...";
+        if (repair && one_model) pending_status_ = "Repairing " + *jobs.front().Model + "...";
+        else if (repair) pending_status_ = "Repairing supported archives...";
+        else if (one_model) pending_status_ = "Analyzing " + *jobs.front().Model + "...";
+        else pending_status_ = "Analyzing archives...";
     }
-    worker_ = std::thread([this, game = game_, targets = std::move(targets), repair, token = cancellation_.Token()] {
+    worker_ = std::thread([this, game = game_, jobs = std::move(jobs), repair, already_complete, one_model, token = cancellation_.Token()] {
         try {
-            for (const auto& mod : targets) {
+            bool one_repairable = false;
+            bool wrote = false;
+            for (const auto& job : jobs) {
                 token.ThrowIfCancelled();
-                const auto progress = [this, mod](const UpdateProgress& value) {
+                const auto progress = [this, archive = job.Archive](const UpdateProgress& value) {
                     std::lock_guard lock(mutex_);
                     pending_progress_ = value;
-                    pending_status_ = Narrow(std::filesystem::path(Widen(mod)).filename().wstring()) + ": " + value.Message;
+                    pending_status_ = Narrow(std::filesystem::path(Widen(archive)).filename().wstring()) + ": " + value.Message;
                 };
                 UpdateReport report;
                 try {
-                    report = repair ? HeroModelUpdater::Update(game, mod, std::nullopt, true, true, progress, token)
-                                    : HeroModelUpdater::Analyze(game, mod, progress, token);
+                    report = repair ? HeroModelUpdater::Update(game, job.Archive, std::nullopt, true, true, progress, token, false, nullptr, job.Model)
+                                    : HeroModelUpdater::Analyze(game, job.Archive, progress, token, job.Model);
                 } catch (const OperationCancelled&) {
                     throw;
                 } catch (const std::exception& error) {
-                    report.Results.push_back({mod, ModelOutcome::Failed, error.what()});
+                    report.Results.push_back({job.Model ? *job.Model : job.Archive, ModelOutcome::Failed, error.what()});
                 }
+                if (!repair && job.Model) {
+                    one_repairable = std::any_of(report.Results.begin(), report.Results.end(), [](const ModelResult& result) {
+                        return result.Outcome == ModelOutcome::Repairable;
+                    });
+                }
+                wrote = wrote || report.WroteFile;
                 std::lock_guard lock(mutex_);
-                const auto existing = std::find_if(pending_reports_.begin(), pending_reports_.end(), [&](const auto& a) { return a.ModPath == mod; });
-                if (existing == pending_reports_.end()) pending_reports_.push_back({mod, std::move(report)});
-                else existing->Report = std::move(report);
+                const auto existing = std::find_if(pending_reports_.begin(), pending_reports_.end(), [&](const auto& archive) {
+                    return archive.ModPath == job.Archive;
+                });
+                if (existing == pending_reports_.end()) pending_reports_.push_back({job.Archive, std::move(report)});
+                else if (job.Model) {
+                    if (report.WroteFile) {
+                        existing->Report.WroteFile = true;
+                        existing->Report.OutputPath = report.OutputPath;
+                        existing->Report.BackupPath = report.BackupPath;
+                    }
+                    for (auto& fresh : report.Results) {
+                        const auto row = std::find_if(existing->Report.Results.begin(), existing->Report.Results.end(),
+                            [&](const ModelResult& prior) { return EqualsIgnoreCase(prior.Model, fresh.Model); });
+                        if (row == existing->Report.Results.end()) existing->Report.Results.push_back(std::move(fresh));
+                        else *row = std::move(fresh);
+                    }
+                } else existing->Report = std::move(report);
             }
             std::lock_guard lock(mutex_);
-            pending_status_ = repair ? "Repair finished. Review the results and test the mod in Deadlock." : "Analysis finished. Supported archives can now be repaired.";
+            if (repair && one_model && wrote) pending_status_ = "Repaired " + *jobs.front().Model + ". The original archive was kept.";
+            else if (repair && one_model) pending_status_ = "Repair did not change " + *jobs.front().Model + ". Review the result.";
+            else if (repair) pending_status_ = "Repair finished. Review the results and test the mod in Deadlock.";
+            else if (one_model && already_complete) pending_status_ = "Checked " + *jobs.front().Model + ".";
+            else if (one_model && one_repairable) pending_status_ = "Checked " + *jobs.front().Model + ". Use Repair this model to update it.";
+            else if (one_model) pending_status_ = "Checked " + *jobs.front().Model + ". Other models in that archive were not checked.";
+            else pending_status_ = "Analysis finished. Supported archives can now be repaired.";
         } catch (const OperationCancelled&) {
             std::lock_guard lock(mutex_);
             pending_status_ = "Cancelled. Completed results are shown below.";
@@ -109,6 +188,7 @@ void RepairPanel::Start(bool repair) {
 }
 
 bool RepairPanel::Poll() {
+    ZoneScopedN("Repair poll");
     if (!busy_) return false;
     const bool finished = done_.load();
     {
@@ -139,17 +219,23 @@ void RepairPanel::SaveReport(void* owner) {
 }
 
 size_t RepairPanel::RepairableCount() const {
-    return static_cast<size_t>(std::count_if(reports_.begin(), reports_.end(), [](const auto& a) { return a.Report.CanRepair(); }));
+    return RepairJobs(reports_, partial_).size();
 }
 
 void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) {
-    const size_t count = RepairableCount();
+    ZoneScopedN("Repairs");
+    const auto jobs = RepairJobs(reports_, partial_);
+    const bool one_model = jobs.size() == 1 && jobs.front().Model.has_value();
     if (ui::ToolButton("Analyze", "Check every mod in your library against the installed game", CanAnalyze())) Start(false);
     ImGui::SameLine();
     char repair_label[64];
-    std::snprintf(repair_label, sizeof(repair_label), "Repair %zu supported###repair", count);
-    if (ui::ToolButton(repair_label, "Repair the analyzed archives that can be repaired. Each repaired copy is saved as a new version in your "
-        "library and the original is kept. Archives that need review are left untouched.", CanRepair())) {
+    if (one_model) std::snprintf(repair_label, sizeof(repair_label), "Repair this model###repair");
+    else std::snprintf(repair_label, sizeof(repair_label), "Repair %zu supported###repair", jobs.size());
+    const char* repair_tip = one_model
+        ? "Repair the model you checked, and its animation skeleton. Other models in the archive are left as they are. The original is kept."
+        : "Repair the analyzed archives that can be repaired. A model checked on its own is repaired by itself. Each repaired copy is saved as a "
+          "new version in your library and the original is kept. Archives that need review are left untouched.";
+    if (ui::ToolButton(repair_label, repair_tip, !busy_ && !jobs.empty())) {
         before_repair();
         Start(true);
     }
@@ -158,8 +244,9 @@ void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) 
     ui::ToolSeparator();
     if (ui::ToolButton("Save report...", "Save the results as a JSON report", !busy_ && !reports_.empty())) SaveReport(owner);
     ImGui::SameLine();
-    ui::HelpMarker("Analyze checks hero models and animation skeletons against your installed game. Repair rechecks the files and saves a "
-        "new version in your library; the original version is kept. Close Deadlock and wait for Steam updates to finish before repairing.");
+    ui::HelpMarker("Analyze checks hero models and animation skeletons against your installed game. Right-click a skin and choose Analyze this "
+        "model to check one model. When that model is repairable, Repair this model updates it and its animation skeleton and leaves the "
+        "other models in the archive alone. The original version is kept. Close Deadlock and wait for Steam updates to finish before repairing.");
 
     // Outcome totals double as filters.
     size_t totals[6] = {};
@@ -194,7 +281,7 @@ void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) 
     ImGui::InputTextWithHint("##resultfilter", "Filter results by archive, model or detail", filter_, sizeof(filter_));
 
     if (reports_.empty()) {
-        ImGui::TextDisabled("Run Analyze to check your library. Results appear here as a table.");
+        ImGui::TextDisabled("Run Analyze to check your library, or right-click a skin and choose Analyze this model. Results appear here as a table.");
         return;
     }
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_Resizable
@@ -208,6 +295,8 @@ void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) 
     ImGui::TableHeadersRow();
     const ImGuiTextFilter filter(filter_);
     int row = 0;
+    std::optional<std::pair<std::string, std::string>> analyze_one;
+    std::optional<std::pair<std::string, std::string>> repair_one;
     for (const auto& archive : reports_) {
         const std::filesystem::path archive_path(Widen(archive.ModPath));
         const std::string archive_name = Narrow(archive_path.filename().wstring());
@@ -232,6 +321,18 @@ void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) 
                 ImGui::EndTooltip();
             }
             if (ImGui::BeginPopupContextItem("result_menu")) {
+                const bool resource = result.Model.find('/') != std::string::npos || result.Model.find('\\') != std::string::npos;
+                if (ImGui::MenuItem("Analyze this model", nullptr, false, !busy_ && !game_.empty() && resource)) {
+                    analyze_one = {archive.ModPath, result.Model};
+                }
+                ImGui::SetItemTooltip("Check this model and its animation skeleton again. Other models in the archive are left as they are.");
+                if (result.Outcome == ModelOutcome::Repairable && ImGui::MenuItem("Repair this model", nullptr, false, !busy_ && !game_.empty() && resource)) {
+                    repair_one = {archive.ModPath, result.Model};
+                }
+                if (result.Outcome == ModelOutcome::Repairable) {
+                    ImGui::SetItemTooltip("Repair this model and its animation skeleton. Other models in the archive are left as they are.");
+                }
+                ImGui::Separator();
                 ui::CopyMenuItem("Copy detail", result.Detail);
                 ui::CopyMenuItem("Copy model path", result.Model);
                 if (result.Warnings) {
@@ -261,5 +362,9 @@ void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) 
         }
     }
     ImGui::EndTable();
+    if (repair_one) {
+        before_repair();
+        Start(true, std::move(*repair_one));
+    } else if (analyze_one) AnalyzeModel(std::move(analyze_one->first), std::move(analyze_one->second));
 }
 }

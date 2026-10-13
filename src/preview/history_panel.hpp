@@ -47,6 +47,8 @@ private:
     enum class Job { Repair, Assemble };
 
     void LoadSelection();
+    // Filters and sorts model indexes. Rebuilt when the query, the rows, or the sort column changes.
+    void RebuildShownModels();
     // Shows the history of one stored model, keeping the chosen versions when it is already shown.
     void SelectModel(const BlobId& blob);
     void StartRepair(const std::string& vpk_path, const std::string& game_directory);
@@ -82,6 +84,15 @@ private:
     std::optional<size_t> selected_copy_;
     std::optional<std::string> selected_pack_;
     char filter_[128] = {};
+    std::vector<size_t> shown_models_;
+    std::string shown_filter_;
+    bool shown_dirty_ = true;
+    int shown_column_ = 0;
+    bool shown_descending_ = false;
+    // The repair button asks the disk whether the pack is still there. Rechecked a couple of times a second.
+    std::string pack_exists_path_;
+    bool pack_exists_ = false;
+    double pack_exists_at_ = -1;
 
     std::thread worker_;
     CancellationSource cancel_;

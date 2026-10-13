@@ -14,6 +14,33 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+# Tracy 0.13.1 client, vendored in third_party/tracy. Off for a normal build:
+# the zone macros stay empty and the client is not linked. The CLion profile
+# preset turns SR_TRACY on. Recording then starts only after TracySession, and
+# only while a profiler is connected, so tests do not listen.
+option(SR_TRACY "Instrument the model tools GUI with Tracy" OFF)
+set(SR_TRACY_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tracy)
+if(SR_TRACY)
+    message(STATUS "Tracy profiler is enabled.")
+    add_library(TracyClient STATIC ${SR_TRACY_ROOT}/TracyClient.cpp)
+    add_library(Tracy::TracyClient ALIAS TracyClient)
+    target_include_directories(TracyClient PUBLIC ${SR_TRACY_ROOT})
+    target_compile_definitions(TracyClient PUBLIC
+        TRACY_ENABLE
+        TRACY_ON_DEMAND
+        TRACY_DELAYED_INIT
+        TRACY_MANUAL_LIFETIME
+    )
+    if(MSVC)
+        target_compile_options(TracyClient PRIVATE /W0)
+    endif()
+    if(WIN32)
+        target_link_libraries(TracyClient PUBLIC ws2_32 dbghelp)
+    endif()
+else()
+    message(STATUS "Tracy profiler is disabled.")
+endif()
+
 add_library(sr_imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -46,7 +73,6 @@ add_library(sr_render STATIC
     src/render/preview_scene.cpp
     src/render/model_renderer.cpp
     src/render/model_comparison.cpp
-    src/render/model_versions.cpp
     src/render/preview_materials.cpp
     src/render/skeleton_pose.cpp
     ${SR_SHADER_OUTPUTS}
@@ -57,8 +83,11 @@ target_link_libraries(sr_render PUBLIC skeleton_repair_core Vulkan::Vulkan)
 add_library(sr_model_tools STATIC
     src/preview/main.cpp
     src/preview/model_viewport.cpp
+    src/preview/animation_player.cpp
     src/preview/preview_panel.cpp
     src/preview/comparison_view.cpp
+    src/preview/multi_view.cpp
+    src/preview/character_view.cpp
     src/preview/repair_panel.cpp
     src/preview/library_panel.cpp
     src/preview/history_panel.cpp
@@ -71,6 +100,11 @@ add_library(sr_model_tools STATIC
 )
 target_include_directories(sr_model_tools PUBLIC src/preview)
 target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32 ole32 windowscodecs)
+if(SR_TRACY)
+    target_link_libraries(sr_model_tools PRIVATE Tracy::TracyClient)
+else()
+    target_include_directories(sr_model_tools PRIVATE ${SR_TRACY_ROOT})
+endif()
 target_link_libraries(DeadlockSkeletonRepair PRIVATE sr_model_tools)
 target_compile_definitions(DeadlockSkeletonRepair PRIVATE SR_MODEL_TOOLS)
 add_executable(ModelPreview src/preview/standalone.cpp)

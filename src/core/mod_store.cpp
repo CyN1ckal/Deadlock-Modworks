@@ -24,7 +24,7 @@ namespace fs = std::filesystem;
 using Hash = std::array<uint8_t, 32>;
 // "DMM1": identifies a shared library file, so arbitrary SQLite files are not merged.
 constexpr int kApplicationId = 0x444D4D31;
-constexpr int kSharedSchemaVersion = 1;
+constexpr int kSharedSchemaVersion = 2;
 
 std::string Hex(const uint8_t* data, size_t size) {
     constexpr char digits[] = "0123456789abcdef";
@@ -159,6 +159,8 @@ class GalleryDb : public SqliteDb {
 public:
     explicit GalleryDb(const fs::path& catalog) : SqliteDb(Prepare(catalog), SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE) {
         Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+        // Existing catalogs return before the block below, so this table is created on every open.
+        Exec("CREATE TABLE IF NOT EXISTS gallery_packages(position INTEGER PRIMARY KEY, snapshot_id TEXT NOT NULL UNIQUE);");
         if (Value("SELECT count(*) FROM sqlite_schema WHERE name = 'gallery_settings'") != 0) return;
         Transaction transaction(*this);
         Exec(R"sql(
@@ -166,6 +168,7 @@ CREATE TABLE IF NOT EXISTS gallery_settings(key TEXT PRIMARY KEY, value TEXT NOT
 -- The file name of each mod's rebuilt copy, from the mod's name when the library was last loaded.
 CREATE TABLE IF NOT EXISTS gallery_names(snapshot_id TEXT PRIMARY KEY, name TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS gallery_sources(position INTEGER PRIMARY KEY, snapshot_id TEXT NOT NULL UNIQUE);
+CREATE TABLE IF NOT EXISTS gallery_packages(position INTEGER PRIMARY KEY, snapshot_id TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS gallery_selected(
     position INTEGER PRIMARY KEY,
     snapshot_id TEXT NOT NULL,
@@ -201,7 +204,7 @@ private:
 };
 
 // A standalone library file for sharing: mods, collection and thumbnails in one SQLite file.
-// Its format is unchanged from the release that first shared libraries, so files from that release can be added.
+// user_version 2 adds library_packages. Version 1 files are still read; they have no package selections.
 constexpr const char* kSharedSchema = R"sql(
 -- One row per distinct file content. `compression` is 0 for raw data and 1 for zstd.
 CREATE TABLE blobs(
@@ -243,6 +246,10 @@ CREATE TABLE library_sources(
     position INTEGER PRIMARY KEY,
     archive INTEGER NOT NULL UNIQUE REFERENCES archives(id)
 );
+CREATE TABLE library_packages(
+    position INTEGER PRIMARY KEY,
+    archive INTEGER NOT NULL UNIQUE REFERENCES archives(id)
+);
 CREATE TABLE library_selected(
     position INTEGER PRIMARY KEY,
     archive INTEGER NOT NULL REFERENCES archives(id),
@@ -252,7 +259,7 @@ CREATE TABLE library_selected(
 CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE thumbnails(key TEXT PRIMARY KEY, png BLOB NOT NULL) WITHOUT ROWID;
 PRAGMA application_id = 1145916721;
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 )sql";
 static_assert(kApplicationId == 1145916721, "Update the shared schema script's application_id.");
 
@@ -421,10 +428,19 @@ struct Context {
         while (select.Step()) result.emplace_back(select.Text(0), select.Text(1));
         return result;
     }
-    // Appends sources and selections that are not in the collection yet. Existing entries keep their order.
-    void AddToCollection(const std::vector<SnapshotId>& sources, const std::vector<std::pair<std::string, std::string>>& selected) const {
+    std::vector<std::string> Packages() const {
+        Statement select(Db.Get(), "SELECT snapshot_id FROM gallery_packages ORDER BY position");
+        std::vector<std::string> result;
+        while (select.Step()) result.push_back(select.Text(0));
+        return result;
+    }
+    // Appends sources, package selections and skin selections that are not in the collection yet. Existing entries keep their order.
+    void AddToCollection(const std::vector<SnapshotId>& sources, const std::vector<std::pair<std::string, std::string>>& selected,
+        const std::vector<std::string>& packages) const {
         Statement source(Db.Get(), "INSERT OR IGNORE INTO gallery_sources(position, snapshot_id) VALUES((SELECT coalesce(max(position), 0) + 1 FROM gallery_sources), ?)");
         for (const auto& id : sources) source.Bind(1, id.Value).Run();
+        Statement package(Db.Get(), "INSERT OR IGNORE INTO gallery_packages(position, snapshot_id) VALUES((SELECT coalesce(max(position), 0) + 1 FROM gallery_packages), ?)");
+        for (const auto& id : packages) package.Bind(1, id).Run();
         Statement selection(Db.Get(), "INSERT OR IGNORE INTO gallery_selected(position, snapshot_id, model) VALUES((SELECT coalesce(max(position), 0) + 1 FROM gallery_selected), ?, ?)");
         for (const auto& [id, model] : selected) selection.Bind(1, id).Bind(2, model).Run();
     }
@@ -515,8 +531,11 @@ struct Context {
             std::vector<std::pair<std::string, std::string>> selected;
             for (const auto& model : library->Selected)
                 if (const auto found = sources.find(Key(model.Archive)); found != sources.end()) selected.emplace_back(found->second.Value, model.Model);
+            std::vector<std::string> packages;
+            for (const auto& source : library->Packages)
+                if (const auto found = sources.find(Key(source)); found != sources.end()) packages.push_back(found->second.Value);
             Transaction transaction(Db);
-            AddToCollection(order, selected);
+            AddToCollection(order, selected, packages);
             SetGameIfUnset(library->GameArchive);
             Db.SetSetting("legacy_collection_merged", "1");
             transaction.Commit();
@@ -618,8 +637,15 @@ void Context::MergeShared(const fs::path& other, CancellationToken cancellation)
     Statement other_selected(shared.Get(), "SELECT archive, model FROM library_selected ORDER BY position");
     while (other_selected.Step()) if (const auto found = snapshots.find(other_selected.Int(0)); found != snapshots.end())
         selected.emplace_back(found->second.Value, other_selected.Text(1));
+    // A version-1 shared file has no package table. Its mods and skin selections are still added.
+    std::vector<std::string> packages;
+    if (shared.Value("SELECT count(*) FROM sqlite_schema WHERE name = 'library_packages'") != 0) {
+        Statement other_packages(shared.Get(), "SELECT archive FROM library_packages ORDER BY position");
+        while (other_packages.Step()) if (const auto found = snapshots.find(other_packages.Int(0)); found != snapshots.end())
+            packages.push_back(found->second.Value);
+    }
     Transaction transaction(Db);
-    AddToCollection(sources, selected);
+    AddToCollection(sources, selected, packages);
     Statement thumbnails(shared.Get(), "SELECT key, png FROM thumbnails");
     Statement insert(Db.Get(), "INSERT OR IGNORE INTO thumbnails(key, png) VALUES(?, ?)");
     while (thumbnails.Step()) insert.Bind(1, thumbnails.Text(0)).Bind(2, thumbnails.Blob(1)).Run();
@@ -707,6 +733,8 @@ ModelLibrary LocalModStore::Load(CancellationToken cancellation, const StoreProg
     }
     for (const auto& [id, model] : context.Selected())
         if (const auto found = paths.find(id); found != paths.end()) result.Selected.push_back({found->second, model});
+    for (const auto& id : context.Packages())
+        if (const auto found = paths.find(id); found != paths.end()) result.Packages.push_back(found->second);
     if (const auto game = opened.Db.Setting("game_archive")) {
         const fs::path path = Widen(*game);
         // A library shared from another computer keeps its game path, which only applies where it exists.
@@ -734,9 +762,15 @@ void LocalModStore::Save(const ModelLibrary& library) const {
         if (found == ids.end()) throw InvalidData("Selected model is not in the library sources.");
         selected.emplace_back(found->second, VpkArchive::Normalize(model.Model));
     }
+    std::vector<std::string> packages;
+    for (const auto& package : library.Packages) {
+        const auto found = ids.find(Key(package));
+        if (found == ids.end()) throw InvalidData("Selected package is not in the library sources.");
+        if (std::none_of(packages.begin(), packages.end(), [&](const auto& id) { return id == found->second; })) packages.push_back(found->second);
+    }
     Transaction transaction(opened.Db);
-    opened.Db.Exec("DELETE FROM gallery_sources; DELETE FROM gallery_selected;");
-    context.AddToCollection(sources, selected);
+    opened.Db.Exec("DELETE FROM gallery_sources; DELETE FROM gallery_selected; DELETE FROM gallery_packages;");
+    context.AddToCollection(sources, selected, packages);
     if (!library.GameArchive.empty()) opened.Db.SetSetting("game_archive", Narrow(fs::absolute(library.GameArchive).lexically_normal().wstring()));
     transaction.Commit();
 }
@@ -802,6 +836,10 @@ void LocalModStore::Export(const fs::path& destination, CancellationToken cancel
             position = 0;
             for (const auto& [snapshot, model] : context.Selected())
                 if (const auto found = archives.find(snapshot); found != archives.end()) selection.Bind(1, ++position).Bind(2, found->second).Bind(3, model).Run();
+            Statement package_row(shared.Get(), "INSERT OR IGNORE INTO library_packages(position, archive) VALUES(?, ?)");
+            position = 0;
+            for (const auto& snapshot : context.Packages())
+                if (const auto found = archives.find(snapshot); found != archives.end()) package_row.Bind(1, ++position).Bind(2, found->second).Run();
             Statement thumbnails(opened.Db.Get(), "SELECT key, png FROM thumbnails");
             Statement thumbnail(shared.Get(), "INSERT INTO thumbnails(key, png) VALUES(?, ?)");
             while (thumbnails.Step()) thumbnail.Bind(1, thumbnails.Text(0)).Bind(2, thumbnails.Blob(1)).Run();

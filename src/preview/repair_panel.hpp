@@ -7,7 +7,10 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <thread>
+#include <unordered_set>
+#include <utility>
 
 namespace skeleton_repair {
 
@@ -23,6 +26,8 @@ public:
     // Archives the last analysis found repairable.
     size_t RepairableCount() const;
     void Analyze() { if (CanAnalyze()) Start(false); }
+    // Checks one model, and its paired animation skeleton or hero model, without checking the rest of the archive.
+    void AnalyzeModel(std::string archive, std::string model);
     // before_repair releases the browser's read locks before replacement starts.
     void Repair(const std::function<void()>& before_repair) { if (CanRepair()) { before_repair(); Start(true); } }
     const std::string& Status() const { return status_; }
@@ -32,11 +37,14 @@ public:
     void Draw(void* owner, const std::function<void()>& before_repair);
 
 private:
-    void Start(bool repair);
+    // `one` is the archive path and the model path. Without it, analysis covers every archive.
+    void Start(bool repair, std::optional<std::pair<std::string, std::string>> one = std::nullopt);
     void SaveReport(void* owner);
     std::string game_;
     std::vector<std::string> mods_;
     std::vector<ArchiveReport> reports_;
+    // Archives whose latest check covered one model. Repair of those archives rewrites only the checked model.
+    std::unordered_set<std::string> partial_;
     std::string status_ = "Choose mod archives, then analyze them before repairing.";
     std::string export_status_;
     UpdateProgress progress_;

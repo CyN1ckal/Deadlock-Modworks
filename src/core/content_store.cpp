@@ -1691,8 +1691,6 @@ int RemoveIncomingFiles(const std::filesystem::path& directory) {
 
 }  // namespace
 
-std::string BlobId::Hex() const { return ToLowerHex(Bytes); }
-
 struct ContentStore::State {
     std::filesystem::path directory;
     sqlite3* db = nullptr;

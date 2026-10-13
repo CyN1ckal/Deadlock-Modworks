@@ -1,6 +1,6 @@
 #include "thumbnail_cache.hpp"
 #include "error.hpp"
-#include "mod_store.hpp"
+#include "texture.hpp"
 #include "strings.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -67,9 +67,8 @@ uint32_t MemoryType(VkPhysicalDevice physical, uint32_t type_bits, VkMemoryPrope
 }
 }
 
-fs::path LegacyThumbnailFolder() {
-    try { return LocalModStore::DefaultRoot() / L"thumbnails"; }
-    catch (const std::exception&) { return {}; }
+fs::path LegacyThumbnailFolder(const fs::path& store_root) {
+    return store_root.empty() ? fs::path() : store_root / L"thumbnails";
 }
 
 fs::path LegacyThumbnailPath(const fs::path& folder, const LibraryModel& model, const fs::path& game) {
@@ -84,12 +83,12 @@ fs::path LegacyThumbnailPath(const fs::path& folder, const LibraryModel& model, 
     return folder / (Hex64(hash) + ".png");
 }
 
-std::string ThumbnailKey(const LocalModStore* store, const LibraryModel& model, const fs::path& game) {
+std::string ThumbnailKey(const std::optional<std::string>& content_id, const LibraryModel& model, const fs::path& game) {
     uint64_t hash = 0xcbf29ce484222325ull;
     Hash(hash, kCacheVersion);
     Hash(hash, std::to_string(kThumbnailSize));
     // Stored mods are identified by content, so their thumbnails survive moving or sharing the library.
-    if (const auto content = store ? store->ContentId(model.Archive) : std::nullopt) Hash(hash, *content);
+    if (content_id) Hash(hash, *content_id);
     else HashFile(hash, model.Archive);
     Hash(hash, Lower(model.Model));
     if (game.empty()) Hash(hash, "");
@@ -253,6 +252,153 @@ ThumbnailImage::ThumbnailImage(const VulkanDevice& device, const ThumbnailPixels
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {pixels.Width, pixels.Height, 1};
+        vkCmdCopyBufferToImage(command_buffer, staging, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        vkCmdPipelineBarrier2(command_buffer, &dependency);
+        Check(vkEndCommandBuffer(command_buffer), "vkEndCommandBuffer");
+
+        VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        Check(vkCreateFence(vk, &fence_info, nullptr, &fence), "vkCreateFence");
+        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &command_buffer;
+        Check(vkQueueSubmit(device_.Queue, 1, &submit, fence), "vkQueueSubmit");
+        Check(vkWaitForFences(vk, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+        cleanup();
+        set_ = ImGui_ImplVulkan_AddTexture(sampler_, view_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    } catch (...) {
+        cleanup();
+        Release();
+        throw;
+    }
+}
+
+ThumbnailImage::ThumbnailImage(const VulkanDevice& device, const TextureImage& texture) : device_(device) {
+    if (texture.Mips.empty() || texture.Width == 0 || texture.Height == 0) throw InvalidData("Texture has no pixels.");
+    std::optional<VkFormat> format;
+    switch (texture.Format) {
+    // ImGui writes the sample straight to a UNORM target. sRGB block formats would linearize the
+    // texels first, so the card is much darker than the texture. UNORM block views keep the encoding.
+    case TextureFormat::BC1: format = VK_FORMAT_BC1_RGBA_UNORM_BLOCK; break;
+    case TextureFormat::BC3: format = VK_FORMAT_BC3_UNORM_BLOCK; break;
+    case TextureFormat::BC4: format = VK_FORMAT_BC4_UNORM_BLOCK; break;
+    case TextureFormat::BC5: format = VK_FORMAT_BC5_UNORM_BLOCK; break;
+    case TextureFormat::BC7: format = VK_FORMAT_BC7_UNORM_BLOCK; break;
+    case TextureFormat::RGBA8: format = VK_FORMAT_R8G8B8A8_UNORM; break;
+    case TextureFormat::BGRA8: format = VK_FORMAT_B8G8R8A8_UNORM; break;
+    }
+    if (!format) throw InvalidData("Texture format is not supported.");
+    VkFormatProperties properties{};
+    vkGetPhysicalDeviceFormatProperties(device_.Physical, *format, &properties);
+    const VkFormatFeatureFlags features = properties.optimalTilingFeatures;
+    if ((features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0 || (features & VK_FORMAT_FEATURE_TRANSFER_DST_BIT) == 0)
+        throw InvalidData("This GPU cannot display that texture.");
+    const std::vector<uint8_t>& pixels = texture.Mips.front();
+    const VkDevice vk = device_.Device;
+    const VkDeviceSize size = pixels.size();
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    const auto cleanup = [&] {
+        vkDestroyFence(vk, fence, nullptr);
+        vkDestroyCommandPool(vk, pool, nullptr);
+        vkDestroyBuffer(vk, staging, nullptr);
+        vkFreeMemory(vk, staging_memory, nullptr);
+    };
+    try {
+        VkImageCreateInfo image{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        image.imageType = VK_IMAGE_TYPE_2D;
+        image.format = *format;
+        image.extent = {texture.Width, texture.Height, 1};
+        image.mipLevels = 1;
+        image.arrayLayers = 1;
+        image.samples = VK_SAMPLE_COUNT_1_BIT;
+        image.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        Check(vkCreateImage(vk, &image, nullptr, &image_), "vkCreateImage");
+        VkMemoryRequirements requirements{};
+        vkGetImageMemoryRequirements(vk, image_, &requirements);
+        VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        allocate.allocationSize = requirements.size;
+        allocate.memoryTypeIndex = MemoryType(device_.Physical, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        Check(vkAllocateMemory(vk, &allocate, nullptr, &memory_), "vkAllocateMemory");
+        Check(vkBindImageMemory(vk, image_, memory_, 0), "vkBindImageMemory");
+
+        VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        view.image = image_;
+        view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view.format = image.format;
+        view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        // Color maps often store a usable picture with alpha 0, because the mesh shader reads rgb only.
+        // ImGui multiplies by alpha, which made those cards invisible. BC4 is one channel and samples as red.
+        view.components.a = VK_COMPONENT_SWIZZLE_ONE;
+        if (image.format == VK_FORMAT_BC4_UNORM_BLOCK) {
+            view.components.r = VK_COMPONENT_SWIZZLE_R;
+            view.components.g = VK_COMPONENT_SWIZZLE_R;
+            view.components.b = VK_COMPONENT_SWIZZLE_R;
+        }
+        Check(vkCreateImageView(vk, &view, nullptr, &view_), "vkCreateImageView");
+
+        VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sampler.magFilter = VK_FILTER_LINEAR;
+        sampler.minFilter = VK_FILTER_LINEAR;
+        sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler.addressModeU = sampler.addressModeV = sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler.maxLod = 0;
+        Check(vkCreateSampler(vk, &sampler, nullptr, &sampler_), "vkCreateSampler");
+
+        VkBufferCreateInfo buffer{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        buffer.size = size;
+        buffer.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        Check(vkCreateBuffer(vk, &buffer, nullptr, &staging), "vkCreateBuffer");
+        vkGetBufferMemoryRequirements(vk, staging, &requirements);
+        allocate.allocationSize = requirements.size;
+        allocate.memoryTypeIndex = MemoryType(device_.Physical, requirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        Check(vkAllocateMemory(vk, &allocate, nullptr, &staging_memory), "vkAllocateMemory");
+        Check(vkBindBufferMemory(vk, staging, staging_memory, 0), "vkBindBufferMemory");
+        void* mapped = nullptr;
+        Check(vkMapMemory(vk, staging_memory, 0, size, 0, &mapped), "vkMapMemory");
+        std::memcpy(mapped, pixels.data(), pixels.size());
+        vkUnmapMemory(vk, staging_memory);
+
+        VkCommandPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+        pool_info.queueFamilyIndex = device_.QueueFamily;
+        Check(vkCreateCommandPool(vk, &pool_info, nullptr, &pool), "vkCreateCommandPool");
+        VkCommandBufferAllocateInfo command_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        command_info.commandPool = pool;
+        command_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        command_info.commandBufferCount = 1;
+        VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+        Check(vkAllocateCommandBuffers(vk, &command_info, &command_buffer), "vkAllocateCommandBuffers");
+        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        Check(vkBeginCommandBuffer(command_buffer, &begin), "vkBeginCommandBuffer");
+        VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image_;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dependency.imageMemoryBarrierCount = 1;
+        dependency.pImageMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(command_buffer, &dependency);
+        VkBufferImageCopy region{};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent = {texture.Width, texture.Height, 1};
         vkCmdCopyBufferToImage(command_buffer, staging, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
         barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
         barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;

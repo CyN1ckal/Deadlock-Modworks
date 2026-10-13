@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bone_transform.hpp"
 #include "skeleton.hpp"
 
 #include <cstdint>
@@ -8,13 +9,6 @@
 #include <vector>
 
 namespace skeleton_repair {
-
-// A bone transform relative to its parent.
-struct BoneTransform {
-    Vec3 Translation;
-    Quat Rotation;
-    float Scale = 1;
-};
 
 // A compiled AG2 animation clip (.vnmclip_c). Each track animates one bone of the clip's
 // animation skeleton, in that skeleton's bone order.
@@ -50,14 +44,13 @@ public:
     void Sample(float seconds, std::span<BoneTransform> out) const;
 
 private:
+    // Declared in clip_decoder.hpp.
     friend AnimationClip DecodeAnimationClip(std::span<const uint8_t> file);
     std::vector<uint16_t> data_;
     std::vector<uint32_t> frame_offsets_;
     // uint16 values per frame, checked against every frame offset on decode.
     size_t frame_size_ = 0;
 };
-
-AnimationClip DecodeAnimationClip(std::span<const uint8_t> file);
 
 // Applies an additive pose onto a reference pose, track by track.
 BoneTransform ApplyAdditive(const BoneTransform& reference, const BoneTransform& delta);

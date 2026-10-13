@@ -4,9 +4,17 @@
 #include "kv3.hpp"
 #include "resource.hpp"
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <objbase.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+
 #include <lz4.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -18,11 +26,19 @@ enum VTexFormat : uint8_t {
     DXT1 = 1,
     DXT5 = 2,
     RGBA8888 = 4,
+    JPEG_RGBA8888 = 15,
+    PNG_RGBA8888 = 16,
+    JPEG_DXT5 = 17,
+    PNG_DXT5 = 18,
     BC7 = 20,
     ATI2N = 21,
     ATI1N = 27,
     BGRA8888 = 28,
+    WEBP_RGBA8888 = 29,
+    WEBP_DXT5 = 30,
 };
+
+enum class ImageFile { Png, Jpeg, Webp };
 
 // VTexFlags bits that make a texture something other than a plain 2D image.
 constexpr uint16_t kClampS = 0x1;
@@ -39,6 +55,142 @@ T Read(std::span<const uint8_t> bytes, size_t offset) {
     T value;
     std::memcpy(&value, bytes.data() + offset, sizeof(T));
     return value;
+}
+
+std::optional<ImageFile> ImageFileFor(uint8_t format) {
+    switch (format) {
+    case PNG_RGBA8888:
+    case PNG_DXT5: return ImageFile::Png;
+    case JPEG_RGBA8888:
+    case JPEG_DXT5: return ImageFile::Jpeg;
+    case WEBP_RGBA8888:
+    case WEBP_DXT5: return ImageFile::Webp;
+    default: return std::nullopt;
+    }
+}
+
+uint32_t ReadBigEndian(std::span<const uint8_t> bytes, size_t offset) {
+    if (offset > bytes.size() || 4 > bytes.size() - offset) {
+        throw InvalidData("Texture image data is truncated.");
+    }
+    return (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1]) << 16)
+        | (static_cast<uint32_t>(bytes[offset + 2]) << 8) | bytes[offset + 3];
+}
+
+// PNG bytes are one image at the start of the payload. Chunks run until IEND.
+size_t PngSize(std::span<const uint8_t> bytes) {
+    const uint8_t signature[] = {137, 80, 78, 71, 13, 10, 26, 10};
+    if (bytes.size() < sizeof(signature) || std::memcmp(bytes.data(), signature, sizeof(signature)) != 0) {
+        throw InvalidData("Texture PNG data is invalid.");
+    }
+    size_t cursor = sizeof(signature);
+    for (;;) {
+        const uint32_t length = ReadBigEndian(bytes, cursor);
+        const uint32_t type = ReadBigEndian(bytes, cursor + 4);
+        if (bytes.size() - cursor < 12 || length > bytes.size() - cursor - 12) {
+            throw InvalidData("Texture PNG data is truncated.");
+        }
+        cursor += static_cast<size_t>(length) + 12;
+        if (type == 0x49454E44u) {
+            return cursor;
+        }
+    }
+}
+
+size_t WebpSize(std::span<const uint8_t> bytes) {
+    if (bytes.size() < 12 || std::memcmp(bytes.data(), "RIFF", 4) != 0 || std::memcmp(bytes.data() + 8, "WEBP", 4) != 0) {
+        throw InvalidData("Texture WebP data is invalid.");
+    }
+    const uint32_t payload = Read<uint32_t>(bytes, 4);
+    const uint64_t total = 8ull + payload;
+    if (total > bytes.size()) {
+        throw InvalidData("Texture WebP data is truncated.");
+    }
+    return static_cast<size_t>(total);
+}
+
+// Keeps an STA thread's apartment when this thread already has one.
+struct ComApartment {
+    bool release = false;
+    ComApartment() {
+        const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (result == RPC_E_CHANGED_MODE) {
+            return;
+        }
+        if (FAILED(result)) {
+            throw InvalidData("Could not start image decoding.");
+        }
+        release = true;
+    }
+    ~ComApartment() {
+        if (release) {
+            CoUninitialize();
+        }
+    }
+    ComApartment(const ComApartment&) = delete;
+    ComApartment& operator=(const ComApartment&) = delete;
+};
+
+TextureImage DecodeImageFile(uint16_t flags, std::span<const uint8_t> encoded, uint32_t max_size) {
+    if (encoded.empty() || encoded.size() > static_cast<size_t>(std::numeric_limits<DWORD>::max())) {
+        throw InvalidData("Texture image data is invalid.");
+    }
+    const ComApartment apartment;
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IWICImagingFactory> factory;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) {
+        throw InvalidData("Could not start image decoding.");
+    }
+    ComPtr<IWICStream> stream;
+    if (FAILED(factory->CreateStream(&stream))
+        || FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(encoded.data()), static_cast<DWORD>(encoded.size())))) {
+        throw InvalidData("Texture image data is invalid.");
+    }
+    ComPtr<IWICBitmapDecoder> decoder;
+    if (FAILED(factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder))) {
+        throw InvalidData("Texture image could not be decoded.");
+    }
+    ComPtr<IWICBitmapFrameDecode> frame;
+    if (FAILED(decoder->GetFrame(0, &frame))) {
+        throw InvalidData("Texture image could not be decoded.");
+    }
+    UINT width = 0;
+    UINT height = 0;
+    if (FAILED(frame->GetSize(&width, &height)) || width == 0 || height == 0) {
+        throw InvalidData("Texture has no pixels.");
+    }
+    IWICBitmapSource* source = frame.Get();
+    ComPtr<IWICBitmapScaler> scaler;
+    if (max_size > 0 && (width > max_size || height > max_size)) {
+        const double scale = static_cast<double>(max_size) / static_cast<double>(std::max(width, height));
+        width = std::max(1u, static_cast<UINT>(std::lround(static_cast<double>(width) * scale)));
+        height = std::max(1u, static_cast<UINT>(std::lround(static_cast<double>(height) * scale)));
+        if (FAILED(factory->CreateBitmapScaler(&scaler))
+            || FAILED(scaler->Initialize(frame.Get(), width, height, WICBitmapInterpolationModeFant))) {
+            throw InvalidData("Texture image could not be decoded.");
+        }
+        source = scaler.Get();
+    }
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(factory->CreateFormatConverter(&converter))
+        || FAILED(converter->Initialize(source, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) {
+        throw InvalidData("Texture image could not be decoded.");
+    }
+    const uint64_t bytes = static_cast<uint64_t>(width) * height * 4;
+    if (bytes > static_cast<uint64_t>(std::numeric_limits<UINT>::max())) {
+        throw InvalidData("Texture image is too large.");
+    }
+    TextureImage image;
+    image.Format = TextureFormat::RGBA8;
+    image.Width = width;
+    image.Height = height;
+    image.ClampU = (flags & kClampS) != 0;
+    image.ClampV = (flags & kClampT) != 0;
+    image.Mips.emplace_back(static_cast<size_t>(bytes));
+    if (FAILED(converter->CopyPixels(nullptr, width * 4, static_cast<UINT>(bytes), image.Mips.front().data()))) {
+        throw InvalidData("Texture image could not be decoded.");
+    }
+    return image;
 }
 
 std::optional<TextureFormat> MapFormat(uint8_t format) {
@@ -93,6 +245,17 @@ TextureImage DecodeTexture(std::span<const uint8_t> file, uint32_t max_size) {
     }
     if (width == 0 || height == 0) {
         throw InvalidData("Texture has no pixels.");
+    }
+    if (const std::optional<ImageFile> image_file = ImageFileFor(raw_format)) {
+        const size_t payload = static_cast<size_t>(header.data() + header.size() - file.data());
+        if (payload > file.size()) {
+            throw InvalidData("Texture image data is truncated.");
+        }
+        const std::span<const uint8_t> encoded = file.subspan(payload);
+        const std::span<const uint8_t> bytes = *image_file == ImageFile::Png ? encoded.first(PngSize(encoded))
+            : *image_file == ImageFile::Webp ? encoded.first(WebpSize(encoded))
+                                             : encoded;
+        return DecodeImageFile(flags, bytes, max_size);
     }
     const std::optional<TextureFormat> format = MapFormat(raw_format);
     if (!format) {

@@ -113,14 +113,18 @@ add_library(skeleton_repair_core STATIC
     src/core/model_geometry.cpp
     src/core/texture.cpp
     src/core/animation_clip.cpp
+    src/core/clip_decoder.cpp
     src/core/game_folder.cpp
     src/core/model_library.cpp
     src/core/content_hash.cpp
     src/core/content_store.cpp
     src/core/mod_store.cpp
+    src/core/store_jobs.cpp
+    src/core/model_versions.cpp
+    src/core/version_builder.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core)
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32 windowscodecs)
 
 # Opens the model tools workspace by default; command-line options run the console workflow.
 add_executable(DeadlockSkeletonRepair
@@ -147,8 +151,10 @@ add_executable(skeleton_repair_tests
     tests/library_model_tests.cpp
     tests/store_reader_tests.cpp
     tests/history_compare_tests.cpp
+    tests/character_view_tests.cpp
     tests/command_line_store_tests.cpp
     src/preview/library_model.cpp
+    src/preview/character_view.cpp
     src/preview/store_reader.cpp
     src/preview/history_compare.cpp
 )
@@ -165,5 +171,17 @@ endif()
 enable_testing()
 include(GoogleTest)
 gtest_discover_tests(skeleton_repair_tests DISCOVERY_MODE PRE_TEST)
+
+# Fails when the include graph gets a cycle, a lower target includes a higher one, or a new
+# stable-dependency violation appears. See scripts/architecture_diagram.py.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import networkx" RESULT_VARIABLE SR_NETWORKX_RESULT OUTPUT_QUIET ERROR_QUIET)
+endif()
+if(Python3_Interpreter_FOUND AND SR_NETWORKX_RESULT EQUAL 0)
+    add_test(NAME dependency_levels COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/architecture_diagram.py --check)
+else()
+    message(STATUS "Python 3 with networkx not found: the dependency_levels test is not registered.")
+endif()
 
 include(cmake/render.cmake)

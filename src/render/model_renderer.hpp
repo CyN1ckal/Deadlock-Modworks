@@ -72,6 +72,7 @@ public:
 
     // Uploads the scene and waits for the copy. Waits for the device first if a scene is already loaded.
     void SetScene(const PreviewScene& scene);
+    // Drops the mesh, skeleton and textures. Waits for the device first, because a frame in flight may still draw them.
     void ClearScene();
     // Replaces only the skeleton lines of the current scene, for example to show a different skeleton or diff colors.
     void SetSkeleton(std::span<const LineVertex> skeleton);

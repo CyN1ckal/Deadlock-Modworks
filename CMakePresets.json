@@ -26,7 +26,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
-        "SR_BUILD_MODEL_TOOLS": true
+        "SR_BUILD_MODEL_TOOLS": true,
+        "SR_TRACY": false
       },
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
       "vendor": { "jetbrains.com/clion": { "toolchain": "Visual Studio" } }
@@ -38,6 +39,17 @@
       "inherits": "clion-debug",
       "binaryDir": "${sourceDir}/build/clion-release",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "clion-profile",
+      "displayName": "CLion Profile x64",
+      "description": "Optimized model tools with debug symbols and Tracy. The window announces itself to tracy-profiler while it is open.",
+      "inherits": "clion-debug",
+      "binaryDir": "${sourceDir}/build/clion-profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "SR_TRACY": true
+      }
     }
   ],
   "buildPresets": [
@@ -58,6 +70,10 @@
     {
       "name": "clion-release",
       "configurePreset": "clion-release"
+    },
+    {
+      "name": "clion-profile",
+      "configurePreset": "clion-profile"
     }
   ]
 }
