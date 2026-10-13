@@ -172,4 +172,16 @@ enable_testing()
 include(GoogleTest)
 gtest_discover_tests(skeleton_repair_tests DISCOVERY_MODE PRE_TEST)
 
+# Fails when the include graph gets a cycle, a lower target includes a higher one, or a new
+# stable-dependency violation appears. See scripts/architecture_diagram.py.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import networkx" RESULT_VARIABLE SR_NETWORKX_RESULT OUTPUT_QUIET ERROR_QUIET)
+endif()
+if(Python3_Interpreter_FOUND AND SR_NETWORKX_RESULT EQUAL 0)
+    add_test(NAME dependency_levels COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/architecture_diagram.py --check)
+else()
+    message(STATUS "Python 3 with networkx not found: the dependency_levels test is not registered.")
+endif()
+
 include(cmake/render.cmake)

@@ -6,13 +6,28 @@ below the lowest module it uses, and entry points nothing includes on the bottom
 row. Every arrow points up. Arrows are the transitive reduction of the graph.
 
 Usage: python scripts/architecture_diagram.py [output.svg]
-Needs networkx and git on PATH.
+       python scripts/architecture_diagram.py --check
+Needs networkx, and git on PATH for drawing. --check draws nothing and exits non-zero when the include graph has a
+cycle, a lower CMake target includes a higher one, or a stable-dependency violation appears that is not accepted below.
 """
-import collections, pathlib, re, subprocess, sys
+import argparse, collections, pathlib, re, subprocess, sys
 import networkx as nx
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-OUT = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'docs' / 'architecture.svg'
+_args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+_args.add_argument('output', nargs='?', type=pathlib.Path, default=ROOT / 'docs' / 'architecture.svg')
+_args.add_argument('--check', action='store_true', help='check the dependency rules instead of drawing')
+ARGS = _args.parse_args()
+OUT = ARGS.output
+
+# Each CMake target may include its own modules and those of the targets before it in this order.
+TARGET_ORDER = ['core', 'render', 'preview', 'app']
+# Stable-dependency violations smaller than this are rounding, not design: one more or one fewer user flips them.
+SDP_TOLERANCE = 0.10
+# Larger violations that are deliberate, with the reason.
+ACCEPTED_SDP = {
+    ('animation_player', 'clip_decoder'): 'The player is the one place clips are loaded, so it decodes them.',
+}
 
 EXT_HEADERS = {'windows.h': 'Win32', 'bcrypt.h': 'Win32', 'wincodec.h': 'Win32', 'lz4.h': 'LZ4',
                'zstd.h': 'Zstandard', 'sqlite3.h': 'SQLite', 'nlohmann/json.hpp': 'nlohmann::json',
@@ -40,20 +55,38 @@ for f in sorted((ROOT / 'src').glob('*/*.[ch]pp')):
 for e in set(EXT_HEADERS.values()): pkg[e] = 'ext'
 for n in dep: dep[n] &= set(pkg)  # drop includes that are not project modules
 
+G = nx.DiGraph()
+for n in pkg: G.add_node(n)
+for a, ds in dep.items():
+    for d in ds: G.add_edge(a, d)
+if not nx.is_directed_acyclic_graph(G):
+    sys.exit('Include cycle: ' + ' -> '.join(a for a, _ in nx.find_cycle(G)))
+ca = {n: G.in_degree(n) for n in G}
+ce = {n: sum(1 for d in G.successors(n) if pkg[d] != 'ext') for n in G}
+inst = {n: (ce[n] / (ca[n] + ce[n]) if ca[n] + ce[n] else 0.0) for n in G}
+
+# ---------- rules ----------
+if ARGS.check:
+    problems = []
+    for a, b in G.edges():
+        if pkg[b] == 'ext': continue
+        if TARGET_ORDER.index(pkg[b]) > TARGET_ORDER.index(pkg[a]):
+            problems.append(f'{a} ({pkg[a]}) includes {b} ({pkg[b]}), a higher target.')
+        gap = inst[b] - inst[a]
+        if gap > SDP_TOLERANCE + 1e-9 and (a, b) not in ACCEPTED_SDP:
+            problems.append(f'{a} (I {inst[a]:.2f}) depends on the less stable {b} (I {inst[b]:.2f}).')
+    for a, b in ACCEPTED_SDP:
+        if not G.has_edge(a, b) or inst[b] - inst[a] <= SDP_TOLERANCE + 1e-9:
+            problems.append(f'ACCEPTED_SDP lists {a} -> {b}, which is no longer a violation. Remove it.')
+    print('\n'.join(problems) or f'{sum(1 for n in G if pkg[n] != "ext")} modules: no cycles, layering holds, '
+          f'stable dependencies hold within {SDP_TOLERANCE:.2f} and {len(ACCEPTED_SDP)} accepted exception(s).')
+    sys.exit(1 if problems else 0)
+
 churn = collections.Counter()
 log = subprocess.run(['git', 'log', '--name-only', '--pretty=format:@', '--', 'src'], cwd=ROOT,
                      capture_output=True, text=True, check=True).stdout
 for commit in log.split('@'):
     for m in {module_of(p) for p in commit.split() if re.search(r'\.[ch]pp$', p)}: churn[m] += 1
-
-G = nx.DiGraph()
-for n in pkg: G.add_node(n)
-for a, ds in dep.items():
-    for d in ds: G.add_edge(a, d)
-assert nx.is_directed_acyclic_graph(G)
-ca = {n: G.in_degree(n) for n in G}
-ce = {n: sum(1 for d in G.successors(n) if pkg[d] != 'ext') for n in G}
-inst = {n: (ce[n] / (ca[n] + ce[n]) if ca[n] + ce[n] else 0.0) for n in G}
 R = nx.transitive_reduction(G)
 # Abstractions and the modules that implement them. Drawn as «interface» boxes and realization arrows.
 REALIZES = {('preview/main', 'model_tools'), ('content_store', 'repair_journal'), ('content_store', 'snapshot_reader')}
