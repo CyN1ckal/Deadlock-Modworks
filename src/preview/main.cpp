@@ -1473,7 +1473,7 @@ struct App {
             ImGui::TextDisabled("Browse skins, build packs, inspect models and repair skeleton changes.");
             ImGui::TextDisabled("Dear ImGui %s, Vulkan 1.3", ImGui::GetVersion());
 #ifdef TRACY_ENABLE
-            ImGui::TextDisabled("Tracy listens on localhost while this window is open. Connect a Tracy profiler to capture a frame.");
+            ImGui::TextDisabled("Tracy is announcing this window. Connect tracy-profiler, or open 127.0.0.1 port 8086.");
 #endif
             if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();

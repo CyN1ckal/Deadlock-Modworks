@@ -43,7 +43,7 @@
     {
       "name": "clion-profile",
       "displayName": "CLion Profile x64",
-      "description": "Optimized model tools with debug symbols and Tracy. Connect a profiler to localhost while the window is open.",
+      "description": "Optimized model tools with debug symbols and Tracy. The window announces itself to tracy-profiler while it is open.",
       "inherits": "clion-debug",
       "binaryDir": "${sourceDir}/build/clion-profile",
       "cacheVariables": {

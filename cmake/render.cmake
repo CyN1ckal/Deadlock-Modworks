@@ -30,8 +30,6 @@ if(SR_TRACY)
         TRACY_ON_DEMAND
         TRACY_DELAYED_INIT
         TRACY_MANUAL_LIFETIME
-        TRACY_ONLY_LOCALHOST
-        TRACY_NO_BROADCAST
     )
     if(MSVC)
         target_compile_options(TracyClient PRIVATE /W0)

@@ -2,7 +2,7 @@
 
 // Tracy zones for the model tools GUI. A normal build leaves the macros empty.
 // The CLion profile preset defines TRACY_ENABLE. Recording then starts when the
-// window opens and stays idle until a Tracy server connects to localhost.
+// window opens and stays idle until a Tracy server connects.
 // Closing the window does not wait for a capture. Zone names are string literals.
 
 #ifdef TRACY_ENABLE
