@@ -1,6 +1,6 @@
 #pragma once
 
-#include "model_library.hpp"
+#include "library_types.hpp"
 
 #include <optional>
 #include <string>

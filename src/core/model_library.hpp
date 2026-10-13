@@ -1,14 +1,10 @@
 #pragma once
+#include "library_types.hpp"
 #include "vpk.hpp"
 #include <filesystem>
 #include <vector>
 
 namespace skeleton_repair {
-struct LibraryModel {
-    std::filesystem::path Archive;
-    std::string Model;
-    bool operator==(const LibraryModel&) const = default;
-};
 struct ModelLibrary {
     std::vector<std::filesystem::path> Sources;
     std::vector<LibraryModel> Selected;

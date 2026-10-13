@@ -1,5 +1,5 @@
 #pragma once
-#include "model_library.hpp"
+#include "library_types.hpp"
 #include "mod_store.hpp"
 #include "model_renderer.hpp"
 #include <imgui.h>
