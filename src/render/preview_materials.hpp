@@ -1,6 +1,7 @@
 #pragma once
 
 #include "preview_scene.hpp"
+#include "resource_reader.hpp"
 #include "texture.hpp"
 
 #include <cstdint>
@@ -21,9 +22,6 @@ struct PreviewMaterial {
     // Why there is no color map, when there is none.
     std::string Problem;
 };
-
-// Returns a compiled resource's bytes by path ("..._c"), or nothing when it is missing.
-using ResourceReader = std::function<std::optional<std::vector<uint8_t>>(const std::string& path)>;
 
 // One entry per distinct material in the scene, in first-use order. Missing or unreadable
 // materials and textures are reported in Problem, never thrown.

@@ -83,6 +83,7 @@ target_link_libraries(sr_render PUBLIC skeleton_repair_core Vulkan::Vulkan)
 add_library(sr_model_tools STATIC
     src/preview/main.cpp
     src/preview/model_viewport.cpp
+    src/preview/animation_player.cpp
     src/preview/preview_panel.cpp
     src/preview/comparison_view.cpp
     src/preview/multi_view.cpp

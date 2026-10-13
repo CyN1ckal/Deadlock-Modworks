@@ -113,6 +113,7 @@ add_library(skeleton_repair_core STATIC
     src/core/model_geometry.cpp
     src/core/texture.cpp
     src/core/animation_clip.cpp
+    src/core/clip_decoder.cpp
     src/core/game_folder.cpp
     src/core/model_library.cpp
     src/core/content_hash.cpp

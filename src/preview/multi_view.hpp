@@ -2,6 +2,7 @@
 
 #include "background.hpp"
 #include "character_view.hpp"
+#include "animation_player.hpp"
 #include "model_viewport.hpp"
 
 #include <vulkan/vulkan.h>

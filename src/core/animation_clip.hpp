@@ -44,14 +44,13 @@ public:
     void Sample(float seconds, std::span<BoneTransform> out) const;
 
 private:
+    // Declared in clip_decoder.hpp.
     friend AnimationClip DecodeAnimationClip(std::span<const uint8_t> file);
     std::vector<uint16_t> data_;
     std::vector<uint32_t> frame_offsets_;
     // uint16 values per frame, checked against every frame offset on decode.
     size_t frame_size_ = 0;
 };
-
-AnimationClip DecodeAnimationClip(std::span<const uint8_t> file);
 
 // Applies an additive pose onto a reference pose, track by track.
 BoneTransform ApplyAdditive(const BoneTransform& reference, const BoneTransform& delta);

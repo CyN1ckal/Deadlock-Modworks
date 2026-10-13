@@ -1,4 +1,4 @@
-#include "animation_clip.hpp"
+#include "clip_decoder.hpp"
 #include "error.hpp"
 #include "kv3.hpp"
 
