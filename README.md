@@ -195,12 +195,15 @@ The core suite checks archives, resources, skeleton migration, and command-line 
 From the repository folder:
 
 ```powershell
+cmake --preset windows-release
 .\scripts\Publish.ps1
 ```
 
-The script builds the release app, chooses Visual Studio 2026 or 2022 when configuring a fresh build folder, and creates **`dist/DeadlockModworks-0.1.0-win-x64.zip`**. Extract the ZIP and launch `DeadlockModworks.exe`. It includes the README and third-party licenses. Shaders are embedded; game assets are not included.
+The script builds the existing `build/release` tree (Visual Studio 18 2026, Release) and does not delete that directory. It stages under `build/package-staging/<id>` and writes **`dist/DeadlockModworks-0.1.0-win-x64.zip`** plus `DeadlockModworks-0.1.0-win-x64.zip.sha256`. Caller-supplied output paths outside the repository, filesystem roots, relative paths that escape the repository, paths that overlap the build or sources, missing directories, and non-empty directories are rejected. The script does not recursively delete an arbitrary path.
 
-The executable uses the Visual C++ runtime. If Windows reports a missing `VCRUNTIME` or `MSVCP` DLL, install the Microsoft Visual C++ x64 Redistributable. The GUI also needs a Vulkan 1.3 graphics driver.
+The zip contains `DeadlockModworks.exe`, this README, third-party notices, the third-party license files, a content manifest, and `LICENSE` when that file is present. Shaders are embedded. Game assets, tests, caches, and profiler data are not included.
+
+The executable is linked with the static MSVC runtime (`/MT`). It does not ship `VCRUNTIME` or `MSVCP` DLLs. The GUI needs a Vulkan 1.3 graphics driver. `vulkan-1.dll` comes from that driver and is not in the zip.
 
 ## Build a repair-only app
 

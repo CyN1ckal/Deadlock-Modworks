@@ -259,3 +259,95 @@ Windows file properties of `DeadlockModworks.exe`, read without launching it:
 | Icon resource in `ModelPreview.exe` | PASS | Same | Same | Same eight sizes. No product `VERSIONINFO`. The exe was not started |
 | Runtime window icon | NOT RUN | Same | Live library not opened | The model-tools window class loads resource 1 for the large and small icons. The window was not created |
 | Explorer, title bar, taskbar, Alt-Tab | NOT RUN | Same | GUI not launched | Shell extraction shows the resource is readable. A desktop observation was not made |
+
+## Stage 7 portable package
+
+Worktree: `C:\Users\warri\.grok\worktrees\repos-deadlock-model-updater\subagent-01a1335d-3509-7e20-b30e-a9f10342787e`. Branch `codex/modworks-v0.1-package`, created from `4ff8308130a0e482dccd0d1c9afcc34f2562edde` (`feat: embed the Deadlock Modworks icon`). This stage closes the stage 2 packaging blocker: `Publish.ps1` no longer deletes `build/release` or an arbitrary output directory. The GUI was not launched. `%LOCALAPPDATA%\DeadlockModManager` was not opened. Nothing was pushed, tagged, or published. `gh release create` was not run.
+
+The packaged executable embeds `4ff8308130a0e482dccd0d1c9afcc34f2562edde` because configure ran before these commits. `--version` does not open a store.
+
+### Runtime
+
+Static MSVC runtime. Release vcxproj `RuntimeLibrary` is `MultiThreaded` (`/MT`) for `DeadlockModworks`, `skeleton_repair_tests`, `render_tests`, `gtest`, `libzstd_static`, and `meshoptimizer`. Debug is `MultiThreadedDebug` (`/MTd`). `gtest_force_shared_crt` is OFF. `ZSTD_USE_STATIC_RUNTIME` is ON. Older subprojects ignore `MSVC_RUNTIME_LIBRARY`, so the per-config C/CXX flags also pass `/MT` or `/MTd`.
+
+`dumpbin /nologo /dependents` from `C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\dumpbin.exe` (vswhere `-prerelease`):
+
+```
+SHELL32.dll
+ole32.dll
+bcrypt.dll
+ADVAPI32.dll
+vulkan-1.dll
+COMDLG32.dll
+KERNEL32.dll
+USER32.dll
+GDI32.dll
+IMM32.dll
+```
+
+No `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, `MSVCP140.dll`, or `api-ms-win-crt-*`. The zip ships no runtime DLL. `vulkan-1.dll` is the graphics-driver loader and is not in the zip. If a static build imported a VC runtime DLL, or a non-system DLL was missing beside the exe, `Publish.ps1` would fail. Dynamic CRT was not needed.
+
+### Commands
+
+From this worktree. Exit code 0 unless noted. This PowerShell execution policy rejects `.\scripts\Publish.ps1` unless launched with `-ExecutionPolicy Bypass`.
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release
+.\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+.\build\release\bin\Release\render_tests.exe --gtest_brief=1
+py -3 scripts/architecture_diagram.py --check
+ctest --test-dir build/release -C Release --output-on-failure
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Publish.ps1
+```
+
+| Command | Result |
+| --- | --- |
+| Configure | Exit 0. Configuring done in 19.9 seconds. Visual Studio 18 2026, Windows SDK 10.0.26100.0, MSVC 19.51.36260.0. Vulkan 1.4.357 found, including `glslc`. Tracy disabled. `product_package_name.txt` is `DeadlockModworks.exe`, `DeadlockModworks-0.1.0-win-x64.zip`, `0.1.0`, `static` |
+| Full Release build | Exit 0. `build\release\bin\Release\DeadlockModworks.exe` |
+| `skeleton_repair_tests.exe --gtest_brief=1` | 215 tests from 22 suites ran. 215 passed. 5946 ms. Exit 0 |
+| `render_tests.exe --gtest_brief=1` | 50 tests from 11 suites ran. 50 passed. 328 ms. Exit 0. No skipped line |
+| `architecture_diagram.py --check` | Exit 0. `58 modules: no cycles, layering holds, stable dependencies hold within 0.10 and 1 accepted exception(s).` |
+| CTest Release | 266 passed, 0 failed, 11.71 seconds. Last test `dependency_levels` |
+| `Publish.ps1` | Exit 0. Reused `build/release`. Did not delete it |
+
+Unsafe destinations were rejected before configure, with no recursive delete. A sentinel file outside the repo and `build\unsafe-out\sentinel.txt` were still present after those runs and after packaging. A later package run left `dist\KEEP.txt` in place. `build\release\CMakeCache.txt` was still present.
+
+### Package
+
+`scripts\Publish.ps1` builds first, then stages under `build\package-staging\<id>` and writes the zip. It rejects missing caller directories, paths that resolve outside the repository, filesystem and repository roots, paths that overlap the build or sources, and caller directories that already contain unrelated files. It deletes only a previous package zip, its `.sha256`, a `.partial` zip, and staging directories it marked under `build\package-staging`.
+
+Final artifact, not committed:
+
+| Item | Value |
+| --- | --- |
+| Zip | `dist\DeadlockModworks-0.1.0-win-x64.zip` |
+| Bytes | 4,213,760 |
+| SHA-256 | `f5e572864f685c0a425b90ed61cc7dd4ec52a55e9ab967938bd21714a0872f7b` |
+| Sidecar | `dist\DeadlockModworks-0.1.0-win-x64.zip.sha256` |
+| Exe bytes | 4,172,800 |
+| Exe SHA-256 | `1f17b684f15b0a4e87fa8889d846d315a085b3db69a2126eff23baff496e94a3` |
+
+Extracted layout: `DeadlockModworks.exe`, `README.md`, `THIRD_PARTY_NOTICES.md`, `PACKAGE_MANIFEST.txt`, and `licenses\` for ValveResourceFormat, lz4, zstd, nlohmann/json, meshoptimizer, Dear ImGui, and Tracy. No `LICENSE` (the root file is still absent; that did not fail the package). No loose shaders, game assets, tests, PDBs, or profiler data. Manifest file sizes and SHA-256 values matched the extracted files (0 mismatches).
+
+Extracted `DeadlockModworks.exe --version` exited 0 and printed `Deadlock Modworks 0.1.0 (4ff8308130a0e482dccd0d1c9afcc34f2562edde)`. File description `Deadlock Modworks 0.1.0`, file version `0.1.0.0`, product `Deadlock Modworks` `0.1.0`, original filename `DeadlockModworks.exe`, internal name `DeadlockModworks`. The process was not left running and no store path was passed.
+
+### CI
+
+`.github/workflows/build.yml` installs Python 3.12 and `networkx`, configures, builds, runs `ctest --test-dir build/release -C Release --output-on-failure`, then both test executables, then `py -3 scripts/architecture_diagram.py --check`, then `Publish.ps1`. The artifact includes the zip and the `.sha256` file.
+
+`.github/workflows/release.yml` is push-only for tags `v*`. It repeats those checks, uploads the same artifact, and runs `gh release create --draft`. It was not executed. Hosted CI does not launch the Vulkan window. `render_tests` skips when no Vulkan 1.3 device exists; a skip is not a unit-test failure. There is no separate GPU smoke job.
+
+| Check | Result (PASS/FAIL/BLOCKED/NOT RUN) | Commit/artifact | Environment | Evidence/notes |
+| --- | --- | --- | --- | --- |
+| Release configure and full build | PASS | `4ff8308` plus this stage | VS 2026, MSVC 19.51.36260.0, Vulkan SDK 1.4.357.0 | Preset `windows-release`. Static `/MT`. Exit 0 |
+| Core tests | PASS | Same | Same | 215/215 |
+| Rendering tests | PASS | Same | RTX 4070 SUPER present locally | 50/50, no skip. Hosted CI may skip device tests |
+| Dependency architecture check | PASS | Same | `py -3`, networkx already installed | Script and CTest `dependency_levels`. CTest 266/266 |
+| `dumpbin /dependents` | PASS | `build\release\bin\Release\DeadlockModworks.exe` | VS 2026 dumpbin | Static CRT. Ten imports. No VC runtime DLL |
+| Package zip and checksum | PASS | `dist\DeadlockModworks-0.1.0-win-x64.zip` | This worktree | SHA-256 `f5e572864f685c0a425b90ed61cc7dd4ec52a55e9ab967938bd21714a0872f7b` |
+| Extracted `--version` | PASS | Same zip | No data-root flag exists | Printed 0.1.0 and `4ff8308`. Store not opened |
+| Unsafe destination rejection | PASS | `scripts\Publish.ps1` | Sentinels kept | Outside, root, relative-escape, overlap, missing, and non-empty paths rejected |
+| Clean-machine launch | NOT RUN | Zip above | No machine without VS, the Vulkan SDK, and a dev PATH | Offline double-click was not run. `--version` on this machine is not that check |
+| Code signing | NOT RUN | | | No certificate. Signing stays deferred |
+| Draft GitHub release | NOT RUN | `.github/workflows/release.yml` | Not executed from this machine | Tag `v*` would upload the zip and open a draft. No tag was pushed |
