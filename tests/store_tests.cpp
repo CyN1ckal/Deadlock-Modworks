@@ -480,6 +480,26 @@ std::vector<uint8_t> HeroModel(const HeroSpec& spec) {
     return Resource(WriteKv3(document));
 }
 
+void DiscardSidecars(const fs::path& catalog) {
+    std::error_code error;
+    fs::remove(fs::path(catalog.wstring() + L"-wal"), error);
+    fs::remove(fs::path(catalog.wstring() + L"-shm"), error);
+}
+
+int CountNamePiece(const fs::path& directory, std::string_view piece) {
+    int count = 0;
+    std::error_code error;
+    for (const fs::directory_entry& entry : fs::recursive_directory_iterator(directory, error)) {
+        if (error || !entry.is_regular_file()) {
+            continue;
+        }
+        if (entry.path().filename().string().find(piece) != std::string::npos) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 std::vector<uint8_t> EntryBytes(const VpkArchive& archive, std::string_view path) {
     for (const auto& entry : archive.Entries()) {
         if (entry.FullPath == path) {
@@ -565,6 +585,8 @@ TEST(Store, UnsupportedSchemaIsRejected) {
         catalog.Exec("UPDATE meta SET value = '3' WHERE key = 'schema_version'");
     }
     ExpectMessage([&] { ContentStore::Open(store_path); }, "Unsupported model library schema.");
+    Catalog after(store_path);
+    EXPECT_EQ(after.Text("SELECT value FROM meta WHERE key = 'schema_version'"), "3");
 }
 
 TEST(Store, VersionOneLibraryGainsSnapshotNames) {
@@ -1956,4 +1978,233 @@ TEST(Store, ImportFolderKeepsCommittedArchivesWhenOneArchiveFails) {
 
     Catalog catalog(store_path);
     EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
+}
+
+TEST(Store, DamagedCatalogIsNotReplaced) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path vpk = dir.Path() / "mod.vpk";
+    const std::vector<uint8_t> payload{1, 2, 3, 4, 5};
+    ArchiveWith(vpk, {VpkChange{"models/a.vmdl_c", payload}});
+    {
+        ContentStore store = ContentStore::Open(store_path);
+        store.ImportVpk(vpk);
+    }
+    const fs::path catalog = store_path / "catalog.sqlite";
+    {
+        Catalog check(store_path);
+        check.Exec("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+    DiscardSidecars(catalog);
+    const std::vector<uint8_t> original = ReadBytes(catalog);
+    ASSERT_GT(original.size(), 100u);
+
+    const auto expect_unchanged = [&](const std::vector<uint8_t>& damaged) {
+        DiscardSidecars(catalog);
+        try {
+            ContentStore::Open(store_path);
+            ADD_FAILURE() << "opened a damaged catalog";
+        } catch (const std::exception& error) {
+            EXPECT_NE(std::string(error.what()).find("The model library is damaged and was not replaced."), std::string::npos);
+        }
+        EXPECT_EQ(ReadBytes(catalog), damaged);
+    };
+
+    const std::vector<uint8_t> garbage(original.size(), static_cast<uint8_t>(0xA5));
+    WriteBytes(catalog, garbage);
+    expect_unchanged(garbage);
+
+    const std::vector<uint8_t> tiny{1, 2, 3, 4};
+    WriteBytes(catalog, tiny);
+    expect_unchanged(tiny);
+
+    std::vector<uint8_t> truncated = original;
+    truncated.resize(original.size() / 2);
+    ASSERT_GT(truncated.size(), 100u);
+    WriteBytes(catalog, truncated);
+    expect_unchanged(truncated);
+
+    WriteBytes(catalog, original);
+    DiscardSidecars(catalog);
+    {
+        Catalog check(store_path);
+        check.Exec("DROP TABLE snapshots;");
+        check.Exec("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+    DiscardSidecars(catalog);
+    const std::vector<uint8_t> dropped = ReadBytes(catalog);
+    expect_unchanged(dropped);
+    {
+        Catalog check(store_path);
+        EXPECT_EQ(check.Int("SELECT COUNT(*) FROM blobs"), 1);
+    }
+
+    WriteBytes(catalog, original);
+    DiscardSidecars(catalog);
+    ContentStore restored = ContentStore::Open(store_path);
+    EXPECT_EQ(restored.ReadBlob(IdOf(payload)), payload);
+    ASSERT_EQ(restored.ListPacks().size(), 1u);
+    EXPECT_EQ(restored.ListModels().size(), 1u);
+}
+
+TEST(Store, TruncatedBlobIsRestoredOnImport) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path vpk = dir.Path() / "mod.vpk";
+    const std::vector<uint8_t> payload{9, 8, 7, 6, 5, 4};
+    ArchiveWith(vpk, {VpkChange{"models/a.vmdl_c", payload}});
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId snapshot = store.ImportVpk(vpk);
+    const std::string hex = IdOf(payload).Hex();
+    const fs::path blob = store_path / "blobs" / "sha256" / hex.substr(0, 2) / hex;
+    ASSERT_TRUE(fs::is_regular_file(blob));
+
+    WriteBytes(blob, {0, 0});
+    EXPECT_THROW(store.ReadBlob(IdOf(payload)), InvalidData);
+    EXPECT_EQ(store.ImportVpk(vpk).Value, snapshot.Value);
+    EXPECT_EQ(store.ReadBlob(IdOf(payload)), payload);
+    EXPECT_EQ(CountBlobFiles(store_path), 1);
+
+    std::vector<uint8_t> corrupt = payload;
+    corrupt[0] ^= 0xFF;
+    WriteBytes(blob, corrupt);
+    EXPECT_EQ(store.ImportVpk(vpk).Value, snapshot.Value);
+    EXPECT_EQ(store.ReadBlob(IdOf(payload)), payload);
+    EXPECT_EQ(store.ListPacks().size(), 1u);
+    EXPECT_EQ(CountBlobFiles(store_path), 1);
+}
+
+TEST(Store, BadArchiveDoesNotDropAnEarlierSnapshot) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path folder = dir.Path() / "mods";
+    fs::create_directories(folder);
+    const std::vector<uint8_t> first_payload{1, 2, 3};
+    const std::vector<uint8_t> second_payload{4, 5, 6, 7};
+    const fs::path first = folder / "a.vpk";
+    const fs::path bad = folder / "bad.vpk";
+    const fs::path second = folder / "z.vpk";
+    ArchiveWith(first, {VpkChange{"models/a.vmdl_c", first_payload}});
+    ArchiveWith(bad, {VpkChange{"models/bad.vmdl_c", std::vector<uint8_t>{9}}});
+    ArchiveWith(second, {VpkChange{"models/z.vmdl_c", second_payload}});
+    auto damaged = ReadBytes(bad);
+    damaged[28 + LoadU32(damaged, 8)] ^= 0xFF;
+    WriteBytes(bad, damaged);
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId kept = store.ImportVpk(first);
+    EXPECT_THROW(store.ImportVpk(bad), InvalidData);
+    EXPECT_EQ(store.ReadBlob(IdOf(first_payload)), first_payload);
+    EXPECT_EQ(store.ListPacks().size(), 1u);
+
+    CancellationSource source;
+    source.Cancel();
+    EXPECT_THROW(store.ImportFolder(folder, source.Token()), OperationCancelled);
+    EXPECT_EQ(store.ReadBlob(IdOf(first_payload)), first_payload);
+    EXPECT_EQ(store.SnapshotContentId(kept), store.SnapshotContentId(store.ListPacks()[0].Snapshot));
+    EXPECT_EQ(store.ListPacks().size(), 1u);
+
+    const FolderImportResult result = store.ImportFolder(folder);
+    ASSERT_EQ(result.Snapshots.size(), 2u);
+    ASSERT_EQ(result.Failures.size(), 1u);
+    EXPECT_EQ(store.ReadBlob(IdOf(first_payload)), first_payload);
+    EXPECT_EQ(store.ReadBlob(IdOf(second_payload)), second_payload);
+    EXPECT_EQ(store.ListPacks().size(), 2u);
+    fs::remove(first);
+    fs::remove(second);
+    EXPECT_EQ(store.ReadSnapshotPath(kept, "models/a.vmdl_c"), first_payload);
+}
+
+TEST(Store, AssembleFailureLeavesSnapshotAndExistingOutput) {
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const std::vector<uint8_t> model{1, 2, 3, 4};
+    const std::vector<uint8_t> texture{5, 6, 7};
+    const fs::path source = dir.Path() / "mod.vpk";
+    ArchiveWith(source, {
+        VpkChange{"models/heroes/hero.vmdl_c", model},
+        VpkChange{"materials/hero.vtex_c", texture},
+    });
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId snapshot = store.ImportVpk(source);
+    fs::remove(source);
+    const BlobId model_id = IdOf(model);
+
+    const fs::path existing = dir.Path() / "existing.vpk";
+    const std::vector<uint8_t> marker{8, 8, 8, 8, 8};
+    WriteBytes(existing, marker);
+    EXPECT_THROW(store.Assemble(snapshot, {model_id}, existing), IoError);
+    EXPECT_EQ(ReadBytes(existing), marker);
+    EXPECT_EQ(store.ReadBlob(model_id), model);
+    EXPECT_EQ(store.ReadSnapshotPath(snapshot, "materials/hero.vtex_c"), texture);
+
+    CancellationSource cancelled;
+    cancelled.Cancel();
+    const fs::path cancelled_output = dir.Path() / "cancelled.vpk";
+    EXPECT_THROW(store.Assemble(snapshot, {model_id}, cancelled_output, cancelled.Token()), OperationCancelled);
+    EXPECT_FALSE(fs::exists(cancelled_output));
+
+    WriteBytes(dir.Path() / "blocked", {1});
+    const fs::path blocked_output = dir.Path() / "blocked" / "out.vpk";
+    EXPECT_THROW(store.Assemble(snapshot, {model_id}, blocked_output), std::exception);
+    EXPECT_FALSE(fs::exists(blocked_output));
+    EXPECT_EQ(ReadBytes(dir.Path() / "blocked"), std::vector<uint8_t>({1}));
+
+    const std::string hex = model_id.Hex();
+    fs::remove(store_path / "blobs" / "sha256" / hex.substr(0, 2) / hex);
+    const fs::path missing_blob_output = dir.Path() / "missing-blob.vpk";
+    EXPECT_THROW(store.Assemble(snapshot, {model_id}, missing_blob_output), std::exception);
+    EXPECT_FALSE(fs::exists(missing_blob_output));
+    ASSERT_EQ(store.ListPacks().size(), 1u);
+    EXPECT_EQ(store.ListPacks()[0].Snapshot.Value, snapshot.Value);
+    EXPECT_EQ(store.ReadSnapshotPath(snapshot, "materials/hero.vtex_c"), texture);
+    EXPECT_EQ(ReadBytes(existing), marker);
+    EXPECT_EQ(CountNamePiece(dir.Path(), ".new"), 0);
+}
+
+TEST(Store, SupportedRepairFailureKeepsTheInputSnapshot) {
+    const std::vector<uint8_t> game_hero = HeroModel({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Remap = {0, 1}});
+    const std::vector<uint8_t> old_hero = HeroModel({.Names = {"arm", "root"}, .Parents = {1, -1}, .Remap = {0, 1}});
+    const std::vector<uint8_t> other{3, 3, 3, 3};
+    constexpr const char* kHero = "models/heroes/test/test.vmdl_c";
+
+    TempDir dir;
+    const fs::path store_path = dir.Path() / "store";
+    const fs::path game_dir = dir.Path() / "game";
+    const fs::path mod = dir.Path() / "mod.vpk";
+    const fs::path other_vpk = dir.Path() / "other.vpk";
+    fs::create_directories(game_dir);
+    ArchiveWith(game_dir / "pak01_dir.vpk", {{kHero, game_hero}});
+    ArchiveWith(mod, {{kHero, old_hero}});
+    ArchiveWith(other_vpk, {VpkChange{"models/other.vmdl_c", other}});
+    const std::vector<uint8_t> original = ReadBytes(mod);
+
+    ContentStore store = ContentStore::Open(store_path);
+    const SnapshotId input = store.ImportVpk(mod);
+    const SnapshotId extra = store.ImportVpk(other_vpk);
+    WriteBytes(dir.Path() / "blocked", {9, 9, 9});
+    const fs::path output = dir.Path() / "blocked" / "repaired.vpk";
+    EXPECT_THROW(HeroModelUpdater::Update(Utf8(game_dir), Utf8(mod), Utf8(output), false, false, {}, {}, false, &store), std::exception);
+    EXPECT_FALSE(fs::exists(output));
+    EXPECT_EQ(ReadBytes(mod), original);
+    EXPECT_EQ(ReadBytes(dir.Path() / "blocked"), (std::vector<uint8_t>{9, 9, 9}));
+
+    CancellationSource cancelled;
+    cancelled.Cancel();
+    EXPECT_THROW(
+        HeroModelUpdater::Update(Utf8(game_dir), Utf8(mod), Utf8(dir.Path() / "out.vpk"), false, false, {}, cancelled.Token(), false, &store),
+        OperationCancelled);
+    EXPECT_FALSE(fs::exists(dir.Path() / "out.vpk"));
+    EXPECT_EQ(ReadBytes(mod), original);
+
+    Catalog catalog(store_path);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM snapshots"), 2);
+    EXPECT_EQ(catalog.Int("SELECT COUNT(*) FROM transforms"), 0);
+    EXPECT_EQ(store.ReadBlob(IdOf(old_hero)), old_hero);
+    EXPECT_EQ(store.ReadBlob(IdOf(other)), other);
+    EXPECT_EQ(store.SnapshotContentId(input).has_value(), true);
+    EXPECT_EQ(store.SnapshotContentId(extra).has_value(), true);
+    EXPECT_EQ(store.ReadSnapshotPath(input, kHero), old_hero);
+    EXPECT_EQ(CountNamePiece(dir.Path(), ".new"), 0);
+    EXPECT_EQ(CountNamePiece(dir.Path(), ".bak-"), 0);
 }

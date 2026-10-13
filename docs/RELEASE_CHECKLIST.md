@@ -259,3 +259,48 @@ Windows file properties of `DeadlockModworks.exe`, read without launching it:
 | Icon resource in `ModelPreview.exe` | PASS | Same | Same | Same eight sizes. No product `VERSIONINFO`. The exe was not started |
 | Runtime window icon | NOT RUN | Same | Live library not opened | The model-tools window class loads resource 1 for the large and small icons. The window was not created |
 | Explorer, title bar, taskbar, Alt-Tab | NOT RUN | Same | GUI not launched | Shell extraction shows the resource is readable. A desktop observation was not made |
+
+## Milestone 6 storage failures
+
+Worktree: `C:\Users\warri\.grok\worktrees\repos-deadlock-model-updater\subagent-01a1335d-3509-7e20-b30e-a9ed0fb530dc`. Branch `codex/modworks-v0.1-storage`, started from `4ff8308130a0e482dccd0d1c9afcc34f2562edde`. No reset or rebase. `src/preview/`, `scripts/Publish.ps1`, and `.github/` were not edited. `LocalModStore::DefaultRoot` is still `%LOCALAPPDATA%\DeadlockModManager`. The live library was not opened. `DeadlockModworks.exe` and `ModelPreview.exe` were not started. `scripts/Publish.ps1` was not executed. No tag was created and nothing was pushed.
+
+The process `TEMP` and `TMP` directories were left unchanged. The archive tests passed there, so `build/test-temp` was not required. CMake was not changed. Schema version stays 2. No table and no `DropObservation` signature change.
+
+Commands, from this worktree:
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release --target skeleton_repair_tests
+.\build\release\bin\Release\skeleton_repair_tests.exe --gtest_brief=1
+py -3 scripts/architecture_diagram.py --check
+```
+
+| Command | Result |
+| --- | --- |
+| `cmake --preset windows-release` | Exit 0. Configuring done in 21.4 seconds. Visual Studio 18 2026, Windows SDK 10.0.26100.0, MSVC 19.51.36260.0. Vulkan 1.4.357 found. Tracy profiler disabled. `build/release` had no stale cache |
+| `skeleton_repair_tests` build | Exit 0. Cold build 81.45 seconds. The tested executable is `build\release\bin\Release\skeleton_repair_tests.exe` after the later incremental rebuild, also exit 0. This target does not link Vulkan |
+| `skeleton_repair_tests.exe --gtest_brief=1` | 224 tests from 22 suites ran. 224 passed. 6355 ms. Exit 0. The summary had no skipped line. Floor before this stage was 215 |
+| `architecture_diagram.py --check` | Exit 0. `58 modules: no cycles, layering holds, stable dependencies hold within 0.10 and 1 accepted exception(s).` |
+| `render_tests` | NOT RUN. This stage edited `.cpp` files and tests only. No rendering source and no shared header included by that target |
+
+Synthetic fixtures only. No Deadlock install and no network.
+
+| Check | Result (PASS/FAIL/BLOCKED/NOT RUN) | Commit/artifact | Environment | Evidence/notes |
+| --- | --- | --- | --- | --- |
+| Truncated or corrupt catalog is not replaced | PASS | This commit | This worktree, Release, synthetic catalog | `Store.DamagedCatalogIsNotReplaced`. A same-size non-SQLite file, a 4-byte file, a half-truncated catalog, and a catalog with `snapshots` dropped all throw `The model library is damaged and was not replaced.` The main file bytes stay. Restoring the bytes reopens the one stored model. `Store.UnsupportedSchemaIsRejected` still requires the exact unsupported-schema message and leaves schema version `3` in place |
+| Gallery-only catalog still initializes | PASS | This commit | Same | `LibraryTest.LocalStoreExportsAndMergesSharedLibraries` saves a thumbnail before the first import. That creates gallery tables without `meta`. Open still creates the content schema |
+| Truncated blob is replaced on import | PASS | This commit | Same | `Store.TruncatedBlobIsRestoredOnImport`. A short blob and a same-size flipped blob are rewritten from the imported payload. One blob file remains and reads back |
+| Export collision, missing dependency, and write failure | PASS | This commit | Same, process temp directory | `LibraryTest.RefusesOverwritesAndCancellationDoesNotPublish` was already present and passed again. `LibraryTest.FailedExportLeavesEarlierOutputAndSources` keeps the first VPK and both sources when a later export lacks a dependency or its parent path is a file. `LibraryTest.SharedExportRefusesCollisionAndCancelledExportPublishesNothing` refuses an existing file and an existing directory, leaves their bytes, and a pre-cancelled export of an empty or populated library creates no destination and no `library-*.tmp`. A following export to a new name writes user version 2. `LibraryTest.SaveFailureLeavesThePreviousLibrary` holds the destination open without delete sharing; the previous `library.json` bytes stay and `library.json.saving` is removed |
+| Bad or cancelled import keeps earlier snapshots | PASS | This commit | Same | `Store.BadArchiveDoesNotDropAnEarlierSnapshot` and `LibraryTest.FailedImportKeepsAnEarlierSnapshot`. A damaged VPK and a pre-cancelled import leave the first snapshot readable. `ImportFolder` records the bad archive and keeps both good snapshots. Removing the source files still reads the stored path |
+| Stored mod after the original path is gone | PASS | This commit | Same | Existing coverage ran in this suite: `Store.ReadSnapshotPathReturnsPayloadsAfterTheSourceFileIsGone`, `Store.AssembleWritesOneModelAndItsResolvedTexture`, `LibraryTest.LocalStoreKeepsImportedModsAfterOriginalIsRemoved`, and `LibraryTest.LocalStoreFlattensChunkedVpkIntoSelfContainedCopy`. No separate hole was found |
+| Supported repair failure keeps the input snapshot | PASS | This commit | Same | `Store.SupportedRepairFailureKeepsTheInputSnapshot`. The output parent is a file, and a pre-cancelled repair publishes nothing. Snapshot count stays 2, transforms stay 0, and the input bytes remain readable. No `.new` or `.bak-` file is left |
+| Assemble failure leaves the snapshot and earlier output | PASS | This commit | Same | `Store.AssembleFailureLeavesSnapshotAndExistingOutput`. Collision, pre-cancel, a parent path that is a file, and a missing blob file leave the snapshot and the existing marker. No partial `.new` file |
+| In-flight cancel between two folder imports | NOT RUN | This commit | Cancellation is an atomic flag polled by the caller | A pre-cancelled `ImportFolder` and a bad file after a committed import were tested. There is no hook to cancel exactly after one file commits and before the next starts without a race |
+| In-flight cancel after a shared-library commit and before publish | NOT RUN | This commit | Same polling limit | Pre-cancelled export, including an empty library, publishes nothing. The check immediately before `MoveFileExW` was not timed separately |
+| Corrupt `settings.json` | NOT RUN | Unchanged preview code | `src/preview/` is owned by another stage | `LoadLibrarySettings` returns empty settings on a parse failure. `HistoryCompare.SettingsFileRoundTripsAndCorruptFilesStayEmpty` locks that. This stage did not change it |
+| Full-disk or read-only volume fault injection | NOT RUN | This commit | No volume fault harness | Write failure was a locked `library.json`, a destination that already exists, and a parent path that is a file |
+| Live library upgrade and GUI restart | NOT RUN | Not opened | `%LOCALAPPDATA%\DeadlockModManager\library.db` is about 1.2 GB. GUI exit rewrites it | No copy, open, or write. Startup on a damaged catalog was proven only through `ContentStore::Open` in the test process |
+| Real-mod manual import, preview, export, and repair | NOT RUN | Synthetic VPKs only | No Deadlock install was used | Representative installed mods were not part of this run |
+| `render_tests` | NOT RUN | Not built this stage | No rendering or shared-header edit | A Vulkan SDK miss did not occur. Configure found Vulkan 1.4.357. `skeleton_repair_tests` does not link it |
+| `scripts/Publish.ps1`, package, clean-machine launch | NOT RUN | Script not executed | The script recursively deletes its output directory | Packaging, ZIP checksum, and a machine without developer tools were out of this stage |
+| Marketplace, installer, deployment manager, new brand data directory | NOT RUN | Not implemented | Schema stays version 2. Default root stays `DeadlockModManager` | Those are outside this storage stage |
