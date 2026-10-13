@@ -2,7 +2,7 @@
 
 Deadlock Modworks 0.1.0 is a desktop workspace for hero-model mods. It is not a marketplace, and **Build VPK...** does not install the file it writes. The procedural path is [QUICK_START.md](QUICK_START.md). Menu names below are the ones drawn by this version.
 
-The captures in `docs/screenshots/` are the real window with an empty library: `library.png`, `builder.png`, `history.png`, `repairs.png`, `inspector.png`, `shortcuts.png`, and `data-root-error.png`. `library.png` is cropped to the window. A comparison of two loaded models was not captured, so this guide does not pretend that `inspector.png` shows one.
+The captures in `docs/screenshots/` are the real window. `library.png`, `builder.png`, `history.png`, `repairs.png`, `inspector.png`, `shortcuts.png`, and `data-root-error.png` are an earlier pass with no model loaded. `library.png` is cropped to the window. `startup-empty-library.png` is the later empty library and shows **Connect game**, **Add mods**, and **Open quick start**. `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png` are the message boxes for those startup failures. A comparison of two loaded models was not captured, so this guide does not pretend that `inspector.png` shows one. The **Quick start** popup was not opened, and a drop onto the window was not performed.
 
 ## The workspace
 
@@ -25,7 +25,7 @@ The first launch with no saved layout docks **Explorer** and **Workspace**. Late
 
 The status bar starts with **Deadlock connected**, **Connecting to Deadlock...**, or **Deadlock not connected**. It then shows import, library, repair, or history work, with **Cancel** while that work runs. The right side counts what is shown, how many skins and sources are loaded, and how many are in the pack.
 
-**Help > About** shows the product title, **Build** and the git commit, and **Dear ImGui** with **Vulkan 1.3**. **Help > Keyboard shortcuts** (**F1**) opens the shortcut list. There is no quick-start item in **Help**, and there is no log-folder item.
+**Help > About** shows the product title, **Build** and the git commit, and **Dear ImGui** with **Vulkan 1.3**. **Help > Keyboard shortcuts** (**F1**) opens the shortcut list. **Help > Quick start** opens a modal titled **Quick start**. **Help > Open logs** selects `<data-root>\logs\modworks.log` in Explorer when that file exists. With the default root the file is `%LOCALAPPDATA%\DeadlockModManager\logs\modworks.log`. If the file is missing, the status line says `No log file yet. Errors are written to <path>.` A start with no error does not create the log. **Help > Copy diagnostic details** copies the product title, the build commit, the data root, and the waiting error, or **No error is waiting.** The quick-start popup and those two menu items were not clicked.
 
 ## Keyboard shortcuts
 
@@ -58,7 +58,11 @@ These are the rows in the **Keyboard shortcuts** dialog.
 
 **Add** and **File > Add mods...** take `.vpk` and `.vmdl_c` files. **Folder** and **File > Add folder...** take every mod VPK in one folder. Chunk names and the game archive (`pak01_dir.vpk` with its chunk files beside it) are skipped. A single-file mod that happens to be named `pak01_dir.vpk` is not treated as the game archive.
 
-Dropping files on the window imports them. Dropping them on the executable starts the app with those files.
+The window accepts dropped files, and the empty library says you can drop mod VPKs on it. A drop was not performed. Dropping files on the executable starts the app with those files. That launch path was not exercised for this note.
+
+An empty library says **Your library has no mods yet.** Then the paragraph that browsing and adding mods work without a connected game, and that textures in the game, comparison, repair, and skin packs that use base-game files need the game archive. A pack made only of other files is copied as stored and does not need the game. The next line is **Building a pack does not install it. Open quick start for how to install or remove one.** The buttons are **Connect game**, **Add mods**, and **Open quick start**. Under them: **You can also drop mod VPKs on the window. Your source files stay available for later builds.** An empty source list says **No sources yet. Connect the game, add mods, or open the quick start from the library.**
+
+**Connect game** uses the explorer's typed path when that field is filled, and otherwise opens **Choose game archive...**. Steam fills the game archive when none is saved. **Connect** and **Browse...** stay under **GAME**. The field hint is **game\citadel or pak01_dir.vpk**.
 
 The toolbar has **Refresh**, the search field **Search skins, packages and sources (Ctrl+F)**, a source list whose first entry is **All sources**, **In pack** (on the library page only), **Grid**, and **List**. **Grid** is the thumbnail grid. **List** is a sortable table with columns for the pack checkbox, a thumbnail, **Name**, **Model path**, and **Source**.
 
@@ -100,7 +104,7 @@ Import does not change the original file. After a successful import, that origin
 
 The builder is the same listing, restricted to the pack, plus a line such as **0 skins in pack**, **Build VPK...**, and **Clear pack**. **File > Build VPK...** (**Ctrl+B**) is enabled only when the pack is not empty and no import, repair, or build is running.
 
-**Build VPK...** asks for a new `.vpk`. The status line then says **Collecting files and validating your pack...**. On success it says `Exported N files to <path>. Test the pack in Deadlock.`
+**Build VPK...** asks for a new `.vpk`. The status line then says **Collecting files and validating your pack...**. On success it says `Exported N file to <path>.` or `Exported N files to <path>.`
 
 What the export includes:
 
@@ -119,7 +123,7 @@ Different bytes at the same path fail with **Conflicting file**, the two source 
 
 **Tools > Cancel VPK build** stops the run. The message is **Cancelled.**
 
-The app does not copy the result into `addons` and does not offer **Reveal in Explorer** on that status line. Right-click the line for **Copy message** or **Dismiss**. To try the pack in Deadlock, close the game and copy the `.vpk` into `game\citadel\addons`. Do not replace `pak01_dir.vpk` or the game's chunk files. Close the game and remove that file from `addons` to uninstall it. See [QUICK_START.md](QUICK_START.md).
+The app does not copy the result into `addons`. Right-click the status line for **Copy message** or **Dismiss**. That menu is not **Reveal in Explorer**. After a successful build, a modal titled **Pack assembled** shows the summary, then **Assembly writes a VPK. It does not install the pack and does not guarantee compatibility with Deadlock.** Then **Install or remove the pack from Deadlock yourself. The quick start has those steps.** The buttons are **Reveal in Explorer**, **Open quick start**, and **Close**. No pack was built for this note, so that modal was not shown. To try the pack in Deadlock, close the game and copy the `.vpk` into `game\citadel\addons`. Do not replace `pak01_dir.vpk` or the game's chunk files. Close the game and remove that file from `addons` to uninstall it. See [QUICK_START.md](QUICK_START.md).
 
 ## Model inspector
 
@@ -196,7 +200,7 @@ Right-click a version for **View**, **Compare with A**, **Compare with game**, *
 
 **Repair** uses the selected copy's pack. The tooltip says the repaired pack is saved as a new version and this one is kept. The pack file on disk is replaced only when that repair runs; the stored previous version remains.
 
-**Assemble...** asks for a new `.vpk` and writes that file from the selected copy's pack with the selected model. It is another way to produce a VPK. It still does not install it.
+**Assemble...** asks for a new `.vpk` and writes that file from the selected copy's pack with the selected model. The summary is `Assembled a pack at <path>.` It opens the same **Pack assembled** modal. It still does not install the pack.
 
 **COPIES** lists **Pack**, **Path**, and **Observed**. **Hide** or **Hide this copy** drops that observation from the history. The tooltip says the pack file is not changed. Hiding a copy is not **Remove from library** and it does not delete blobs. When the list has unproven matches, a header named **Unproven matches** shows them.
 
@@ -285,10 +289,24 @@ Opening the window on another directory:
 DeadlockModworks.exe --data-root "D:\ModworksData"
 ```
 
+## Startup files
+
+The data root is `--data-root`, then `DEADLOCK_MODWORKS_DATA_ROOT`, then `%LOCALAPPDATA%\DeadlockModManager`. Under it:
+
+| Path | What it is |
+| --- | --- |
+| `logs\modworks.log` | Errors only. **Help > Open logs** selects this file. A quiet start does not create it. |
+| `store\settings.json` | The saved game directory, when one has been written. A corrupt file is left unchanged. |
+| `store\catalog.sqlite` | The model library. A read-only catalog is not replaced. |
+
+A corrupt `settings.json` shows **settings.json could not be read. Saved preferences were left unchanged, and the model library was not replaced.** The catalog stays. The window continues after that box. A data root that cannot be written, including a read-only catalog, shows **Deadlock Modworks cannot write its data folder at ... The model library was not replaced.** and exits without replacing the catalog.
+
+`vulkan-1.dll` is delay-loaded. A missing loader is supposed to show **vulkan-1.dll was not found. Install or update the graphics driver that provides the Vulkan loader, then start Deadlock Modworks again. The model library was not opened.** That dialog was not observed. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
 ## What 0.1 does not do
 
-- It does not install, update, or remove mods inside Deadlock by itself.
-- It does not ship an installer, an auto-updater, code signing, or a mod marketplace.
+- It does not install, update, or remove mods inside Deadlock by itself. **Pack assembled** says so, and **Install or remove** in the quick start is still a manual copy.
+- It does not ship an installer, an auto-updater, code signing, or a mod marketplace. `v0.1.0` is not tagged, and nothing has been published. A clean-machine launch, code signing, and `scripts/Publish.ps1` on this documentation update were not run.
 - It does not repair every mod. Archives that need review are left unchanged.
-- It does not embed `vulkan-1.dll`.
-- It does not include an in-app quick start, a log folder, or **Open logs**. Diagnostics are the message box, **Help > About**, `--version`, **Copy message**, and **Save report...**. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+- It does not embed `vulkan-1.dll`. The missing-loader dialog was not observed.
+- It does not treat a clicked **Quick start** popup, a finished **Pack assembled** modal, a two-model comparison screenshot, or a drag-and-drop as something this documentation update ran. The labels above are the ones in source. The quick-start sentences were not given an extra step.
