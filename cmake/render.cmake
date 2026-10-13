@@ -113,6 +113,14 @@ add_executable(ModelPreview
     "${CMAKE_BINARY_DIR}/generated/app_icon.rc"
 )
 target_link_libraries(ModelPreview PRIVATE sr_model_tools)
+# The loader stays a driver DLL. Delay-load it so a missing vulkan-1.dll can show a message
+# instead of the process exiting before main.
+if(MSVC)
+    foreach(target DeadlockModworks ModelPreview)
+        target_link_options(${target} PRIVATE "/DELAYLOAD:vulkan-1.dll")
+        target_link_libraries(${target} PRIVATE delayimp)
+    endforeach()
+endif()
 
 add_executable(render_tests
     tests/preview_scene_tests.cpp

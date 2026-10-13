@@ -166,6 +166,7 @@ add_library(skeleton_repair_core STATIC
     src/core/animation_clip.cpp
     src/core/clip_decoder.cpp
     src/core/game_folder.cpp
+    src/core/startup.cpp
     src/core/model_library.cpp
     src/core/content_hash.cpp
     src/core/content_store.cpp
@@ -205,6 +206,7 @@ add_executable(skeleton_repair_tests
     tests/history_compare_tests.cpp
     tests/character_view_tests.cpp
     tests/command_line_store_tests.cpp
+    tests/startup_tests.cpp
     src/preview/library_model.cpp
     src/preview/character_view.cpp
     src/preview/store_reader.cpp

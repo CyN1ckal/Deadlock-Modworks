@@ -29,6 +29,7 @@
 #include "library_panel.hpp"
 #include "mod_store.hpp"
 #include "product_version.hpp"
+#include "startup.hpp"
 #include "background.hpp"
 #include "theme.hpp"
 #include "ui.hpp"
@@ -130,6 +131,11 @@ void SaveShellPlacement(HWND hwnd) {
     if (!out) return;
     out << placement.rcNormalPosition.left << ' ' << placement.rcNormalPosition.top << ' '
         << width << ' ' << height << ' ' << (placement.showCmd == SW_SHOWMAXIMIZED ? 1 : 0) << '\n';
+}
+
+void ShowStartupFailure(const std::string& message) {
+    std::fprintf(stderr, "%s\n", message.c_str());
+    MessageBoxW(nullptr, Widen(message).c_str(), SR_PRODUCT_TITLE_W, MB_ICONERROR | MB_SETFOREGROUND);
 }
 
 std::wstring EnvironmentValue(const wchar_t* name) {
@@ -657,6 +663,16 @@ struct App {
     bool StandaloneModel = false;
     std::filesystem::path DataRoot;
     std::filesystem::path LayoutIni;
+    char ManualGame[2048] = {};
+    std::string SettingsGame;
+    bool auto_detect_done_ = false;
+    std::string StartupNotice;
+    std::string LastError;
+    std::string LastLogged;
+    bool StoreStatusIsError = false;
+    bool OpenQuickStart = false;
+    bool OpenExport = false;
+    std::optional<AssembledPack> PendingExport;
     std::optional<LocalModStore> Store;
     std::filesystem::path ConfiguredGame;
     // Set when the game was chosen on the command line, so the saved game does not replace it.
@@ -693,6 +709,88 @@ struct App {
 
     bool ImportBusy() const { return ImportWorker.valid(); }
     bool FilesBusy() const { return Repair.Busy() || Builder.Busy() || History.Busy() || ImportBusy(); }
+    bool LibraryReady() const { return !Restoring; }
+
+    void RememberGamePath(const std::filesystem::path& path) {
+        const std::string text = Narrow(path.wstring());
+        std::snprintf(ManualGame, sizeof(ManualGame), "%s", text.c_str());
+    }
+
+    void ReportError(const std::string& message) {
+        if (message.empty()) return;
+        LastError = message;
+        if (message == LastLogged) return;
+        LastLogged = message;
+        AppendErrorLog(DataPathsFor(DataRoot).LogFile, DiagnosticText(SR_PRODUCT_TITLE, SR_GIT_COMMIT, DataRoot, message));
+    }
+
+    void NoteStartupError(const std::string& message) {
+        if (message.empty()) return;
+        StartupNotice = message;
+        LastError = message;
+        LastLogged = message;
+    }
+
+    void SetStoreStatus(std::string text, bool error) {
+        StoreStatus = std::move(text);
+        StoreStatusIsError = error;
+        if (error) ReportError(StoreStatus);
+    }
+
+    void MaybeAutoDetect() {
+        if (auto_detect_done_) return;
+        if (KeepGame || !ConfiguredGame.empty()) {
+            auto_detect_done_ = true;
+            return;
+        }
+        if (Restoring || (Store && !CanPersist)) return;
+        if (!SettingsGame.empty()) {
+            const std::string saved = std::exchange(SettingsGame, {});
+            OpenGame(std::filesystem::path(Widen(saved)));
+            auto_detect_done_ = true;
+            return;
+        }
+        auto_detect_done_ = true;
+        try {
+            if (const auto detected = FindGameFolder()) OpenGame(Widen(*detected));
+        } catch (const std::exception& error) {
+            GameError = error.what();
+            ReportError(GameError);
+        }
+    }
+
+    void ConnectManual(HWND hwnd, bool browse) {
+        if (!browse && ManualGame[0] != '\0') {
+            OpenGame(std::filesystem::path(Widen(std::string(ManualGame))));
+            return;
+        }
+        ChooseGame(hwnd);
+    }
+
+    void OpenLogs() {
+        const std::filesystem::path log = DataPathsFor(DataRoot).LogFile;
+        std::error_code error;
+        if (std::filesystem::is_regular_file(log, error)) {
+            ui::RevealInExplorer(log);
+            return;
+        }
+        SetStoreStatus("No log file yet. Errors are written to " + Narrow(log.wstring()) + ".", false);
+    }
+
+    void CopyDiagnostics() {
+        ui::CopyToClipboard(DiagnosticText(SR_PRODUCT_TITLE, SR_GIT_COMMIT, DataRoot, LastError));
+    }
+
+    void CollectExportNotice() {
+        if (const auto notice = Builder.TakeExportNotice()) {
+            PendingExport = *notice;
+            OpenExport = true;
+        }
+        if (const auto notice = History.TakeExportNotice()) {
+            PendingExport = *notice;
+            OpenExport = true;
+        }
+    }
 
     void CloseInspection() {
         Inspector.Cancel();
@@ -722,7 +820,7 @@ struct App {
         if (!force && !SaveError.empty() && ImGui::GetTime() - LastSaveAttempt < 5) return;
         LastSaveAttempt = ImGui::GetTime();
         try { Store->Save(current); SavedState = current; SaveError.clear(); NoteSaved(); }
-        catch (const std::exception& error) { SaveError = error.what(); }
+        catch (const std::exception& error) { SaveError = error.what(); ReportError(SaveError); }
     }
 
     // Reads the saved library from the database, merging the folder-based store of earlier releases on first use.
@@ -730,7 +828,7 @@ struct App {
         Restoring = true;
         ImportCancellation = CancellationSource{};
         ImportedCount = 0; ImportTotal = 0;
-        StoreStatus = "Opening your library...";
+        SetStoreStatus("Opening your library...", false);
         ImportWorker = std::async(std::launch::async, [root = Store->Root(), token = ImportCancellation.Token(),
             completed = &ImportedCount, total = &ImportTotal] {
             ImportResult result;
@@ -743,13 +841,13 @@ struct App {
     // Adds a shared library database's mods and selections to this library.
     void StartMerge(const std::filesystem::path& other) {
         if (FilesBusy() || !Store) return;
-        if (!CanPersist) { StoreStatus = "Your library has not been opened, so nothing can be added to it yet. " + SaveError; return; }
+        if (!CanPersist) { SetStoreStatus("Your library has not been opened, so nothing can be added to it yet. " + SaveError, true); return; }
         // The merge appends to the saved collection, so it must match what is on screen.
         Persist(true);
-        if (!SaveError.empty()) { StoreStatus = "Could not save your library before adding another: " + SaveError; return; }
+        if (!SaveError.empty()) { SetStoreStatus("Could not save your library before adding another: " + SaveError, true); return; }
         ImportCancellation = CancellationSource{};
         ImportedCount = 0; ImportTotal = 0;
-        StoreStatus = "Adding " + Narrow(other.filename().wstring()) + " to your library...";
+        SetStoreStatus("Adding " + Narrow(other.filename().wstring()) + " to your library...", false);
         ImportWorker = std::async(std::launch::async, [root = Store->Root(), other, token = ImportCancellation.Token(),
             completed = &ImportedCount, total = &ImportTotal] {
             ImportResult result;
@@ -764,14 +862,14 @@ struct App {
     // Names a source's mod, then reopens the library so its copy carries the new name.
     void StartRename(const std::filesystem::path& archive, const std::string& name) {
         if (FilesBusy() || !Store) return;
-        if (!CanPersist) { StoreStatus = "Your library has not been opened, so nothing can be renamed yet. " + SaveError; return; }
+        if (!CanPersist) { SetStoreStatus("Your library has not been opened, so nothing can be renamed yet. " + SaveError, true); return; }
         // The reopened library replaces what is on screen, so it must be saved first.
         Persist(true);
-        if (!SaveError.empty()) { StoreStatus = "Could not save your library before renaming: " + SaveError; return; }
+        if (!SaveError.empty()) { SetStoreStatus("Could not save your library before renaming: " + SaveError, true); return; }
         ReleaseArchives();
         ImportCancellation = CancellationSource{};
         ImportedCount = 0; ImportTotal = 0;
-        StoreStatus = "Renaming...";
+        SetStoreStatus("Renaming...", false);
         ImportWorker = std::async(std::launch::async, [root = Store->Root(), archive, name, token = ImportCancellation.Token(),
             completed = &ImportedCount, total = &ImportTotal] {
             ImportResult result;
@@ -815,10 +913,10 @@ struct App {
             return;
         }
         if (FilesBusy()) return;
-        if (!Store) { StoreStatus = "Local mod storage is unavailable. " + SaveError; return; }
+        if (!Store) { SetStoreStatus("Local mod storage is unavailable. " + SaveError, true); return; }
         ImportCancellation = CancellationSource{};
         ImportedCount = 0; ImportTotal = incoming.Sources.size();
-        StoreStatus = "Importing mods into local storage...";
+        SetStoreStatus("Importing mods into local storage...", false);
         auto starting = replace ? incoming : Builder.Snapshot(ModPaths, ConfiguredGame);
         if (replace) starting.Sources.clear();
         ImportWorker = std::async(std::launch::async, [root = Store->Root(), incoming, starting = std::move(starting),
@@ -877,9 +975,10 @@ struct App {
             const auto result = ImportWorker.get();
             ApplyLibrary(result.Library);
             if (result.Restored) { SavedState = result.Library; CanPersist = true; }
-            StoreStatus = !result.Errors.empty() ? result.Errors
-                : !result.Done.empty() ? result.Done
-                : Restoring ? "" : "Saved in your library. Your collection will reopen automatically.";
+            if (!result.Errors.empty()) SetStoreStatus(result.Errors, true);
+            else if (!result.Done.empty()) SetStoreStatus(result.Done, false);
+            else if (Restoring) SetStoreStatus({}, false);
+            else SetStoreStatus("Saved in your library. Your collection will reopen automatically.", false);
             Persist(true);
             if (InspectAfterImport && !Restoring) {
                 for (const auto& [source, cached] : result.Imported) {
@@ -888,7 +987,7 @@ struct App {
                 InspectAfterImport.reset();
             }
         } catch (const std::exception& error) {
-            StoreStatus = error.what();
+            SetStoreStatus(error.what(), true);
             if (!Restoring) InspectAfterImport.reset();
         }
         if (Restoring) {
@@ -929,6 +1028,7 @@ struct App {
             StartRestore();
         } catch (const std::exception& error) {
             SaveError = error.what();
+            ReportError(SaveError);
         }
     }
     ~App() {
@@ -945,6 +1045,7 @@ struct App {
         GameError.clear();
         GameLoading = GamePak(chosen);
         ConfiguredGame = std::filesystem::absolute(GameLoading).lexically_normal();
+        RememberGamePath(ConfiguredGame);
         // The game directory has hundreds of thousands of entries, so it is parsed off the UI thread.
         GameLoader.Start([archives = Archives, pak = GameLoading](CancellationToken) {
             ZoneScopedN("Open game archive");
@@ -972,7 +1073,10 @@ struct App {
             GameDirectory = Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring());
             Multi.SetGame(Game);
         } catch (const std::exception& error) {
-            GameError = Narrow(GameLoading.wstring()) + ": " + error.what();
+            std::error_code missing;
+            if (!std::filesystem::is_regular_file(GameLoading, missing)) GameError = MissingGameMessage(GameLoading);
+            else GameError = Narrow(GameLoading.wstring()) + ": " + error.what();
+            ReportError(GameError);
             Multi.SetGame(nullptr);
         }
         // The comparison and textures depend on the game, so reload the model being inspected.
@@ -1067,10 +1171,10 @@ struct App {
         if (!folder) return;
         try {
             const auto mods = FolderImportCandidates(*folder);
-            if (mods.empty()) { StoreStatus = "No mod VPKs found in " + Narrow(folder->wstring()) + "."; return; }
+            if (mods.empty()) { SetStoreStatus("No mod VPKs found in " + Narrow(folder->wstring()) + ".", true); return; }
             AddPaths(mods);
         } catch (const std::exception& error) {
-            StoreStatus = error.what();
+            SetStoreStatus(error.what(), true);
         }
     }
 
@@ -1206,6 +1310,10 @@ struct App {
         }
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("Keyboard shortcuts", "F1")) OpenShortcuts = true;
+            if (ImGui::MenuItem("Quick start")) OpenQuickStart = true;
+            if (ImGui::MenuItem("Open logs")) OpenLogs();
+            if (ImGui::MenuItem("Copy diagnostic details")) CopyDiagnostics();
+            ImGui::Separator();
             if (ImGui::MenuItem("About")) OpenAbout = true;
             ImGui::EndMenu();
         }
@@ -1229,9 +1337,13 @@ struct App {
 
     // The most important message for the status bar, with a way to dismiss it.
     std::string* StatusMessage(ImVec4& color) {
+        if (!StartupNotice.empty()) { color = ui::kError; return &StartupNotice; }
         if (!SaveError.empty()) { color = ui::kError; return &SaveError; }
         if (!GameError.empty()) { color = ui::kError; return &GameError; }
-        if (!StoreStatus.empty() && !ImportBusy()) { color = ImGui::GetStyleColorVec4(ImGuiCol_Text); return &StoreStatus; }
+        if (!StoreStatus.empty() && !ImportBusy()) {
+            color = StoreStatusIsError ? ui::kError : ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            return &StoreStatus;
+        }
         return nullptr;
     }
 
@@ -1336,7 +1448,7 @@ struct App {
         ImGui::SetNextItemWidth(-1);
         ImGui::InputTextWithHint("##sourcefilter", "Filter sources", SourceFilter, sizeof(SourceFilter));
 
-        const float footer = ImGui::GetFrameHeightWithSpacing() * 4 + ImGui::GetTextLineHeightWithSpacing() * 2
+        const float footer = ImGui::GetFrameHeightWithSpacing() * 6 + ImGui::GetTextLineHeightWithSpacing() * 2
             + (GameError.empty() ? 0.f : ImGui::GetTextLineHeightWithSpacing() * 2) + (SaveError.empty() ? 0.f : ImGui::GetTextLineHeightWithSpacing() * 2);
         ImGui::BeginChild("sources", {0, std::max(ImGui::GetFrameHeight() * 3, ImGui::GetContentRegionAvail().y - footer)}, ImGuiChildFlags_Borders);
         const ImGuiTextFilter filter(SourceFilter);
@@ -1402,7 +1514,7 @@ struct App {
         }
         if (ModPaths.empty()) {
             ImGui::PushTextWrapPos();
-            ImGui::TextDisabled("No sources yet. Click Add, or drop mod VPKs on the window.");
+            ImGui::TextDisabled("No sources yet. Connect the game, add mods, or open the quick start from the library.");
             ImGui::PopTextWrapPos();
         }
         if (remove) RemoveSource(*remove);
@@ -1419,9 +1531,19 @@ struct App {
             GameMenuItems(hwnd);
             ImGui::EndPopup();
         }
-        ImGui::SetItemTooltip("%s\nRight-click for more.", Game ? GameName.c_str() : "Connect Deadlock for textures, skin repairs and pack dependencies.");
+        ImGui::SetItemTooltip("%s\nRight-click for more. %s", Game ? GameName.c_str() : "No game is connected.",
+            GameResourceSummary().c_str());
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##manualgame", "game\\citadel or pak01_dir.vpk", ManualGame, sizeof(ManualGame));
+        const float game_button = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f;
+        ImGui::BeginDisabled(FilesBusy());
+        if (ImGui::Button("Connect", {game_button, 0})) ConnectManual(hwnd, false);
         ImGui::SameLine();
-        if (ui::ToolButton("...", "Choose game\\citadel\\pak01_dir.vpk (Ctrl+G)", !FilesBusy())) ChooseGame(hwnd);
+        if (ImGui::Button("Browse...", {-1, 0})) ConnectManual(hwnd, true);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Browse to game\\citadel\\pak01_dir.vpk (Ctrl+G). A typed path is used as entered.");
+        }
         if (!GameError.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
             ImGui::TextWrapped("%s", GameError.c_str());
@@ -1520,7 +1642,10 @@ struct App {
                 [&](const LibraryModel& model) {
                     ShowPage(Page::Repair);
                     Repair.AnalyzeModel(Narrow(model.Archive.wstring()), model.Model);
-                });
+                },
+                [&] { ConnectManual(hwnd, false); },
+                [&] { OpenQuickStart = true; },
+                LibraryReady());
         } else if (CurrentPage == Page::History) {
             const std::string& game_directory = GameDirectory;
             History.Draw(hwnd, Panel, [game = Game](const std::string& path) { return game ? game->Read(path) : std::nullopt; }, GameClips,
@@ -1587,8 +1712,11 @@ struct App {
 
     void DrawDialogs() {
         ZoneScopedN("Dialogs");
+        CollectExportNotice();
         if (std::exchange(OpenShortcuts, false)) ImGui::OpenPopup("Keyboard shortcuts");
         if (std::exchange(OpenAbout, false)) ImGui::OpenPopup("About");
+        if (std::exchange(OpenQuickStart, false)) ImGui::OpenPopup("Quick start");
+        if (std::exchange(OpenExport, false)) ImGui::OpenPopup("Pack assembled");
         const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
         DrawRenamePopup();
@@ -1630,6 +1758,33 @@ struct App {
             if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
+        ImGui::SetNextWindowSize({ImGui::GetFontSize() * 36, 0}, ImGuiCond_Appearing);
+        if (ImGui::BeginPopupModal("Quick start", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+            ImGui::TextWrapped("These steps are the whole first run. Assembly does not install the pack.");
+            ImGui::Spacing();
+            for (const GuideStep& step : QuickStartSteps()) {
+                ImGui::TextColored(ui::kAccent, "%s", step.Title);
+                ImGui::TextWrapped("%s", step.Detail);
+                ImGui::Spacing();
+            }
+            if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
+        ImGui::SetNextWindowSize({ImGui::GetFontSize() * 32, 0}, ImGuiCond_Appearing);
+        if (ImGui::BeginPopupModal("Pack assembled", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+            if (PendingExport) {
+                ImGui::TextWrapped("%s", PendingExport->Summary.c_str());
+                ImGui::TextWrapped("%s", kAssemblyDoesNotInstall);
+                ImGui::TextWrapped("Install or remove the pack from Deadlock yourself. The quick start has those steps.");
+                if (ImGui::Button("Reveal in Explorer")) ui::RevealInExplorer(PendingExport->Output);
+                ImGui::SameLine();
+                if (ImGui::Button("Open quick start")) OpenQuickStart = true;
+            }
+            if (ImGui::Button("Close", {-1, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
     }
 };
 
@@ -1660,11 +1815,26 @@ int Run(const std::vector<std::filesystem::path>& args) {
     const std::wstring data_root_env = EnvironmentValue(L"DEADLOCK_MODWORKS_DATA_ROOT");
     const std::filesystem::path data_root = std::filesystem::absolute(
         ResolveDataRoot(data_root_flag, data_root_env.empty() ? nullptr : data_root_env.c_str())).lexically_normal();
-    std::error_code directory_error;
-    std::filesystem::create_directories(data_root, directory_error);
+    const DataPaths paths = DataPathsFor(data_root);
+    const DataRootInspection storage = InspectDataRoot(paths.Root);
+    if (!storage.Writable) {
+        ShowStartupFailure(storage.Message.empty() ? UnwritableDataRootMessage(paths.Root) : storage.Message);
+        return 1;
+    }
+    if (LoadLibraryW(L"vulkan-1.dll") == nullptr) {
+        AppendErrorLog(paths.LogFile, DiagnosticText(SR_PRODUCT_TITLE, SR_GIT_COMMIT, paths.Root, kMissingVulkanLoaderMessage));
+        ShowStartupFailure(kMissingVulkanLoaderMessage);
+        return 1;
+    }
+    const SettingsInspection settings = InspectLibrarySettings(paths.StoreDirectory);
+    if (settings.State == SettingsState::Corrupt) {
+        AppendErrorLog(paths.LogFile, DiagnosticText(SR_PRODUCT_TITLE, SR_GIT_COMMIT, paths.Root, settings.Message));
+        ShowStartupFailure(settings.Message);
+    }
+    try {
     // ImGui stores this pointer and does not copy it. The string has to outlive the context.
-    const std::string layout_ini = Narrow((data_root / L"layout.ini").wstring());
-    const ShellPlacement placement = LoadShellPlacement(data_root / L"window.ini");
+    const std::string layout_ini = Narrow(paths.LayoutIni.wstring());
+    const ShellPlacement placement = LoadShellPlacement(paths.WindowIni);
     const RECT work = PrimaryWorkOrigin();
 
     ImGui_ImplWin32_EnableDpiAwareness();
@@ -1688,7 +1858,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
         DestroyWindowIcons(icon, icon_small);
         throw std::runtime_error("Could not create the model tools window.");
     }
-    g_window_ini = data_root / L"window.ini";
+    g_window_ini = paths.WindowIni;
     SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
     SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon_small));
 
@@ -1743,18 +1913,14 @@ int Run(const std::vector<std::filesystem::path>& args) {
 
     int exit_code = 0;
     {
-        App app(g_device, data_root);
-        // A game restored from the saved library may still be connecting; only detect one when none is configured.
-        if (!game_folder && app.ConfiguredGame.empty()) {
-            try {
-                if (const auto detected = FindGameFolder()) game_folder = Widen(*detected);
-            } catch (const std::exception& error) {
-                app.GameError = error.what();
-            }
-        }
-        if (game_folder) {
+        App app(g_device, paths.Root);
+        if (settings.State == SettingsState::Corrupt) app.NoteStartupError(settings.Message);
+        else if (settings.State == SettingsState::Ok) app.SettingsGame = settings.GameDirectory;
+        // A saved library game is applied when the restore finishes. Detect Steam only when that path is empty.
+        const ResolvedGamePath chosen_game = ResolveGamePath(game_folder, {});
+        if (!chosen_game.AutoDetect) {
             app.KeepGame = true;
-            app.OpenGame(*game_folder);
+            app.OpenGame(chosen_game.Path);
         }
         if (!positional.empty()) {
             if (positional.size() > 1 && EndsWith(Narrow(positional[0].wstring()), ".vpk") && EndsWith(Narrow(positional[1].wstring()), ".vmdl_c")) {
@@ -1812,6 +1978,7 @@ int Run(const std::vector<std::filesystem::path>& args) {
 
             app.Builder.Poll();
             app.PollImport();
+            app.MaybeAutoDetect();
             app.PollGame();
             app.PollInspect();
             app.Multi.Poll();
@@ -1894,6 +2061,10 @@ int Run(const std::vector<std::filesystem::path>& args) {
     DeleteObject(background);
     DestroyWindowIcons(icon, icon_small);
     return exit_code;
+    } catch (const std::exception& error) {
+        AppendErrorLog(paths.LogFile, DiagnosticText(SR_PRODUCT_TITLE, SR_GIT_COMMIT, paths.Root, error.what()));
+        throw;
+    }
 }
 
 }  // namespace

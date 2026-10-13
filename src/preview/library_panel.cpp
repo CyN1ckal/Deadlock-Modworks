@@ -1,6 +1,7 @@
 #include "profile.hpp"
 #include "library_panel.hpp"
 #include "character_view.hpp"
+#include "startup.hpp"
 #include "strings.hpp"
 #include "texture.hpp"
 #include "theme.hpp"
@@ -14,6 +15,7 @@
 #include <imgui_internal.h>
 #include <algorithm>
 #include <chrono>
+#include <utility>
 #include <cstdio>
 #include <cmath>
 #include <fstream>
@@ -410,9 +412,24 @@ const std::string* LibraryPanel::DrawThumbnail(const Card& card, const std::file
     }
     return loading || found == thumbnails_.end() ? nullptr : &found->second.Error;
 }
+void LibraryPanel::NoteStatus(std::string text, bool error) {
+    status_ = std::move(text);
+    status_error_ = error;
+}
+
+std::optional<AssembledPack> LibraryPanel::TakeExportNotice() {
+    return std::exchange(export_notice_, std::nullopt);
+}
+
 void LibraryPanel::Poll() {
     ZoneScopedN("Library poll");
-    if (worker_.valid() && worker_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) status_ = worker_.get();
+    if (worker_.valid() && worker_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        PanelJob job = worker_.get();
+        if (job.Output) {
+            export_notice_ = AssembledPack{*job.Output, job.Status};
+        }
+        NoteStatus(std::move(job.Status), job.Error);
+    }
     try {
         if (auto scan = scan_.Take()) {
             ZoneScopedN("Apply library scan");
@@ -444,7 +461,7 @@ void LibraryPanel::Restore(const ModelLibrary& library) {
     pack_stale_ = true;
     Refresh(library.Sources);
     source_filter_.clear();
-    status_.clear();
+    NoteStatus({}, false);
 }
 ModelLibrary LibraryPanel::Snapshot(const std::vector<std::filesystem::path>& sources, const std::filesystem::path& game) const {
     ModelLibrary result{sources, {}, game};
@@ -659,7 +676,7 @@ void LibraryPanel::SetInPack(size_t index, bool include) {
     if (include) selected_.push_back(model);
     else selected_.erase(found);
     if (!pack_stale_ && index < in_pack_.size()) in_pack_[index] = include;
-    status_.clear();
+    NoteStatus({}, false);
     Changed();
 }
 void LibraryPanel::IncludeSource(const std::filesystem::path& source, bool include) {
@@ -670,7 +687,7 @@ void LibraryPanel::IncludePackage(const std::filesystem::path& source, bool incl
     if (include == (found != package_selection_.end())) return;
     if (include) package_selection_.push_back(source);
     else package_selection_.erase(found);
-    status_.clear();
+    NoteStatus({}, false);
     Changed();
 }
 void LibraryPanel::ClearPack() {
@@ -679,7 +696,7 @@ void LibraryPanel::ClearPack() {
     selected_.clear();
     package_selection_.clear();
     pack_stale_ = true;
-    status_.clear();
+    NoteStatus({}, false);
     Changed();
 }
 void LibraryPanel::Reload(const std::vector<std::filesystem::path>& sources) {
@@ -697,22 +714,26 @@ void LibraryPanel::AddLibrary(void* owner, const std::function<void(const ModelL
         source_filter_.clear();
         if (EqualsIgnoreCase(Narrow(path.extension().wstring()), ".db")) {
             merge(path);
-            status_ = "Adding the shared library to yours...";
+            NoteStatus("Adding the shared library to yours...", false);
         } else {
             // Library lists from earlier releases name their VPKs, which are imported again.
             load(ModelLibrary::Load(path));
-            status_ = "Restoring library...";
+            NoteStatus("Restoring library...", false);
         }
-    } catch (const std::exception& error) { status_ = error.what(); }
+    } catch (const std::exception& error) { NoteStatus(error.what(), true); }
 }
 void LibraryPanel::ShareLibrary(void* owner) {
     if (!CanShare()) return;
     const auto path = Dialog(owner, FileKind::SharedLibrary);
     if (path.empty()) return;
-    status_ = "Writing a copy of your library...";
+    NoteStatus("Writing a copy of your library...", false);
     worker_ = std::async(std::launch::async, [store = *store_, path] {
-        try { store.Export(path); return "Saved your whole library to " + Narrow(path.wstring()) + ". Others can add it with Add library."; }
-        catch (const std::exception& error) { return std::string(error.what()); }
+        try {
+            store.Export(path);
+            return PanelJob{"Saved your whole library to " + Narrow(path.wstring()) + ". Others can add it with Add library.", false, {}};
+        } catch (const std::exception& error) {
+            return PanelJob{error.what(), true, {}};
+        }
     });
 }
 void LibraryPanel::BuildPack(void* owner, const std::filesystem::path& game) {
@@ -720,11 +741,14 @@ void LibraryPanel::BuildPack(void* owner, const std::filesystem::path& game) {
     const auto path = Dialog(owner, FileKind::Pack);
     if (path.empty()) return;
     cancellation_ = CancellationSource{};
-    status_ = "Collecting files and validating your pack...";
+    NoteStatus("Collecting files and validating your pack...", false);
     worker_ = std::async(std::launch::async, [models = selected_, packages = package_selection_, game, path, token = cancellation_.Token()] {
-        try { const auto count = ExportModelLibrary(models, game, path, token, packages);
-            return "Exported " + std::to_string(count) + " files to " + Narrow(path.wstring()) + ". Test the pack in Deadlock.";
-        } catch (const std::exception& error) { return std::string(error.what()); }
+        try {
+            const auto count = ExportModelLibrary(models, game, path, token, packages);
+            return PanelJob{ExportResultSummary(count, path), false, path};
+        } catch (const std::exception& error) {
+            return PanelJob{error.what(), true, {}};
+        }
     });
 }
 void LibraryPanel::OpenFileList(const Card& card) {
@@ -958,7 +982,8 @@ void LibraryPanel::DrawList(const std::vector<Card>& shown, const std::filesyste
 void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& sources,
     const std::filesystem::path& game, bool repair_busy, bool pause_loading, bool pack_view, const std::function<void()>& add,
     const std::function<void(const ModelLibrary&)>&, const std::function<void(const std::filesystem::path&)>&,
-    const std::function<void(const LibraryModel&)>& preview, const std::function<void(const LibraryModel&)>& analyze) {
+    const std::function<void(const LibraryModel&)>& preview, const std::function<void(const LibraryModel&)>& analyze,
+    const std::function<void()>& connect_game, const std::function<void()>& open_quick_start, bool collection_ready) {
     ZoneScopedN("Gallery");
     Poll();
     if (thumbnail_game_ != game) { InvalidateThumbnails(); thumbnail_game_ = game; }
@@ -1054,10 +1079,11 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         if (!status_.empty()) ImGui::SameLine();
     }
     if (!status_.empty()) {
-        ui::TextEllipsis(status_);
+        ImVec4 status_color = status_error_ ? ui::kError : (Busy() ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : ui::kGood);
+        ui::TextEllipsis(status_, 0, &status_color);
         if (ImGui::BeginPopupContextItem("status_menu")) {
             ui::CopyMenuItem("Copy message", status_);
-            if (ImGui::MenuItem("Dismiss")) status_.clear();
+            if (ImGui::MenuItem("Dismiss")) NoteStatus({}, false);
             ImGui::EndPopup();
         }
     }
@@ -1129,12 +1155,27 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         ImGui::Spacing();
         if (!have_items && Scanning()) {
             ImGui::TextDisabled("Loading your collection...");
+        } else if (no_sources && !collection_ready) {
+            ImGui::TextDisabled("Opening your library...");
         } else if (no_sources) {
             ImGui::TextUnformatted("Your library has no mods yet.");
-            ImGui::TextDisabled("Add or drop mod VPKs (Ctrl+O). Your source files stay available for future builds.");
+            ImGui::PushTextWrapPos(0);
+            ImGui::TextWrapped("%s", GameResourceSummary().c_str());
+            ImGui::TextWrapped("Building a pack does not install it. Open quick start for how to install or remove one.");
+            ImGui::PopTextWrapPos();
+            const bool can_add = static_cast<bool>(add) && !locked;
             theme::PushPrimaryButton();
-            if (ImGui::Button("Add mods...")) add();
+            if (ImGui::Button("Connect game") && connect_game) connect_game();
             theme::PopPrimaryButton();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!can_add);
+            theme::PushPrimaryButton();
+            if (ImGui::Button("Add mods") && can_add) add();
+            theme::PopPrimaryButton();
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button("Open quick start") && open_quick_start) open_quick_start();
+            ImGui::TextDisabled("You can also drop mod VPKs on the window. Your source files stay available for later builds.");
         } else if (pack_view && pack_empty) {
             ImGui::TextUnformatted("The pack is empty.");
             ImGui::TextDisabled("Tick skins in the library, include a mod's other files, or right-click them and choose Include in pack.");

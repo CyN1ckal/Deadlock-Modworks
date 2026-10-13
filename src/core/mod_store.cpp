@@ -737,9 +737,8 @@ ModelLibrary LocalModStore::Load(CancellationToken cancellation, const StoreProg
         if (const auto found = paths.find(id); found != paths.end()) result.Packages.push_back(found->second);
     if (const auto game = opened.Db.Setting("game_archive")) {
         const fs::path path = Widen(*game);
-        // A library shared from another computer keeps its game path, which only applies where it exists.
-        std::error_code error;
-        if (fs::is_regular_file(path, error)) result.GameArchive = path;
+        // Kept when the file is missing so the UI can say the install moved. This does not clear the setting.
+        if (!game->empty()) result.GameArchive = path;
     }
     if (notice) *notice = problems;
     return result;
