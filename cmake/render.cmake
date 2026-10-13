@@ -90,6 +90,8 @@ add_library(sr_model_tools STATIC
     src/preview/character_view.cpp
     src/preview/repair_panel.cpp
     src/preview/library_panel.cpp
+    src/preview/mods_panel.cpp
+    src/preview/gamebanana_panel.cpp
     src/preview/history_panel.cpp
     src/preview/background.cpp
     src/preview/thumbnail_cache.cpp

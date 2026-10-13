@@ -106,6 +106,13 @@ TEST(GameBananaParse, RefusesUnexpectedResponses) {
     EXPECT_EQ(categories[0].Name, "Animations");
 }
 
+TEST(GameBananaParse, TurnsDescriptionsIntoPlainText) {
+    EXPECT_EQ(GbPlainText("<b>Black</b> haze &amp; friends<br>Line two<br /><ul><li>One</li><li>Two</li></ul>"),
+        "Black haze & friends\nLine two\n- One\n- Two");
+    EXPECT_EQ(GbPlainText("<p>a</p><p></p><p></p><p>b</p>"), "a\n\nb");
+    EXPECT_EQ(GbPlainText("1 &lt; 2 &unknown; <unclosed"), "1 < 2 &unknown;");
+}
+
 TEST(HttpUrls, AcceptsOnlyPlainHttps) {
     const auto url = ParseHttpsUrl("https://GameBanana.com/apiv11/Mod/1?x=1#frag");
     ASSERT_TRUE(url);

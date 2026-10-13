@@ -249,7 +249,8 @@ TEST(StartupMessages, QuickStartAndGameNeedsStaySpecific) {
         EXPECT_STRNE(steps[i].Detail, "");
     }
     EXPECT_NE(std::string(steps[6].Detail).find("does not install"), std::string::npos);
-    EXPECT_NE(std::string(steps[7].Detail).find("does not install"), std::string::npos);
+    EXPECT_NE(std::string(steps[7].Detail).find("Apply to game"), std::string::npos);
+    EXPECT_NE(std::string(steps[7].Detail).find("not installed"), std::string::npos);
     const std::string needs = GameResourceSummary();
     EXPECT_NE(needs.find("without a connected game"), std::string::npos);
     EXPECT_NE(needs.find("base-game"), std::string::npos);

@@ -1176,6 +1176,7 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
             ImGui::SameLine();
             if (ImGui::Button("Open quick start") && open_quick_start) open_quick_start();
             ImGui::TextDisabled("You can also drop mod VPKs on the window. Your source files stay available for later builds.");
+            ImGui::TextDisabled("Get mods (Ctrl+8) downloads mods from GameBanana. Mods (Ctrl+7) turns them on in the game.");
         } else if (pack_view && pack_empty) {
             ImGui::TextUnformatted("The pack is empty.");
             ImGui::TextDisabled("Tick skins in the library, include a mod's other files, or right-click them and choose Include in pack.");

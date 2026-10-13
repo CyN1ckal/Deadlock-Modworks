@@ -249,6 +249,41 @@ std::vector<GbCategory> ParseGbCategories(std::string_view text) {
     return result;
 }
 
+std::string GbPlainText(std::string_view html) {
+    std::string text;
+    for (size_t i = 0; i < html.size();) {
+        if (html[i] == '<') {
+            const auto end = html.find('>', i);
+            if (end == std::string_view::npos) break;
+            std::string tag(html.substr(i + 1, end - i - 1));
+            std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const auto name = tag.substr(0, tag.find_first_of(" /\t"));
+            if (name == "br" || tag == "/p" || tag == "/div" || tag == "/li" || tag == "/h1" || tag == "/h2" || tag == "/h3" || tag == "/ul") text += '\n';
+            if (name == "li") text += "- ";
+            i = end + 1;
+            continue;
+        }
+        if (html[i] == '&') {
+            static constexpr std::pair<std::string_view, std::string_view> kEntities[] = {
+                {"&amp;", "&"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#39;", "'"}, {"&apos;", "'"}, {"&nbsp;", " "}};
+            const auto found = std::find_if(std::begin(kEntities), std::end(kEntities), [&](const auto& entity) { return html.substr(i).starts_with(entity.first); });
+            if (found != std::end(kEntities)) { text += found->second; i += found->first.size(); continue; }
+        }
+        text += html[i++];
+    }
+    // At most one blank line in a row, and none at either end.
+    std::string result;
+    int newlines = 0;
+    for (const char c : text) {
+        if (c == '\r') continue;
+        if (c == '\n') { if (++newlines <= 2 && !result.empty()) result += c; continue; }
+        newlines = 0;
+        result += c;
+    }
+    while (!result.empty() && (result.back() == '\n' || result.back() == ' ')) result.pop_back();
+    return result;
+}
+
 namespace gamebanana {
 GbPage Browse(GbSort sort, int page, int64_t category, CancellationToken cancellation) {
     return ParseGbPage(HttpGet(GbBrowseUrl(sort, page, 30, category), ApiOptions(), cancellation));

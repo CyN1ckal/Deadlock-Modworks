@@ -28,6 +28,9 @@
 #include "repair_panel.hpp"
 #include "library_panel.hpp"
 #include "mod_store.hpp"
+#include "mods_panel.hpp"
+#include "gamebanana_panel.hpp"
+#include "archive_extract.hpp"
 #include "product_version.hpp"
 #include "startup.hpp"
 #include "background.hpp"
@@ -615,7 +618,7 @@ Inspection InspectModelFile(const std::filesystem::path& path) {
 // Archives, the model list, and the two views that show the selection.
 // Archives are opened and models decoded on worker threads; this thread only applies finished results and uploads them.
 struct App {
-    enum class Page { Gallery, Pack, History, Inspect, Repair, Multi };
+    enum class Page { Gallery, Pack, History, Inspect, Repair, Multi, Mods, Browse };
     Page CurrentPage = Page::Gallery;
     Page PreviousPage = Page::Gallery;
     // Set while a page shown from code waits for its tab to become selected.
@@ -654,6 +657,8 @@ struct App {
     RepairPanel Repair;
     LibraryPanel Builder;
     HistoryPanel History;
+    ModsPanel Mods;
+    GameBananaPanel Banana;
     // Animation clips in the game archive, which history previews also offer.
     std::vector<std::string> GameClips;
     // Shows the comparison tab of the inspector on the next frame.
@@ -695,6 +700,10 @@ struct App {
         bool Restored = false;
         // Shown when the work finished without errors, instead of the import message.
         std::string Done;
+        // A GameBanana download: the content ids of its stored mods, where they came from, and whether to enable them.
+        std::vector<std::string> DownloadedIds;
+        std::optional<ModOrigin> Origin;
+        bool Enable = false;
     };
     // The source being renamed, and the name being typed.
     std::filesystem::path RenameTarget;
@@ -706,9 +715,16 @@ struct App {
     CancellationSource ImportCancellation;
     std::atomic<size_t> ImportedCount = 0;
     std::atomic<size_t> ImportTotal = 0;
+    // Set while the import worker is downloading from GameBanana.
+    bool Downloading = false;
+    std::string DownloadName;
+    std::atomic<uint64_t> DownloadBytes = 0;
+    std::atomic<uint64_t> DownloadTotal = 0;
 
     bool ImportBusy() const { return ImportWorker.valid(); }
-    bool FilesBusy() const { return Repair.Busy() || Builder.Busy() || History.Busy() || ImportBusy(); }
+    // Work that reads or replaces the library's stored mods. Applying mods to the game reads them too.
+    bool LibraryWorkBusy() const { return Repair.Busy() || Builder.Busy() || History.Busy() || ImportBusy(); }
+    bool FilesBusy() const { return LibraryWorkBusy() || Mods.Busy(); }
     bool LibraryReady() const { return !Restoring; }
 
     void RememberGamePath(const std::filesystem::path& path) {
@@ -968,12 +984,98 @@ struct App {
         });
     }
 
+    // Downloads one file of a GameBanana mod, stores every mod VPK in it under the mod's name, and adds them to the
+    // collection. The Mods page records where they came from and, with `enable`, enables them in the current profile.
+    void StartDownload(const GbMod& mod, const GbFile& file, bool enable) {
+        if (Restoring || FilesBusy()) return;
+        if (!Store) { SetStoreStatus("Local mod storage is unavailable. " + SaveError, true); return; }
+        if (!CanPersist) { SetStoreStatus("Your library has not been opened, so nothing can be added to it yet. " + SaveError, true); return; }
+        // The download is added to the saved collection, so it must match what is on screen.
+        Persist(true);
+        if (!SaveError.empty()) { SetStoreStatus("Could not save your library before downloading: " + SaveError, true); return; }
+        ImportCancellation = CancellationSource{};
+        ImportedCount = 0; ImportTotal = 0;
+        DownloadBytes = 0; DownloadTotal = file.Size;
+        Downloading = true;
+        DownloadName = mod.Name;
+        SetStoreStatus("Downloading " + mod.Name + "...", false);
+        const ModOrigin origin{mod.Id, file.Id, file.Name, mod.ProfileUrl, mod.DateModified};
+        ImportWorker = std::async(std::launch::async, [root = Store->Root(), name = mod.Name, file, origin, enable,
+            token = ImportCancellation.Token(), bytes = &DownloadBytes, total = &DownloadTotal, completed = &ImportedCount, count = &ImportTotal] {
+            ZoneScopedN("Download mod");
+            namespace fs = std::filesystem;
+            ImportResult result;
+            const LocalModStore store(root);
+            const auto folder = root / L"downloads" / (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+            struct Cleanup { fs::path Path; ~Cleanup() { std::error_code error; fs::remove_all(Path, error); } } cleanup{folder};
+            fs::create_directories(folder);
+            std::wstring file_name = fs::path(Widen(file.Name)).filename().wstring();
+            for (auto& c : file_name) if (c < 32 || std::wstring_view(L"<>:\"/\\|?*").find(c) != std::wstring_view::npos) c = L'_';
+            if (file_name.empty() || file_name == L"." || file_name == L"..") file_name = L"download";
+            const auto archive = folder / file_name;
+            gamebanana::Download(file, archive, token, [=](uint64_t done, std::optional<uint64_t> all) { *bytes = done; if (all) *total = *all; });
+
+            std::vector<fs::path> vpks;
+            if (IsModArchive(archive)) vpks = ExtractModArchive(archive, folder / L"extracted", token).Archives;
+            else if (EqualsIgnoreCase(Narrow(archive.extension().wstring()), ".vpk")) vpks.push_back(archive);
+            else throw InvalidData(file.Name + " is not a zip, 7z, rar or VPK file. Follow the mod page to install it by hand.");
+            *count = vpks.size();
+            std::vector<fs::path> imported;
+            for (const auto& vpk : vpks) {
+                try {
+                    const auto cached = store.Import(vpk, token);
+                    store.Rename(cached, vpks.size() == 1 ? name : name + " (" + Narrow(vpk.stem().wstring()) + ")");
+                    if (const auto id = store.ContentId(cached)) result.DownloadedIds.push_back(*id);
+                    imported.push_back(cached);
+                } catch (const OperationCancelled&) { throw; }
+                catch (const std::exception& error) { result.Errors += Narrow(vpk.filename().wstring()) + ": " + error.what() + "\n"; }
+                ++*completed;
+            }
+            // Add each new mod to the saved collection, then read it back so the copies carry the new names.
+            std::string ignored;
+            auto library = store.Load(token, {}, &ignored);
+            for (const auto& cached : imported) {
+                const auto id = store.ContentId(cached);
+                const bool listed = std::any_of(library.Sources.begin(), library.Sources.end(), [&](const auto& source) { return store.ContentId(source) == id; });
+                if (!listed) library.Sources.push_back(cached);
+            }
+            store.Save(library);
+            // Load replaces its notice, so the import errors above are kept apart.
+            std::string notice;
+            result.Library = store.Load(token, {}, &notice);
+            result.Errors += notice;
+            result.Restored = true;
+            result.Origin = origin;
+            result.Enable = enable;
+            if (!result.DownloadedIds.empty()) {
+                result.Done = "Downloaded " + name + (enable ? ". It is enabled; choose Apply to game on the Mods page." : ". Enable it on the Mods page.");
+            }
+            return result;
+        });
+    }
+
+    // The library's stored mods for the Mods page, in library order.
+    std::vector<ModEntry> ModEntries() const {
+        std::vector<ModEntry> entries;
+        if (!Store) return entries;
+        for (const auto& path : ModPaths) {
+            const auto id = Store->ContentId(path);
+            if (!id) continue;
+            const LibraryPanel::SourceInfo* info = Builder.FindSource(path);
+            std::string name = info ? info->Name : Narrow(path.stem().wstring());
+            if (name.size() > 4 && EqualsIgnoreCase(std::string_view(name).substr(name.size() - 4), ".vpk")) name.resize(name.size() - 4);
+            entries.push_back({*id, std::move(name), path});
+        }
+        return entries;
+    }
+
     void PollImport() {
         ZoneScopedN("Poll import");
         if (!ImportBusy() || ImportWorker.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
         try {
             const auto result = ImportWorker.get();
             ApplyLibrary(result.Library);
+            if (result.Origin && !result.DownloadedIds.empty()) Mods.AddDownloaded(result.DownloadedIds, *result.Origin, result.Enable);
             if (result.Restored) { SavedState = result.Library; CanPersist = true; }
             if (!result.Errors.empty()) SetStoreStatus(result.Errors, true);
             else if (!result.Done.empty()) SetStoreStatus(result.Done, false);
@@ -987,9 +1089,10 @@ struct App {
                 InspectAfterImport.reset();
             }
         } catch (const std::exception& error) {
-            SetStoreStatus(error.what(), true);
+            SetStoreStatus(Downloading ? "Could not download " + DownloadName + ": " + error.what() : std::string(error.what()), true);
             if (!Restoring) InspectAfterImport.reset();
         }
+        Downloading = false;
         if (Restoring) {
             Restoring = false;
             // Imports requested during a failed restore still need storage, but are not saved over the library.
@@ -1017,7 +1120,7 @@ struct App {
 
     explicit App(const VulkanDevice& device, const std::filesystem::path& data_root)
         : Panel(device), Compare(device), Multi(device), Builder(device, Archives, data_root),
-          History(ContentDirectoryFor(data_root)), DataRoot(data_root), LayoutIni(data_root / L"layout.ini") {
+          History(ContentDirectoryFor(data_root)), Mods(data_root), Banana(device), DataRoot(data_root), LayoutIni(data_root / L"layout.ini") {
         Multi.SetArchives(Archives);
         Builder.SetMultiViewHandler([this](const LibraryModel& model) {
             Multi.Open(model, Builder.Models());
@@ -1233,8 +1336,8 @@ struct App {
         }
         if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_LeftArrow, global)) ShowPage(PreviousPage);
         if (ImGui::Shortcut(ImGuiKey_F1, global)) OpenShortcuts = true;
-        const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect, Page::Multi};
-        const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5, ImGuiKey_6};
+        const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect, Page::Multi, Page::Mods, Page::Browse};
+        const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5, ImGuiKey_6, ImGuiKey_7, ImGuiKey_8};
         for (size_t i = 0; i < std::size(pages); ++i) {
             if (ImGui::Shortcut(ImGuiMod_Ctrl | keys[i], global)) ShowPage(pages[i]);
         }
@@ -1248,6 +1351,10 @@ struct App {
             if (ImGui::MenuItem("Add mods...", "Ctrl+O", false, !FilesBusy())) AddMods(hwnd);
             if (ImGui::MenuItem("Add folder...", "Ctrl+Shift+O", false, !FilesBusy())) AddFolder(hwnd);
             ImGui::SetItemTooltip("Adds every mod VPK in a folder, such as Deadlock's addons folder. Chunk files and the game archive are skipped.");
+            if (ImGui::MenuItem("Get mods from GameBanana", "Ctrl+8")) ShowPage(Page::Browse);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Manage mods", "Ctrl+7")) ShowPage(Page::Mods);
+            ImGui::SetItemTooltip("Enable mods, set their load order and apply them to Deadlock's addons folder.");
             ImGui::Separator();
             if (ImGui::MenuItem("Add shared library...", nullptr, false, !FilesBusy())) AddLibrary(hwnd);
             ImGui::SetItemTooltip("Adds the mods and pack selections of a shared .db library to yours. Nothing in your library is replaced.");
@@ -1277,7 +1384,7 @@ struct App {
             const struct { const char* Label; const char* Keys; Page Value; } pages[] = {
                 {"Mod library", "Ctrl+1", Page::Gallery}, {"VPK builder", "Ctrl+2", Page::Pack}, {"Version history", "Ctrl+3", Page::History},
                 {"Skin repairs", "Ctrl+4", Page::Repair}, {"Model inspector", "Ctrl+5", Page::Inspect},
-                {"Multi view", "Ctrl+6", Page::Multi}};
+                {"Multi view", "Ctrl+6", Page::Multi}, {"Mods", "Ctrl+7", Page::Mods}, {"Get mods", "Ctrl+8", Page::Browse}};
             for (const auto& page : pages) {
                 if (ImGui::MenuItem(page.Label, page.Keys, CurrentPage == page.Value)) ShowPage(page.Value);
             }
@@ -1293,7 +1400,7 @@ struct App {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Tools")) {
-            const bool repair_allowed = !Builder.Busy() && !ImportBusy();
+            const bool repair_allowed = !Builder.Busy() && !ImportBusy() && !Mods.Busy();
             if (ImGui::MenuItem("Analyze mods", nullptr, false, repair_allowed && Repair.CanAnalyze())) {
                 ShowPage(Page::Repair);
                 Repair.Analyze();
@@ -1372,12 +1479,21 @@ struct App {
             if (ImportBusy()) {
                 const size_t done = ImportedCount.load();
                 const size_t total = ImportTotal.load();
-                ImGui::TextUnformatted(Restoring ? "Opening library" : "Importing");
-                if (total > 0) {
+                ImGui::TextUnformatted(Restoring ? "Opening library" : Downloading ? "Downloading" : "Importing");
+                const uint64_t received = DownloadBytes.load(), size = DownloadTotal.load();
+                if (Downloading && total == 0) {
+                    ImGui::ProgressBar(size ? static_cast<float>(received) / static_cast<float>(size) : 0.f, {90, ImGui::GetTextLineHeight() * .55f}, "");
+                    ImGui::Text("%.1f / %.1f MB", static_cast<double>(received) / 1048576.0, static_cast<double>(size) / 1048576.0);
+                    ImGui::SetItemTooltip("%s", DownloadName.c_str());
+                } else if (total > 0) {
                     ImGui::ProgressBar(static_cast<float>(done) / static_cast<float>(total), {90, ImGui::GetTextLineHeight() * .55f}, "");
                     ImGui::Text("%zu / %zu", done, total);
                 }
                 if (ImGui::SmallButton("Cancel##import")) ImportCancellation.Cancel();
+                ImGui::Separator();
+            }
+            if (Mods.Busy()) {
+                ImGui::TextColored(ui::kWarning, "Applying mods to the game...");
                 ImGui::Separator();
             }
             if (Builder.Busy()) {
@@ -1497,6 +1613,11 @@ struct App {
                     if (ImGui::MenuItem("Remove other files from the pack", nullptr, false, !PackBusy())) Builder.IncludePackage(path, false);
                 }
                 ImGui::Separator();
+                if (const auto id = Store ? Store->ContentId(path) : std::nullopt) {
+                    const bool enabled = Mods.State().Enabled(*id);
+                    if (ImGui::MenuItem(enabled ? "Disable for the game" : "Enable for the game")) Mods.SetEnabled(*id, !enabled);
+                    ImGui::SetItemTooltip("Changes the current mod profile. Apply it on the Mods page (Ctrl+7).");
+                }
                 if (ImGui::MenuItem("Rename...", nullptr, false, !FilesBusy() && Store.has_value())) {
                     RenameTarget = path;
                     std::string current = Narrow(path.stem().wstring());
@@ -1604,6 +1725,8 @@ struct App {
             {"Skin repairs###repair", "Check and repair your mods after game updates (Ctrl+4)", Page::Repair},
             {inspect_label.c_str(), "Textures, animations and skeleton of one model (Ctrl+5)", Page::Inspect},
             {"Multi view###multi", "Several models of one character, with one shared camera (Ctrl+6)", Page::Multi},
+            {"Mods###mods", "Enable mods, set their load order and profiles, and apply them to the game (Ctrl+7)", Page::Mods},
+            {"Get mods###browse", "Browse, search and download Deadlock mods from GameBanana (Ctrl+8)", Page::Browse},
         };
         Page visible = CurrentPage;
         for (const auto& tab : tabs) {
@@ -1649,7 +1772,7 @@ struct App {
         } else if (CurrentPage == Page::History) {
             const std::string& game_directory = GameDirectory;
             History.Draw(hwnd, Panel, [game = Game](const std::string& path) { return game ? game->Read(path) : std::nullopt; }, GameClips,
-                Compare, game_directory, Repair.Busy() || Builder.Busy() || ImportBusy(),
+                Compare, game_directory, Repair.Busy() || Builder.Busy() || ImportBusy() || Mods.Busy(),
                 [&](bool compare) {
                     // A stored version is not one of the gallery's archives.
                     Inspector.Cancel();
@@ -1700,8 +1823,25 @@ struct App {
             }
         } else if (CurrentPage == Page::Multi) {
             Multi.Draw(Builder.Models());
+        } else if (CurrentPage == Page::Mods) {
+            Mods.Draw(ModEntries(), ConfiguredGame, LibraryWorkBusy(),
+                [&](const std::filesystem::path& source) { Builder.SetSourceFilter(source); ShowPage(Page::Gallery); },
+                [&] { ShowPage(Page::Browse); });
+        } else if (CurrentPage == Page::Browse) {
+            const auto entries = ModEntries();
+            const char* reason = Restoring ? "Your library is still opening." : !CanPersist ? "Your library could not be opened, so nothing can be added."
+                : FilesBusy() ? "Wait for the library to finish its current work." : nullptr;
+            Banana.Draw(reason == nullptr, reason,
+                [&](int64_t mod) {
+                    size_t count = 0;
+                    for (const auto& id : Mods.State().FromGameBanana(mod))
+                        count += std::any_of(entries.begin(), entries.end(), [&](const ModEntry& entry) { return entry.ContentId == id; }) ? 1 : 0;
+                    return count;
+                },
+                [&](const GbMod& mod, const GbFile& file, bool enable) { StartDownload(mod, file, enable); });
         } else {
-            ImGui::BeginDisabled(Builder.Busy() || ImportBusy());
+            // Applying mods copies the stored files a repair would replace.
+            ImGui::BeginDisabled(Builder.Busy() || ImportBusy() || Mods.Busy());
             Repair.Draw(hwnd, [&] { ReleaseArchives(); });
             ImGui::EndDisabled();
         }
@@ -1725,7 +1865,7 @@ struct App {
             static const char* const kShortcuts[][2] = {
                 {"Ctrl+O", "Add mods"}, {"Ctrl+Shift+O", "Add every mod in a folder"}, {"Ctrl+G", "Choose the game archive"},
                 {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins, packages and sources"}, {"F5", "Reopen every source and reload thumbnails"},
-                {"Ctrl+1 ... Ctrl+6", "Library, builder, history, repairs, inspector, multi view"}, {"Alt+Left", "Back to the previous page"},
+                {"Ctrl+1 ... Ctrl+8", "Library, builder, history, repairs, inspector, multi view, mods, get mods"}, {"Alt+Left", "Back to the previous page"},
                 {"Ctrl+Shift+E", "Show or hide the explorer"}, {"View > Workspace", "Focus the workspace"},
                 {"View > Reset layout", "Restore the explorer and workspace split"},
                 {"Double-click", "Inspect a skin, list a package's files, or view a version"},
@@ -1978,6 +2118,8 @@ int Run(const std::vector<std::filesystem::path>& args) {
 
             app.Builder.Poll();
             app.PollImport();
+            app.Mods.Poll();
+            if (const auto error = app.Mods.TakeError()) app.ReportError(*error);
             app.MaybeAutoDetect();
             app.PollGame();
             app.PollInspect();

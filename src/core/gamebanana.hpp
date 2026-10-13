@@ -84,6 +84,8 @@ std::string GbCategoriesUrl();
 GbPage ParseGbPage(std::string_view json);
 GbMod ParseGbMod(std::string_view json);
 std::vector<GbCategory> ParseGbCategories(std::string_view json);
+// A mod description's HTML as plain text: tags dropped, block ends as line breaks, common entities decoded.
+std::string GbPlainText(std::string_view html);
 
 // Network calls to gamebanana.com. They throw like HttpGet.
 namespace gamebanana {
