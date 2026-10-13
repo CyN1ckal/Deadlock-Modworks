@@ -149,6 +149,8 @@ if(MSVC)
     target_compile_options(sr_sqlite PRIVATE /W0)
 endif()
 
+include(cmake/archive_deps.cmake)
+
 add_library(skeleton_repair_core STATIC
     src/core/strings.cpp
     src/core/skeleton.cpp
@@ -174,9 +176,14 @@ add_library(skeleton_repair_core STATIC
     src/core/store_jobs.cpp
     src/core/model_versions.cpp
     src/core/version_builder.cpp
+    src/core/archive_extract.cpp
+    src/core/http_client.cpp
+    src/core/gamebanana.cpp
+    src/core/mod_state.cpp
+    src/core/addons_deployer.cpp
 )
 target_include_directories(skeleton_repair_core PUBLIC src/core "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer advapi32 shell32 ole32 windowscodecs)
+target_link_libraries(skeleton_repair_core PUBLIC bcrypt sr_lz4 libzstd_static sr_sqlite nlohmann_json::nlohmann_json meshoptimizer sr_archive winhttp advapi32 shell32 ole32 windowscodecs)
 
 # Opens the model tools workspace by default; command-line options run the console workflow.
 add_executable(DeadlockModworks
@@ -207,6 +214,10 @@ add_executable(skeleton_repair_tests
     tests/character_view_tests.cpp
     tests/command_line_store_tests.cpp
     tests/startup_tests.cpp
+    tests/mod_state_tests.cpp
+    tests/addons_deployer_tests.cpp
+    tests/gamebanana_tests.cpp
+    tests/archive_extract_tests.cpp
     src/preview/library_model.cpp
     src/preview/character_view.cpp
     src/preview/store_reader.cpp
