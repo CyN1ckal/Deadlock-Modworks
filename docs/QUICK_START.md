@@ -119,7 +119,9 @@ Modworks only touches the `pakNN_dir.vpk` files it placed, which it records in `
 
 ### A pack you built
 
-Close Deadlock first. Copy only the exported `.vpk` into:
+To let Modworks install your pack, choose **Build as mod...** instead of **Build VPK...** in the VPK builder, give it a name, and apply it from **Mods** like any other mod. Building again under the same name replaces it.
+
+To install an exported `.vpk` by hand instead, close Deadlock first. Copy only the exported `.vpk` into:
 
 ```text
 <Steam library>\steamapps\common\Deadlock\game\citadel\addons

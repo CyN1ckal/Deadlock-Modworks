@@ -17,6 +17,8 @@ struct ModOrigin {
     std::string PageUrl;
     // GameBanana's modification time of the mod when it was downloaded, in Unix seconds.
     int64_t DateModified = 0;
+    // Built by the VPK builder as a named mod. Building again under the same name replaces it.
+    bool Built = false;
     bool operator==(const ModOrigin&) const = default;
 };
 
@@ -54,6 +56,9 @@ public:
     void Step(const std::string& id, bool up, const std::vector<std::string>& present);
     // Removes a mod that left the library from the order, every profile and the origins.
     void Forget(const std::string& id);
+    // Puts `replacement` where `id` was: its place in the load order and its enabled state in every profile.
+    // `id` is then forgotten. A replacement that was already listed moves to that place.
+    void Replace(const std::string& id, const std::string& replacement);
 
     const std::vector<ModProfile>& Profiles() const { return profiles_; }
     const std::string& ActiveProfile() const { return active_; }

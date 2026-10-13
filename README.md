@@ -31,7 +31,7 @@ There is no installer, automatic update, code signing, or GameBanana account sig
 7. After a pack is assembled, a modal titled **Pack assembled** shows the summary. A library build says `Exported N file to <path>.` or `Exported N files to <path>.` **Assemble...** on **Version history** says `Assembled a pack at <path>.` The modal then says assembly writes a VPK, does not install the pack, and does not guarantee compatibility. The buttons are **Reveal in Explorer**, **Open quick start**, and **Close**. No pack was built for this update, so that modal was not shown.
 8. Close Deadlock and copy the file into `game\citadel\addons` yourself. Do not replace `pak01_dir.vpk` or the game's chunk files. Delete that copy from `addons` to take the pack out. Modworks does not copy a built pack in or out.
 
-To use mods without building a pack, open **Get mods** (**Ctrl+8**), paste a GameBanana link or search, and choose **Download & enable**. Then open **Mods** (**Ctrl+7**), close Deadlock, and choose **Apply to game**. Untick a mod and apply again to take it out.
+To use mods without building a pack, open **Get mods** (**Ctrl+8**), paste a GameBanana link or search, and choose **Download & enable**. Then open **Mods** (**Ctrl+7**), close Deadlock, and choose **Apply to game**. Untick a mod and apply again to take it out. To install your own pack the same way, choose **Build as mod...** instead of **Build VPK...** and give it a name; building again under that name replaces it.
 
 The same steps, with the failure cases, are in the [quick start](docs/QUICK_START.md). The zip from `Publish.ps1` contains this README, not the `docs` folder. The longer guides are in the source repository.
 

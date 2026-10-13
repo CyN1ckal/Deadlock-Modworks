@@ -103,6 +103,31 @@ TEST(ModState, ForgetsRemovedMods) {
     EXPECT_FALSE(state.Origin("a"));
 }
 
+TEST(ModState, ReplacementTakesThePlaceAndEnabledStateOfTheOldMod) {
+    ModState state;
+    state.Sync({"a", "old", "b", "new"});
+    state.SetEnabled("old", true);
+    state.SetEnabled("new", true);
+    state.CreateProfile("Other", false);
+    state.SetOrigin("old", {0, 0, "", "", 0, true});
+    state.Replace("old", "new");
+    EXPECT_EQ(state.Order(), (Ids{"a", "new", "b"}));
+    EXPECT_FALSE(state.Enabled("new"));
+    state.SwitchProfile("Default");
+    EXPECT_TRUE(state.Enabled("new"));
+    EXPECT_EQ(state.EnabledInOrder({"a", "b", "new", "old"}), (Ids{"new"}));
+    EXPECT_FALSE(state.Origin("old"));
+}
+
+TEST(ModState, ReplacingAnUnknownModAddsTheReplacement) {
+    ModState state;
+    state.Sync({"a"});
+    state.Replace("missing", "new");
+    EXPECT_EQ(state.Order(), (Ids{"a", "new"}));
+    state.Replace("new", "new");
+    EXPECT_EQ(state.Order(), (Ids{"a", "new"}));
+}
+
 TEST(ModState, SavesAndLoads) {
     TempFolder temp;
     const auto file = temp.Path / "mods.json";
@@ -113,6 +138,7 @@ TEST(ModState, SavesAndLoads) {
     state.CreateProfile("Other", false);
     state.SetEnabled("c", true);
     state.SetOrigin("c", {691764, 1746166, "haze.zip", "https://gamebanana.com/mods/691764", 1783303978});
+    state.SetOrigin("b", {0, 0, "", "", 0, true});
     state.Save(file);
     const auto loaded = ModState::Load(file);
     EXPECT_EQ(loaded, state);

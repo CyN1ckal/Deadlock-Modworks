@@ -127,6 +127,17 @@ Different bytes at the same path fail with **Conflicting file**, the two source 
 
 The app does not copy the result into `addons`. Right-click the status line for **Copy message** or **Dismiss**. That menu is not **Reveal in Explorer**. After a successful build, a modal titled **Pack assembled** shows the summary, then **Assembly writes a VPK. It does not install the pack and does not guarantee compatibility with Deadlock.** Then **Install or remove the pack from Deadlock yourself. The quick start has those steps.** The buttons are **Reveal in Explorer**, **Open quick start**, and **Close**. No pack was built for this note, so that modal was not shown. To try the pack in Deadlock, close the game and copy the `.vpk` into `game\citadel\addons`. Do not replace `pak01_dir.vpk` or the game's chunk files. Close the game and remove that file from `addons` to uninstall it. See [QUICK_START.md](QUICK_START.md).
 
+### Build as mod
+
+**Build as mod...**, beside **Build VPK...**, builds the same pack but keeps it in your library as a mod with the name you type, instead of writing a file you place yourself. It then appears on the **Mods** page with **Built pack** as its source, ready to enable and apply like any other mod. **Enable it in the current profile** is ticked by default.
+
+- Building again under the same name, in any letter case, replaces the earlier build. The prompt says so. The new build takes the earlier one's place in the load order and stays enabled in every profile where it was enabled, and the earlier build leaves the collection. It stays in **Version history**.
+- The pack selection is kept after a build, so you can change it and build again.
+- A pack whose files are exactly those of one mod already in your library is refused with **The pack has exactly the same files as ..., which is already in your library. Enable that mod on the Mods page instead.** The library keeps identical files once, so naming such a pack would rename that mod.
+- The build follows the same rules as **Build VPK...**: dependencies, conflicts and the connected game work the same way.
+
+A built mod also shows in the gallery, because its skins are in your library.
+
 ## Model inspector
 
 The page title is **Model inspector**, or **Inspect:** plus the file name once a model is open. The **<** button goes back.
@@ -232,7 +243,8 @@ Click a mod to see its screenshots, its description and its files, newest first.
 - **Load order.** The list is the load order. Drag a mod, use the arrows, or right-click it for **Move to top** and **Move to bottom**. The number beside an enabled mod is its position. When two enabled mods contain the same file, the one higher in the list wins. Such mods show **overrides** or **overridden**; hover it to see which mods share files and how many.
 - **Profiles.** **Profile** switches between named sets of enabled mods. **New** starts a profile, optionally with the mods enabled now. **Rename** and **Delete** change the current one. Every profile shares the one load order. The last profile cannot be deleted.
 - **Enable all** and **Disable all** change the current profile. The explorer's right-click menu on a source has **Enable for the game** or **Disable for the game** too.
-- Right-click a mod for **Show skins in library**, **Open GameBanana page** for downloaded mods, and the path items. **Source** says **GameBanana** or **Local file**.
+- Right-click a mod for **Show skins in library**, **Open GameBanana page** for downloaded mods, and the path items. **Source** says **GameBanana**, **Built pack** or **Local file**.
+- **Add VPKs...** adds mod VPKs you already have, including packs you exported with **Build VPK...** earlier, so you can enable them here. **Build as mod...** in the VPK builder adds a pack under a name you choose; see [Build as mod](#build-as-mod).
 
 Nothing reaches the game until **Apply to game**. It needs a connected game and Deadlock closed. It makes `game\citadel\addons` hold exactly the enabled mods, as `pak01_dir.vpk`, `pak02_dir.vpk` and so on in load order: mods already in place stay, moved ones are renamed, new ones are copied, and Modworks files that are no longer enabled are removed. The page then says whether the addons folder matches the enabled mods, or **Changes not applied yet** when it does not.
 
@@ -242,7 +254,7 @@ Deadlock only reads `addons` when `game\citadel\gameinfo.gi` lists `Game citadel
 
 Enabled mods, the load order, profiles and download sources are saved in `<data-root>\mods.json`. A damaged `mods.json` is left as it is and the page says so; changes made in that session are not saved over it. **Share library...** does not include it.
 
-The VPK builder works as before. **Apply to game** does not install a pack you build; copy it into `addons` yourself, or add it to the library and enable it like any mod.
+The VPK builder works as before. **Apply to game** does not install a file written by **Build VPK...**; use **Build as mod...** instead, or add that file with **Add VPKs...** and enable it.
 
 These pages were exercised with a disposable data root and a stand-in game folder: browsing, a pasted link, and **Download & enable** followed by **Apply to game** with the mod `haze black recolor`, next to a foreign `pak03_dir.vpk` that stayed untouched. They were not run against a real Deadlock install, so loading in game was not observed.
 

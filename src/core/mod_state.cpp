@@ -78,6 +78,7 @@ ModState ModState::Load(const fs::path& file) {
             origin.FileName = item.value("file_name", std::string());
             origin.PageUrl = item.value("page_url", std::string());
             origin.DateModified = item.value("date_modified", int64_t{0});
+            origin.Built = item.value("built", false);
             state.origins_[id] = std::move(origin);
         }
     } catch (const json::exception&) {
@@ -92,7 +93,7 @@ void ModState::Save(const fs::path& file) const {
     json origins = json::object();
     for (const auto& [id, origin] : origins_) {
         origins[id] = {{"gamebanana_mod", origin.GameBananaMod}, {"gamebanana_file", origin.GameBananaFile},
-            {"file_name", origin.FileName}, {"page_url", origin.PageUrl}, {"date_modified", origin.DateModified}};
+            {"file_name", origin.FileName}, {"page_url", origin.PageUrl}, {"date_modified", origin.DateModified}, {"built", origin.Built}};
     }
     const json document = {{"version", kVersion}, {"order", order_}, {"active", active_}, {"profiles", profiles}, {"origins", origins}};
     fs::create_directories(file.parent_path());
@@ -162,6 +163,21 @@ void ModState::Step(const std::string& id, bool up, const std::vector<std::strin
 void ModState::Forget(const std::string& id) {
     Erase(order_, id);
     for (auto& profile : profiles_) Erase(profile.Enabled, id);
+    origins_.erase(id);
+}
+
+void ModState::Replace(const std::string& id, const std::string& replacement) {
+    if (id == replacement || replacement.empty()) return;
+    const auto at = std::find(order_.begin(), order_.end(), id);
+    if (at == order_.end()) { Sync({replacement}); return; }
+    Erase(order_, replacement);
+    *std::find(order_.begin(), order_.end(), id) = replacement;
+    for (auto& profile : profiles_) {
+        const auto enabled = std::find(profile.Enabled.begin(), profile.Enabled.end(), id);
+        if (enabled == profile.Enabled.end()) continue;
+        Erase(profile.Enabled, replacement);
+        *std::find(profile.Enabled.begin(), profile.Enabled.end(), id) = replacement;
+    }
     origins_.erase(id);
 }
 

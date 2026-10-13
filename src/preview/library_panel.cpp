@@ -1063,6 +1063,11 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
             "A package copies its other files as stored. Shared files are deduplicated; conflicting files block the export.",
             !locked && pack_ready)) BuildPack(owner, game);
         theme::PopPrimaryButton();
+        if (build_as_mod_) {
+            ImGui::SameLine();
+            if (ui::ToolButton("Build as mod...", "Build the pack into your library as a named mod, which the Mods page can enable "
+                "and apply to the game. Building again under the same name replaces it.", !locked && pack_ready)) build_as_mod_();
+        }
         ImGui::SameLine();
         if (ui::ToolButton("Clear pack", "Remove every skin and package from the pack", !locked && pack_ready)) ClearPack();
         if (game.empty() && skins > 0) {

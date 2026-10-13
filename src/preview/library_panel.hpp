@@ -39,6 +39,8 @@ public:
     const std::vector<LibraryModel>& Models() const { return models_; }
     // Right-click Multi view on a skin. Empty hides the command.
     void SetMultiViewHandler(std::function<void(const LibraryModel&)> open) { open_multi_ = std::move(open); }
+    // Shows "Build as mod..." beside "Build VPK..." on the builder page.
+    void SetBuildAsModHandler(std::function<void()> build) { build_as_mod_ = std::move(build); }
     // Cards the gallery showed on the last frame it was drawn, after search and filters.
     size_t ShownCount() const { return shown_count_; }
     // Bumps when the saved library would change: sources, pack selection, or a removed skin.
@@ -238,6 +240,7 @@ private:
     std::string file_list_title_;
     bool open_file_list_ = false;
     std::function<void(const LibraryModel&)> open_multi_;
+    std::function<void()> build_as_mod_;
     std::map<std::filesystem::path, size_t> source_counts_;
     // Indexes of models_ in display order, and whether each model is in the pack. Rebuilt when marked stale.
     std::vector<size_t> order_;

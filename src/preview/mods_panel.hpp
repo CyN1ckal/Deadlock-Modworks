@@ -33,10 +33,11 @@ public:
     ModsPanel& operator=(const ModsPanel&) = delete;
 
     ModState& State() { return state_; }
+    const ModState& State() const { return state_; }
     // Saves mods.json. A failure is shown on the page and returned by TakeError.
     void Save();
-    // Records a download: its stored mods, where they came from, and enables them when asked.
-    void AddDownloaded(const std::vector<std::string>& ids, const ModOrigin& origin, bool enable);
+    // Records mods added to the library by a download or a build: where they came from, and enables them when asked.
+    void RecordAdded(const std::vector<std::string>& ids, const ModOrigin& origin, bool enable);
     // Enables or disables one mod in the active profile.
     void SetEnabled(const std::string& id, bool enabled);
 
@@ -48,7 +49,8 @@ public:
     // `entries` are the library's mods in library order. `game` is the configured game archive or folder.
     // `files_busy` is set while other work may replace stored mods, which also blocks Apply.
     void Draw(const std::vector<ModEntry>& entries, const std::filesystem::path& game, bool files_busy,
-        const std::function<void(const std::filesystem::path&)>& show_in_library, const std::function<void()>& get_mods);
+        const std::function<void(const std::filesystem::path&)>& show_in_library, const std::function<void()>& get_mods,
+        const std::function<void()>& add_files);
 
     // True when the enabled mods differ from what Modworks last placed in the addons folder.
     bool HasPendingChanges(const std::vector<ModEntry>& entries) const;
@@ -67,10 +69,11 @@ private:
     void Refresh(const std::filesystem::path& game, bool force);
     void SetStatus(std::string text, bool error);
     void UpdateConflicts(const std::vector<ModEntry>& entries);
-    void DrawToolbar(const std::vector<ModEntry>& entries, const std::filesystem::path& game, bool files_busy);
+    void DrawToolbar(const std::vector<ModEntry>& entries, const std::filesystem::path& game, bool files_busy,
+        const std::function<void()>& add_files);
     void DrawGameState(const std::vector<ModEntry>& entries);
     void DrawList(const std::vector<ModEntry>& entries, const std::function<void(const std::filesystem::path&)>& show_in_library,
-        const std::function<void()>& get_mods);
+        const std::function<void()>& get_mods, const std::function<void()>& add_files, bool files_busy);
     void DrawProfilePopups();
 
     std::filesystem::path file_;

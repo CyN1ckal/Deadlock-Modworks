@@ -70,7 +70,7 @@ void ModsPanel::Save() {
     catch (const std::exception& error) { SetStatus(error.what(), true); }
 }
 
-void ModsPanel::AddDownloaded(const std::vector<std::string>& ids, const ModOrigin& origin, bool enable) {
+void ModsPanel::RecordAdded(const std::vector<std::string>& ids, const ModOrigin& origin, bool enable) {
     state_.Sync(ids);
     for (const auto& id : ids) {
         state_.SetOrigin(id, origin);
@@ -168,19 +168,21 @@ void ModsPanel::UpdateConflicts(const std::vector<ModEntry>& entries) {
 }
 
 void ModsPanel::Draw(const std::vector<ModEntry>& entries, const fs::path& game, bool files_busy,
-    const std::function<void(const fs::path&)>& show_in_library, const std::function<void()>& get_mods) {
+    const std::function<void(const fs::path&)>& show_in_library, const std::function<void()>& get_mods,
+    const std::function<void()>& add_files) {
     Poll();
     Refresh(game, false);
     state_.Sync(Ids(entries));
     UpdateConflicts(entries);
-    DrawToolbar(entries, game, files_busy);
+    DrawToolbar(entries, game, files_busy, add_files);
     DrawGameState(entries);
-    DrawList(entries, show_in_library, get_mods);
+    DrawList(entries, show_in_library, get_mods, add_files, files_busy);
     DrawProfilePopups();
     if (std::exchange(pending_apply_, false)) Apply(entries, game);
 }
 
-void ModsPanel::DrawToolbar(const std::vector<ModEntry>& entries, const fs::path& game, bool files_busy) {
+void ModsPanel::DrawToolbar(const std::vector<ModEntry>& entries, const fs::path& game, bool files_busy,
+    const std::function<void()>& add_files) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Profile");
     ImGui::SameLine();
@@ -215,6 +217,9 @@ void ModsPanel::DrawToolbar(const std::vector<ModEntry>& entries, const fs::path
         for (const auto& id : ids) state_.SetEnabled(id, false);
         Save();
     }
+    ImGui::SameLine();
+    if (ui::ToolButton("Add VPKs...", "Add mod VPKs you already have, such as packs you built, to the library (Ctrl+O). "
+        "The VPK builder's Build as mod... adds a pack under a name of your choice.", !files_busy && !Busy())) add_files();
     ui::ToolSeparator();
     ImGui::SetNextItemWidth(std::max(ImGui::GetFontSize() * 8, ImGui::GetContentRegionAvail().x - ImGui::GetFontSize() * 9));
     ImGui::InputTextWithHint("##modfilter", "Filter mods", filter_, sizeof(filter_));
@@ -275,12 +280,17 @@ void ModsPanel::DrawGameState(const std::vector<ModEntry>& entries) {
 }
 
 void ModsPanel::DrawList(const std::vector<ModEntry>& entries, const std::function<void(const fs::path&)>& show_in_library,
-    const std::function<void()>& get_mods) {
+    const std::function<void()>& get_mods, const std::function<void()>& add_files, bool files_busy) {
     const auto ordered = state_.Ordered(Ids(entries));
     if (ordered.empty()) {
         ImGui::Spacing();
-        ImGui::TextWrapped("Your library has no mods yet. Download some from GameBanana, or add VPKs you already have.");
+        ImGui::TextWrapped("Your library has no mods yet. Download some from GameBanana, add VPKs you already have, "
+            "or build a pack in the VPK builder and choose Build as mod...");
         if (ImGui::Button("Get mods")) get_mods();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(files_busy || Busy());
+        if (ImGui::Button("Add VPKs...")) add_files();
+        ImGui::EndDisabled();
         return;
     }
     // Conflict summary per mod.
@@ -374,6 +384,9 @@ void ModsPanel::DrawList(const std::vector<ModEntry>& entries, const std::functi
             ImGui::TextUnformatted("GameBanana");
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s\nClick to open the mod page.", origin->FileName.c_str(), origin->PageUrl.c_str());
             if (ImGui::IsItemClicked()) OpenUrl(origin->PageUrl);
+        } else if (origin && origin->Built) {
+            ImGui::TextUnformatted("Built pack");
+            ImGui::SetItemTooltip("Built in the VPK builder with Build as mod... Building again under the same name replaces it.");
         } else {
             ImGui::TextDisabled("Local file");
         }

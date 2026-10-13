@@ -700,11 +700,17 @@ struct App {
         bool Restored = false;
         // Shown when the work finished without errors, instead of the import message.
         std::string Done;
-        // A GameBanana download: the content ids of its stored mods, where they came from, and whether to enable them.
-        std::vector<std::string> DownloadedIds;
+        // A GameBanana download or a pack built as a mod: the content ids of its stored mods, where they came from,
+        // and whether to enable them. A rebuilt mod replaces ReplacedId on the Mods page.
+        std::vector<std::string> AddedIds;
         std::optional<ModOrigin> Origin;
         bool Enable = false;
+        std::string ReplacedId;
     };
+    // The Build as mod prompt.
+    bool OpenBuildMod = false;
+    char BuildModName[101] = "My pack";
+    bool BuildModEnable = true;
     // The source being renamed, and the name being typed.
     std::filesystem::path RenameTarget;
     char RenameText[201] = {};
@@ -717,6 +723,7 @@ struct App {
     std::atomic<size_t> ImportTotal = 0;
     // Set while the import worker is downloading from GameBanana.
     bool Downloading = false;
+    bool BuildingMod = false;
     std::string DownloadName;
     std::atomic<uint64_t> DownloadBytes = 0;
     std::atomic<uint64_t> DownloadTotal = 0;
@@ -1025,7 +1032,7 @@ struct App {
                 try {
                     const auto cached = store.Import(vpk, token);
                     store.Rename(cached, vpks.size() == 1 ? name : name + " (" + Narrow(vpk.stem().wstring()) + ")");
-                    if (const auto id = store.ContentId(cached)) result.DownloadedIds.push_back(*id);
+                    if (const auto id = store.ContentId(cached)) result.AddedIds.push_back(*id);
                     imported.push_back(cached);
                 } catch (const OperationCancelled&) { throw; }
                 catch (const std::exception& error) { result.Errors += Narrow(vpk.filename().wstring()) + ": " + error.what() + "\n"; }
@@ -1047,11 +1054,118 @@ struct App {
             result.Restored = true;
             result.Origin = origin;
             result.Enable = enable;
-            if (!result.DownloadedIds.empty()) {
+            if (!result.AddedIds.empty()) {
                 result.Done = "Downloaded " + name + (enable ? ". It is enabled; choose Apply to game on the Mods page." : ". Enable it on the Mods page.");
             }
             return result;
         });
+    }
+
+    // The library mod built from the pack under `name` earlier, which a new build of that name replaces.
+    std::optional<std::string> BuiltModNamed(const std::string& name) const {
+        for (const auto& entry : ModEntries()) {
+            const auto origin = Mods.State().Origin(entry.ContentId);
+            if (origin && origin->Built && EqualsIgnoreCase(entry.Name, name)) return entry.ContentId;
+        }
+        return std::nullopt;
+    }
+
+    // Builds the pack like Build VPK, stores the result in the library as a mod called `name`, and adds it to the
+    // collection. An earlier build of the same name leaves the collection, and the Mods page gives the new build its
+    // place in the load order and its enabled state.
+    void StartBuildMod(const std::string& name, bool enable) {
+        if (Restoring || FilesBusy()) return;
+        if (!Store) { SetStoreStatus("Local mod storage is unavailable. " + SaveError, true); return; }
+        if (!CanPersist) { SetStoreStatus("Your library has not been opened, so nothing can be added to it yet. " + SaveError, true); return; }
+        Persist(true);
+        if (!SaveError.empty()) { SetStoreStatus("Could not save your library before building: " + SaveError, true); return; }
+        const auto selection = Builder.Snapshot(ModPaths, ConfiguredGame);
+        if (selection.Selected.empty() && selection.Packages.empty()) return;
+        const auto replaced = BuiltModNamed(name);
+        ImportCancellation = CancellationSource{};
+        ImportedCount = 0; ImportTotal = 0;
+        BuildingMod = true;
+        SetStoreStatus("Building " + name + "...", false);
+        ImportWorker = std::async(std::launch::async, [root = Store->Root(), name, enable, models = selection.Selected,
+            packages = selection.Packages, game = GamePath(), replaced, token = ImportCancellation.Token()] {
+            ZoneScopedN("Build mod");
+            namespace fs = std::filesystem;
+            ImportResult result;
+            const LocalModStore store(root);
+            const auto folder = root / L"downloads" / (L"build-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+            struct Cleanup { fs::path Path; ~Cleanup() { std::error_code error; fs::remove_all(Path, error); } } cleanup{folder};
+            fs::create_directories(folder);
+            const auto vpk = folder / L"pack.vpk";
+            ExportModelLibrary(models, game, vpk, token, packages);
+            const auto cached = store.Import(vpk, token);
+            const auto id = store.ContentId(cached);
+            if (!id) throw InvalidData("The built pack was not stored in the library.");
+
+            std::string ignored;
+            auto library = store.Load(token, {}, &ignored);
+            // The library stores identical files once, so a pack made of exactly one mod's files is that mod.
+            // Naming it would rename that mod, and a later rebuild would take it out of the collection.
+            if (id != replaced) {
+                for (const auto& source : library.Sources) {
+                    if (store.ContentId(source) != id) continue;
+                    const auto other = store.Name(source).value_or(Narrow(source.stem().wstring()));
+                    throw InvalidOperation("The pack has exactly the same files as " + other
+                        + ", which is already in your library. Enable that mod on the Mods page instead.");
+                }
+            }
+            store.Rename(cached, name);
+            const bool replacing = replaced && *replaced != *id;
+            if (replacing) {
+                const auto old = [&](const fs::path& path) { return store.ContentId(path) == replaced; };
+                std::erase_if(library.Sources, old);
+                std::erase_if(library.Packages, old);
+                std::erase_if(library.Selected, [&](const LibraryModel& model) { return old(model.Archive); });
+            }
+            if (std::none_of(library.Sources.begin(), library.Sources.end(), [&](const auto& source) { return store.ContentId(source) == id; }))
+                library.Sources.push_back(cached);
+            store.Save(library);
+            std::string notice;
+            result.Library = store.Load(token, {}, &notice);
+            result.Errors += notice;
+            result.Restored = true;
+            result.AddedIds = {*id};
+            ModOrigin origin;
+            origin.Built = true;
+            result.Origin = origin;
+            result.Enable = enable;
+            if (replacing) result.ReplacedId = *replaced;
+            result.Done = "Built " + name + (replacing ? ", replacing the earlier build" : "")
+                + (enable ? ". It is enabled; choose Apply to game on the Mods page." : ". Enable it on the Mods page.");
+            return result;
+        });
+    }
+
+    void DrawBuildModPopup() {
+        if (std::exchange(OpenBuildMod, false)) ImGui::OpenPopup("Build as mod");
+        ImGui::SetNextWindowSize({ImGui::GetFontSize() * 28, 0}, ImGuiCond_Appearing);
+        if (!ImGui::BeginPopupModal("Build as mod", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+        ImGui::TextWrapped("Builds the pack into your library as a mod with this name. Turn it on and off on the Mods page like any other mod.");
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(-1);
+        const bool entered = ImGui::InputTextWithHint("##modname", "Mod name", BuildModName, sizeof(BuildModName), ImGuiInputTextFlags_EnterReturnsTrue);
+        std::string name = BuildModName;
+        name.erase(0, name.find_first_not_of(" \t"));
+        name.erase(name.find_last_not_of(" \t") + 1);
+        if (const auto replaced = name.empty() ? std::nullopt : BuiltModNamed(name)) {
+            ImGui::TextColored(ui::kWarning, "Replaces your earlier build named %s.", name.c_str());
+            ImGui::TextDisabled("The new build keeps its place in the load order and stays enabled where it was.");
+        }
+        ImGui::Checkbox("Enable it in the current profile", &BuildModEnable);
+        const bool can_build = !name.empty() && !FilesBusy() && !Restoring;
+        ImGui::BeginDisabled(!can_build);
+        if (ImGui::Button("Build") || (entered && can_build)) {
+            StartBuildMod(name, BuildModEnable);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
 
     // The library's stored mods for the Mods page, in library order.
@@ -1075,7 +1189,8 @@ struct App {
         try {
             const auto result = ImportWorker.get();
             ApplyLibrary(result.Library);
-            if (result.Origin && !result.DownloadedIds.empty()) Mods.AddDownloaded(result.DownloadedIds, *result.Origin, result.Enable);
+            if (!result.ReplacedId.empty() && result.AddedIds.size() == 1) Mods.State().Replace(result.ReplacedId, result.AddedIds.front());
+            if (result.Origin && !result.AddedIds.empty()) Mods.RecordAdded(result.AddedIds, *result.Origin, result.Enable);
             if (result.Restored) { SavedState = result.Library; CanPersist = true; }
             if (!result.Errors.empty()) SetStoreStatus(result.Errors, true);
             else if (!result.Done.empty()) SetStoreStatus(result.Done, false);
@@ -1093,6 +1208,7 @@ struct App {
             if (!Restoring) InspectAfterImport.reset();
         }
         Downloading = false;
+        BuildingMod = false;
         if (Restoring) {
             Restoring = false;
             // Imports requested during a failed restore still need storage, but are not saved over the library.
@@ -1126,6 +1242,7 @@ struct App {
             Multi.Open(model, Builder.Models());
             ShowPage(Page::Multi);
         });
+        Builder.SetBuildAsModHandler([this] { OpenBuildMod = true; });
         try {
             Store.emplace(DataRoot);
             StartRestore();
@@ -1479,7 +1596,7 @@ struct App {
             if (ImportBusy()) {
                 const size_t done = ImportedCount.load();
                 const size_t total = ImportTotal.load();
-                ImGui::TextUnformatted(Restoring ? "Opening library" : Downloading ? "Downloading" : "Importing");
+                ImGui::TextUnformatted(Restoring ? "Opening library" : Downloading ? "Downloading" : BuildingMod ? "Building mod" : "Importing");
                 const uint64_t received = DownloadBytes.load(), size = DownloadTotal.load();
                 if (Downloading && total == 0) {
                     ImGui::ProgressBar(size ? static_cast<float>(received) / static_cast<float>(size) : 0.f, {90, ImGui::GetTextLineHeight() * .55f}, "");
@@ -1826,7 +1943,7 @@ struct App {
         } else if (CurrentPage == Page::Mods) {
             Mods.Draw(ModEntries(), ConfiguredGame, LibraryWorkBusy(),
                 [&](const std::filesystem::path& source) { Builder.SetSourceFilter(source); ShowPage(Page::Gallery); },
-                [&] { ShowPage(Page::Browse); });
+                [&] { ShowPage(Page::Browse); }, [&] { AddMods(hwnd); });
         } else if (CurrentPage == Page::Browse) {
             const auto entries = ModEntries();
             const char* reason = Restoring ? "Your library is still opening." : !CanPersist ? "Your library could not be opened, so nothing can be added."
@@ -1860,6 +1977,8 @@ struct App {
         const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
         DrawRenamePopup();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
+        DrawBuildModPopup();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {.5f, .5f});
         if (ImGui::BeginPopupModal("Keyboard shortcuts", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             static const char* const kShortcuts[][2] = {
