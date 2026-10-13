@@ -16,7 +16,7 @@
 namespace skeleton_repair {
 class LibraryPanel {
 public:
-    LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives);
+    LibraryPanel(const VulkanDevice& device, std::shared_ptr<ArchiveCache> archives, const std::filesystem::path& data_root);
     ~LibraryPanel();
     bool Busy() const { return worker_.valid(); }
     // True while source archives are being scanned for models.

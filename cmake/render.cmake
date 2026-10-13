@@ -97,6 +97,7 @@ add_library(sr_model_tools STATIC
     src/preview/store_reader.cpp
     src/preview/history_compare.cpp
     src/preview/ui.cpp
+    src/preview/theme.cpp
 )
 target_include_directories(sr_model_tools PUBLIC src/preview)
 target_link_libraries(sr_model_tools PUBLIC sr_render sr_imgui shell32 comdlg32 ole32 windowscodecs)

@@ -2,17 +2,18 @@
 
 // Compact widgets and shell actions shared by the model tools panels.
 
-#include <imgui.h>
+#include "theme.hpp"
 
 #include <filesystem>
 #include <string>
 
 namespace skeleton_repair::ui {
 
-inline constexpr ImVec4 kAccent{.34f, .58f, .96f, 1.f};
-inline constexpr ImVec4 kGood{.42f, .80f, .52f, 1.f};
-inline constexpr ImVec4 kWarning{.95f, .70f, .34f, 1.f};
-inline constexpr ImVec4 kError{.96f, .42f, .40f, 1.f};
+// kAccent is the focus blue, not #4682B4: these call sites paint text and selection borders.
+inline constexpr ImVec4 kAccent = theme::kFocus;
+inline constexpr ImVec4 kGood = theme::kSuccess;
+inline constexpr ImVec4 kWarning = theme::kWarning;
+inline constexpr ImVec4 kError = theme::kError;
 
 void CopyToClipboard(const std::string& text);
 // Opens Explorer with a file selected, or a folder itself.

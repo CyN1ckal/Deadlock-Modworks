@@ -52,8 +52,9 @@ struct RenderOptions {
     bool ShowSkeleton = true;
     bool ShowGrid = true;
     ColorMode Coloring = ColorMode::Clay;
-    // Display-encoded RGB.
-    std::array<float, 3> Background{0.11f, 0.12f, 0.14f};
+    // Display-encoded RGB. Workspace #141B23, matching theme::kWorkspace / theme::kClearRgb,
+    // so a viewport does not flash the previous grey while the swapchain resizes.
+    std::array<float, 3> Background{20.f / 255.f, 27.f / 255.f, 35.f / 255.f};
     // Bind pose when null.
     const FramePose* Pose = nullptr;
 };
