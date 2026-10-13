@@ -1,3 +1,7 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 #include "model_library.hpp"
 #include "archive_transaction.hpp"
 #include "resource.hpp"
@@ -66,6 +70,24 @@ void AppendCount(std::string& text, int count, const char* one, const char* many
     if (!text.empty()) text += ", ";
     text += std::to_string(count) + " " + (count == 1 ? one : many);
 }
+void WriteNewFile(const std::filesystem::path& path, const std::string& text) {
+    HANDLE handle = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) throw IoError("Could not save model library.");
+    size_t written = 0;
+    bool failed = false;
+    while (written < text.size()) {
+        const DWORD chunk = static_cast<DWORD>(std::min<size_t>(text.size() - written, 1u << 20));
+        DWORD wrote = 0;
+        if (!WriteFile(handle, text.data() + written, chunk, &wrote, nullptr) || wrote == 0) { failed = true; break; }
+        written += wrote;
+    }
+    if (!failed && !FlushFileBuffers(handle)) failed = true;
+    CloseHandle(handle);
+    if (failed) {
+        DeleteFileW(path.c_str());
+        throw IoError("Could not save model library.");
+    }
+}
 }
 
 void ModelLibrary::Save(const std::filesystem::path& path) const {
@@ -75,10 +97,18 @@ void ModelLibrary::Save(const std::filesystem::path& path) const {
     for (const auto& model : Selected) json["selected"].push_back({{"archive", Narrow(Absolute(model.Archive).wstring())}, {"model", model.Model}});
     for (const auto& package : Packages) json["packages"].push_back(Narrow(Absolute(package).wstring()));
     if (!GameArchive.empty()) json["gameArchive"] = Narrow(Absolute(GameArchive).wstring());
-    std::ofstream out(path, std::ios::binary);
-    out << json.dump(2) << '\n';
-    out.flush();
-    if (!out) throw IoError("Could not save model library.");
+    const auto text = json.dump(2) + "\n";
+    const auto temp = path.parent_path() / (path.filename().wstring() + L".saving");
+    try {
+        WriteNewFile(temp, text);
+        if (!MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileW(temp.c_str());
+            throw IoError("Could not save model library.");
+        }
+    } catch (...) {
+        DeleteFileW(temp.c_str());
+        throw;
+    }
 }
 ModelLibrary ModelLibrary::Load(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
