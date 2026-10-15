@@ -2,6 +2,7 @@
 
 #include "library_types.hpp"
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,8 +17,9 @@ std::optional<std::string> CharacterOfModel(std::string_view model_path);
 // File name without .vmdl_c, with underscores shown as spaces.
 std::string ModelFileTitle(std::string_view model_path);
 
-// "archive.vpk - mina ult", so two mods of one model can be told apart.
-std::string SlotCaption(const LibraryModel& model);
+// "archive.vpk - mina ult", so two mods of one model can be told apart. A model of the `base` game archive
+// reads "Base game - mina ult".
+std::string SlotCaption(const LibraryModel& model, const std::filesystem::path& base = {});
 
 struct ViewportGrid {
     int Columns = 1;
@@ -36,8 +38,10 @@ struct CharacterOption {
 std::vector<CharacterOption> CharactersIn(const std::vector<LibraryModel>& models);
 
 // Fills up to `limit` slots with models of the chosen model's character.
-// The chosen model is first. Other mods of that character come next, preferring each mod's copy of the
-// same model file, and further files from a mod already represented fill any slots that remain.
-std::vector<size_t> CharacterSlots(const std::vector<LibraryModel>& models, size_t chosen, int limit);
+// The chosen model is first. The `base` game archive's model comes next when the chosen model is a mod's,
+// then other mods of that character, preferring each archive's copy of the same model file. Further files
+// from an archive already represented fill any slots that remain.
+std::vector<size_t> CharacterSlots(const std::vector<LibraryModel>& models, size_t chosen, int limit,
+    const std::filesystem::path& base = {});
 
 }  // namespace skeleton_repair

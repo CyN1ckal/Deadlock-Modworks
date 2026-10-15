@@ -100,3 +100,25 @@ TEST(CharacterView, MissingCharacterStillShowsTheChosenModel) {
 }
 
 }  // namespace
+
+TEST(CharacterView, BaseGameModelTakesTheSecondSlot) {
+    const std::vector<LibraryModel> models = {
+        Model("Mods/A.vpk", "models/heroes/mina/mina.vmdl_c"),
+        Model("Mods/B.vpk", "models/heroes/mina/mina.vmdl_c"),
+        Model("Mods/C.vpk", "models/heroes/mina/mina.vmdl_c"),
+        Model("Game/pak01_dir.vpk", "models/heroes/mina/mina_ult.vmdl_c"),
+        Model("Game/pak01_dir.vpk", "models/heroes/mina/mina.vmdl_c"),
+    };
+    // The game's copy of the same file comes right after the chosen mod, ahead of other mods.
+    EXPECT_EQ(CharacterSlots(models, 1, 4, "game/PAK01_DIR.vpk"), (std::vector<size_t>{1, 4, 0, 2}));
+    EXPECT_EQ(CharacterSlots(models, 1, 2, "Game/pak01_dir.vpk"), (std::vector<size_t>{1, 4}));
+    // A base model chosen first is compared with the mods.
+    EXPECT_EQ(CharacterSlots(models, 4, 4, "Game/pak01_dir.vpk"), (std::vector<size_t>{4, 0, 1, 2}));
+}
+
+TEST(CharacterView, BaseGameCaption) {
+    const LibraryModel model = Model("D:/Steam/game/citadel/pak01_dir.vpk", "models/heroes/mina/mina_ult.vmdl_c");
+    EXPECT_EQ(SlotCaption(model, "d:/steam/game/citadel/PAK01_DIR.vpk"), "Base game - mina ult");
+    EXPECT_EQ(SlotCaption(model, "C:/mods/Mina Pack.vpk"), "pak01_dir.vpk - mina ult");
+    EXPECT_EQ(SlotCaption(model), "pak01_dir.vpk - mina ult");
+}

@@ -1291,7 +1291,7 @@ struct App {
             GameClips = std::move(loaded->Clips);
             GameName = Narrow(GameLoading.wstring());
             GameDirectory = Narrow(std::filesystem::path(Widen(GameName)).parent_path().wstring());
-            Multi.SetGame(Game);
+            Multi.SetGame(Game, GamePath());
         } catch (const std::exception& error) {
             std::error_code missing;
             if (!std::filesystem::is_regular_file(GameLoading, missing)) GameError = MissingGameMessage(GameLoading);
@@ -1306,7 +1306,7 @@ struct App {
 
     void StartInspect(const std::filesystem::path& archive, const std::string& model) {
         ActiveMod = archive;
-        ModName = Narrow(archive.filename().wstring());
+        ModName = Builder.IsBaseArchive(archive) ? std::string("Base game") : Narrow(archive.filename().wstring());
         Selected = model;
         StandaloneModel = false;
         Panel.ShowError("", "");
@@ -1699,6 +1699,19 @@ struct App {
             }
             count_column(Builder.ListedCount());
         }
+        // The connected game's own hero models, listed read-only for reference and comparison.
+        if (Builder.BaseModelCount() > 0 && filter.PassFilter("Base game")) {
+            const auto& base = Builder.BaseArchive();
+            const bool base_active = !active.empty() && Builder.IsBaseArchive(active);
+            if (ImGui::Selectable("Base game", base_active && (CurrentPage == Page::Gallery || CurrentPage == Page::Pack))) {
+                Builder.SetSourceFilter(base_active ? std::filesystem::path{} : base);
+                ShowPage(Page::Gallery);
+            }
+            ImGui::SetItemTooltip("%s\nThe installed game's own hero models. Click to browse them; inspect one to compare with your mods.",
+                Narrow(base.wstring()).c_str());
+            count_column(Builder.BaseModelCount());
+            if (!ModPaths.empty()) ImGui::Separator();
+        }
         std::optional<std::filesystem::path> remove;
         for (const auto& path : ModPaths) {
             const LibraryPanel::SourceInfo* info = Builder.FindSource(path);
@@ -1916,11 +1929,14 @@ struct App {
                         ShowPage(Page::Multi);
                     }
                     ImGui::SetItemTooltip("Show this character's models together, with one shared camera.");
-                    if (ImGui::MenuItem("Analyze this model", nullptr, false, Game && !FilesBusy() && !Selected.empty())) {
-                        ShowPage(Page::Repair);
-                        Repair.AnalyzeModel(Narrow(ActiveMod.wstring()), Selected);
+                    // The game's own models are what a mod is analyzed against.
+                    if (!Builder.IsBaseArchive(ActiveMod)) {
+                        if (ImGui::MenuItem("Analyze this model", nullptr, false, Game && !FilesBusy() && !Selected.empty())) {
+                            ShowPage(Page::Repair);
+                            Repair.AnalyzeModel(Narrow(ActiveMod.wstring()), Selected);
+                        }
+                        ImGui::SetItemTooltip("Check this model and its animation skeleton against the installed game.");
                     }
-                    ImGui::SetItemTooltip("Check this model and its animation skeleton against the installed game.");
                 }
                 ImGui::EndPopup();
             }

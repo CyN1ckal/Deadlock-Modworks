@@ -29,13 +29,22 @@ public:
     void StopLoading();
     // Skins plus package selections. Build, Clear and Ctrl+B follow this count.
     size_t SelectedCount() const { return selected_.size() + package_selection_.size(); }
-    size_t ModelCount() const { return models_.size(); }
+    // Skins of the library's sources. The base game's models are not counted.
+    size_t ModelCount() const { return models_.size() - base_count_; }
+    // Hero models of the connected game archive, listed read-only for reference. 0 until the game is scanned.
+    size_t BaseModelCount() const { return base_count_; }
+    // The game archive whose hero models the last scan listed, or empty.
+    const std::filesystem::path& BaseArchive() const { return base_archive_; }
+    bool IsBaseArchive(const std::filesystem::path& archive) const;
+    // Also shows the base game's models when every source is shown. Choosing the base game as the source shows them anyway.
+    void SetShowBase(bool show) { show_base_ = show; }
     // Non-model files of one source, or 0 when that source has no package.
     size_t PackageFiles(const std::filesystem::path& source) const;
     // Skins in one source, or its package file count when it has no skins.
     size_t SourceCount(const std::filesystem::path& source) const;
     // The source-list total: each source contributes SourceCount.
     size_t ListedCount() const;
+    // Every listed model, including the base game's, which Multi view compares with mods.
     const std::vector<LibraryModel>& Models() const { return models_; }
     // Right-click Multi view on a skin. Empty hides the command.
     void SetMultiViewHandler(std::function<void(const LibraryModel&)> open) { open_multi_ = std::move(open); }
@@ -134,6 +143,7 @@ private:
         std::string Preview;
     };
     struct ScanResult {
+        std::filesystem::path Base;
         std::vector<LibraryModel> Models;
         std::vector<PackagePayload> Packages;
         std::vector<std::string> Errors;
@@ -162,6 +172,9 @@ private:
     void Activate(const Card& card, const std::function<void(const LibraryModel&)>& preview);
     void Toggle(const Card& card);
     bool InPack(size_t index);
+    bool IsBase(size_t index) const { return index < is_base_.size() && is_base_[index] != 0; }
+    // The card subtitle and list column: the source file, or "Base game".
+    std::string SourceLabel(const LibraryModel& model, size_t index) const;
     bool PackageInPack(const std::filesystem::path& source) const;
     void SetInPack(size_t index, bool include);
     void SortModels(int column, bool descending);
@@ -217,6 +230,14 @@ private:
     void Refresh(const std::vector<std::filesystem::path>& sources);
     std::vector<std::filesystem::path> sources_;
     std::vector<LibraryModel> models_;
+    // Marks models_ entries that come from the base game archive. They never enter the pack.
+    std::vector<uint8_t> is_base_;
+    size_t base_count_ = 0;
+    std::filesystem::path base_archive_;
+    // The game Draw was last given, and the one the current scan listed.
+    std::filesystem::path game_;
+    std::filesystem::path scanned_game_;
+    bool show_base_ = false;
     std::vector<PackagePayload> payloads_;
     std::vector<LibraryModel> selected_;
     // Source archives whose non-model files are in the pack.

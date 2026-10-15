@@ -85,6 +85,17 @@ Right-click a skin:
 
 **Reveal source in Explorer** opens the library's rebuilt copy, under `cache`, not necessarily the folder you imported from.
 
+### Base game models
+
+With Deadlock connected, the game's own hero models, everything under `models/heroes*/<character>/` in `pak01_dir.vpk`, are listed for reference. They are not part of your library and nothing is copied.
+
+- **Base game** at the top of the explorer's source list, or in the library's source list, shows only them.
+- The **Base game** checkbox in the library toolbar also shows them beside your mods under **All sources**. Sorting by name puts a mod and the game's model of the same name next to each other.
+- Their cards carry a **GAME** tag and say **Base game** as their source. They have no pack checkbox, cannot be included in a pack, and have no **Analyze this model**.
+- Double-click one to open it in the **Model inspector**, whose title is then **Inspect: Base game**. Right-click it for **Inspect**, **Multi view**, **Show only the base game**, and the copy items.
+
+They are not counted as skins in the status bar.
+
 Right-click a non-model package card for **Show files** (**Enter**), which opens **Package files**, plus **Include in pack** and **Reveal source in Explorer**.
 
 Right-click a source in the explorer:
@@ -170,7 +181,7 @@ Each side is a list of **Mod (before)**, **Repaired (after)**, and **Game (curre
 
 Right-click a skin and choose **Multi view**, or open the tab and pick **Character**. The count list is **1**, **2**, **3**, or **4**. **Link** keeps orbit, pan, and zoom on one camera. One clip plays on every viewport that has an animation skeleton.
 
-The page fills viewports from `models/heroes/<character>/...`: the model you opened, then one model from each other mod of that character, then further files from those mods. Each viewport can show another model of that character. An empty slot says **Choose a model** or **Empty**. With nothing selected the page says **Right-click a skin in the library and choose Multi view, or pick a character above.**
+The page fills viewports from `models/heroes/<character>/...`: the model you opened, then the base game's copy of that model when the game is connected, then one model from each other mod of that character, then further files from those mods. Base game models are captioned **Base game**, and the **Character** list includes every hero the game has. Each viewport can show another model of that character. An empty slot says **Choose a model** or **Empty**. With nothing selected the page says **Right-click a skin in the library and choose Multi view, or pick a character above.**
 
 ## Skin repairs
 

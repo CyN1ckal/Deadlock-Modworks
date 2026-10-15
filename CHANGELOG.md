@@ -9,6 +9,7 @@
 - **Build as mod...** in the VPK builder builds the pack into the library as a named mod that the **Mods** page can enable and apply. Building again under the same name replaces it in place, keeping its load-order position and enabled state. A pack identical to a mod already in the library is refused rather than renaming that mod.
 - **Add VPKs...** on the **Mods** page, and **Built pack** as a mod source.
 - `mods.json` in the data root keeps enabled mods, load order, profiles and download sources.
+- **Base game** models: with Deadlock connected, the game's own hero models (`models/heroes*/<character>/`) are listed read-only for reference. Choose **Base game** in the explorer or the library's source list, or tick **Base game** in the library toolbar to show them beside your mods. They can be inspected and opened in **Multi view**, which now puts the game's copy of a model right after the mod you opened. They never go in the pack and are not analyzed.
 - zlib 1.3.1, XZ Utils (liblzma) 5.8.1 and libarchive 3.8.1 are built from pinned, hash-checked sources. Their licenses are in `THIRD_PARTY_NOTICES.md` and the package's `licenses` folder.
 
 ### Fixed

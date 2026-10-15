@@ -67,8 +67,9 @@ std::string ModelFileTitle(std::string_view model_path) {
     return title;
 }
 
-std::string SlotCaption(const LibraryModel& model) {
-    const std::string file = Narrow(model.Archive.filename().wstring());
+std::string SlotCaption(const LibraryModel& model, const std::filesystem::path& base) {
+    const bool from_base = !base.empty() && ArchiveKey(model.Archive) == ArchiveKey(base);
+    const std::string file = from_base ? std::string("Base game") : Narrow(model.Archive.filename().wstring());
     const std::string title = ModelFileTitle(model.Model);
     if (file.empty()) return title;
     if (title.empty()) return file;
@@ -101,7 +102,8 @@ std::vector<CharacterOption> CharactersIn(const std::vector<LibraryModel>& model
     return options;
 }
 
-std::vector<size_t> CharacterSlots(const std::vector<LibraryModel>& models, size_t chosen, int limit) {
+std::vector<size_t> CharacterSlots(const std::vector<LibraryModel>& models, size_t chosen, int limit,
+    const std::filesystem::path& base) {
     if (limit < 1 || chosen >= models.size()) return {};
     std::vector<size_t> slots{chosen};
     const std::optional<std::string> character = CharacterOfModel(models[chosen].Model);
@@ -137,9 +139,18 @@ std::vector<size_t> CharacterSlots(const std::vector<LibraryModel>& models, size
 
     std::vector<uint8_t> used(models.size(), 0);
     used[chosen] = 1;
+    // The game's own model is the reference a mod is compared with, so it takes the second slot.
+    const std::string base_archive = base.empty() ? std::string{} : ArchiveKey(base);
+    if (!base_archive.empty() && base_archive != chosen_archive && static_cast<int>(slots.size()) < limit) {
+        if (const auto found = by_archive.find(base_archive); found != by_archive.end() && !found->second.empty()) {
+            const size_t index = pick(found->second);
+            slots.push_back(index);
+            used[index] = 1;
+        }
+    }
     for (const auto& [archive, group] : by_archive) {
         if (static_cast<int>(slots.size()) >= limit) break;
-        if (archive == chosen_archive || group.empty()) continue;
+        if (archive == chosen_archive || archive == base_archive || group.empty()) continue;
         const size_t index = pick(group);
         slots.push_back(index);
         used[index] = 1;

@@ -78,7 +78,8 @@ void MultiView::SetArchives(std::shared_ptr<ArchiveCache> archives) {
     Reload();
 }
 
-void MultiView::SetGame(std::shared_ptr<const IndexedArchive> game) {
+void MultiView::SetGame(std::shared_ptr<const IndexedArchive> game, std::filesystem::path path) {
+    game_path_ = std::move(path);
     if (game_ == game) return;
     game_ = std::move(game);
     Reload();
@@ -90,7 +91,7 @@ void MultiView::Open(const LibraryModel& model, const std::vector<LibraryModel>&
     const auto found = std::find_if(library.begin(), library.end(), [&](const LibraryModel& other) { return SameModel(other, model); });
     const std::vector<size_t> indexes = found == library.end()
         ? std::vector<size_t>{}
-        : CharacterSlots(library, static_cast<size_t>(found - library.begin()), kMaxSlots);
+        : CharacterSlots(library, static_cast<size_t>(found - library.begin()), kMaxSlots, game_path_);
 
     for (int slot = 0; slot < kMaxSlots; ++slot) {
         loads_[slot].Cancel();
@@ -321,7 +322,7 @@ void MultiView::DrawSlot(int slot, ImVec2 size, const std::vector<LibraryModel>&
     const char* preview = "Choose a model";
     std::string preview_storage;
     if (slots_[slot].Model) {
-        preview_storage = SlotCaption(*slots_[slot].Model);
+        preview_storage = SlotCaption(*slots_[slot].Model, game_path_);
         preview = preview_storage.c_str();
     }
     ImGui::SetNextItemWidth(size.x);
@@ -338,7 +339,7 @@ void MultiView::DrawSlot(int slot, ImVec2 size, const std::vector<LibraryModel>&
         }
         for (size_t index = 0; index < choices.size(); ++index) {
             const LibraryModel& choice = choices[index];
-            const std::string caption = SlotCaption(choice);
+            const std::string caption = SlotCaption(choice, game_path_);
             if (!ContainsIgnoreCase(caption, picker_filter_)) continue;
             const bool current = slots_[slot].Model && SameModel(*slots_[slot].Model, choice);
             ImGui::PushID(static_cast<int>(index));
@@ -377,7 +378,7 @@ void MultiView::DrawSlot(int slot, ImVec2 size, const std::vector<LibraryModel>&
     }
     if (view.TakeContextMenu()) ImGui::OpenPopup("slot_menu");
 
-    const std::string caption = slots_[slot].Model ? FitText(SlotCaption(*slots_[slot].Model), image.x - 16) : std::string("Empty");
+    const std::string caption = slots_[slot].Model ? FitText(SlotCaption(*slots_[slot].Model, game_path_), image.x - 16) : std::string("Empty");
     const ImVec2 text = ImGui::CalcTextSize(caption.c_str());
     draw->AddRectFilled({origin.x, origin.y}, {origin.x + text.x + 12, origin.y + text.y + 6}, IM_COL32(0, 0, 0, 140));
     draw->AddText({origin.x + 6, origin.y + 3}, ImGui::GetColorU32(ImGuiCol_Text), caption.c_str());
@@ -439,8 +440,8 @@ void MultiView::Draw(const std::vector<LibraryModel>& library) {
             const std::optional<std::string> name = CharacterOfModel(model.Model);
             if (name && EqualsIgnoreCase(*name, character_)) choices.push_back(model);
         }
-        std::sort(choices.begin(), choices.end(), [](const LibraryModel& left, const LibraryModel& right) {
-            return CompareIgnoreCase(SlotCaption(left), SlotCaption(right)) < 0;
+        std::sort(choices.begin(), choices.end(), [&](const LibraryModel& left, const LibraryModel& right) {
+            return CompareIgnoreCase(SlotCaption(left, game_path_), SlotCaption(right, game_path_)) < 0;
         });
     }
 

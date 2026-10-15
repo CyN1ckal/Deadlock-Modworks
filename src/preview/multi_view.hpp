@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,8 +24,9 @@ public:
     explicit MultiView(const VulkanDevice& device);
 
     void SetArchives(std::shared_ptr<ArchiveCache> archives);
-    // Reloads the open slots when the connected game archive changes, so textures can resolve.
-    void SetGame(std::shared_ptr<const IndexedArchive> game);
+    // Reloads the open slots when the connected game archive changes, so textures can resolve. `path` is that
+    // archive's file, whose models are the base game's own and are captioned and placed as such.
+    void SetGame(std::shared_ptr<const IndexedArchive> game, std::filesystem::path path = {});
 
     // Fills the grid from `library` with models of `model`'s character and starts loading them.
     // `keep_layout` leaves the viewport count alone, for a character change from the toolbar.
@@ -71,6 +73,7 @@ private:
 
     std::shared_ptr<ArchiveCache> archives_;
     std::shared_ptr<const IndexedArchive> game_;
+    std::filesystem::path game_path_;
     std::string character_;
     int slot_count_ = 4;
     int last_moved_ = 0;
