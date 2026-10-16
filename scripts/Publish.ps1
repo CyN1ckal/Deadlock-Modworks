@@ -261,6 +261,32 @@ function Get-Sha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
 }
 
+# zlib, xz, and libarchive extract under archive-deps\<CompilerId>-<version>\ so a
+# compiler update does not reuse a stale tool cache. Older trees kept those sources
+# directly under archive-deps. Accept either layout. Refuse the package if the copies disagree.
+function Find-ArchiveLicense([string]$RelativeSuffix) {
+    $root = Join-Path $BuildDirectory 'archive-deps'
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        throw "Cannot locate archive licenses under $root"
+    }
+    $suffix = $RelativeSuffix.Replace('/', '\')
+    $hits = New-Object System.Collections.Generic.List[string]
+    $direct = Join-Path $root $suffix
+    if (Test-Path -LiteralPath $direct -PathType Leaf) { $hits.Add($direct) }
+    foreach ($child in @(Get-ChildItem -LiteralPath $root -Force -Directory)) {
+        if ($child.Name -eq 'downloads' -or $child.Name -eq 'install') { continue }
+        $nested = Join-Path $child.FullName $suffix
+        if (Test-Path -LiteralPath $nested -PathType Leaf) { $hits.Add($nested) }
+    }
+    if ($hits.Count -eq 0) { throw "Cannot locate $suffix under $root" }
+    $hashes = @{}
+    foreach ($hit in $hits) { $hashes[(Get-Sha256 $hit)] = $true }
+    if ($hashes.Count -ne 1) {
+        throw "Archive license $suffix resolved to different files: $($hits -join '; ')"
+    }
+    return ($hits | Sort-Object | Select-Object -First 1)
+}
+
 if ($Configuration -ne 'Release') { throw "Only Release packages are supported (got $Configuration)." }
 
 $BuildGiven = $PSBoundParameters.ContainsKey('BuildDirectory') -and -not [string]::IsNullOrWhiteSpace($BuildDirectory)
@@ -483,9 +509,9 @@ $licenseSources = @(
     @{ Source = Join-Path $BuildDirectory '_deps\meshoptimizer-src\LICENSE.md'; Name = 'meshoptimizer-LICENSE.md' },
     @{ Source = Join-Path $BuildDirectory '_deps\imgui-src\LICENSE.txt'; Name = 'imgui-LICENSE.txt' },
     @{ Source = Join-Path $Repository 'third_party\tracy\LICENSE'; Name = 'tracy-LICENSE.txt' },
-    @{ Source = Join-Path $BuildDirectory 'archive-deps\libarchive\src\sr_libarchive_ep\COPYING'; Name = 'libarchive-COPYING.txt' },
-    @{ Source = Join-Path $BuildDirectory 'archive-deps\zlib\src\sr_zlib_ep\LICENSE'; Name = 'zlib-LICENSE.txt' },
-    @{ Source = Join-Path $BuildDirectory 'archive-deps\xz\src\sr_xz_ep\COPYING.0BSD'; Name = 'xz-liblzma-COPYING.0BSD.txt' }
+    @{ Source = (Find-ArchiveLicense 'libarchive\src\sr_libarchive_ep\COPYING'); Name = 'libarchive-COPYING.txt' },
+    @{ Source = (Find-ArchiveLicense 'zlib\src\sr_zlib_ep\LICENSE'); Name = 'zlib-LICENSE.txt' },
+    @{ Source = (Find-ArchiveLicense 'xz\src\sr_xz_ep\COPYING.0BSD'); Name = 'xz-liblzma-COPYING.0BSD.txt' }
 )
 foreach ($license in $licenseSources) {
     Copy-RequiredFile $license.Source (Join-Path $licenseOutput $license.Name)
