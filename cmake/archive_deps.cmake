@@ -8,6 +8,11 @@ include(ExternalProject)
 
 set(SR_ARCHIVE_PREFIX "${CMAKE_BINARY_DIR}/archive-deps")
 set(SR_ARCHIVE_INSTALL "${SR_ARCHIVE_PREFIX}/install")
+# Each dependency's own build caches the paths of cl.exe, link.exe and the other tools, and a Visual Studio update
+# deletes the old ones. Building under a folder named for the compiler version configures them afresh after an
+# update, with the main build's compiler. The source archives are kept apart, so they are not downloaded again.
+set(SR_ARCHIVE_BUILDS "${SR_ARCHIVE_PREFIX}/${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}")
+set(SR_ARCHIVE_DOWNLOADS "${SR_ARCHIVE_PREFIX}/downloads")
 file(MAKE_DIRECTORY "${SR_ARCHIVE_INSTALL}/include")
 
 set(SR_ARCHIVE_COMMON_ARGS
@@ -20,6 +25,10 @@ set(SR_ARCHIVE_COMMON_ARGS
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
     "-DCMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG"
 )
+# Visual Studio generators choose the toolset themselves.
+if(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+    list(APPEND SR_ARCHIVE_COMMON_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+endif()
 set(SR_ARCHIVE_BUILD ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release)
 set(SR_ARCHIVE_INSTALL_STEP ${CMAKE_COMMAND} --install <BINARY_DIR> --config Release)
 
@@ -28,7 +37,8 @@ ExternalProject_Add(sr_zlib_ep
     URL https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
     URL_HASH SHA256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    PREFIX "${SR_ARCHIVE_PREFIX}/zlib"
+    PREFIX "${SR_ARCHIVE_BUILDS}/zlib"
+    DOWNLOAD_DIR "${SR_ARCHIVE_DOWNLOADS}"
     CMAKE_ARGS ${SR_ARCHIVE_COMMON_ARGS} -DZLIB_BUILD_EXAMPLES=OFF
     BUILD_COMMAND ${SR_ARCHIVE_BUILD}
     INSTALL_COMMAND ${SR_ARCHIVE_INSTALL_STEP}
@@ -40,7 +50,8 @@ ExternalProject_Add(sr_xz_ep
     URL https://github.com/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.gz
     URL_HASH SHA256=507825b599356c10dca1cd720c9d0d0c9d5400b9de300af00e4d1ea150795543
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    PREFIX "${SR_ARCHIVE_PREFIX}/xz"
+    PREFIX "${SR_ARCHIVE_BUILDS}/xz"
+    DOWNLOAD_DIR "${SR_ARCHIVE_DOWNLOADS}"
     CMAKE_ARGS ${SR_ARCHIVE_COMMON_ARGS}
         -DXZ_NLS=OFF -DXZ_DOC=OFF -DBUILD_TESTING=OFF
         -DXZ_TOOL_XZ=OFF -DXZ_TOOL_XZDEC=OFF -DXZ_TOOL_LZMADEC=OFF -DXZ_TOOL_LZMAINFO=OFF
@@ -55,7 +66,8 @@ ExternalProject_Add(sr_libarchive_ep
     URL https://github.com/libarchive/libarchive/releases/download/v3.8.1/libarchive-3.8.1.tar.gz
     URL_HASH SHA256=bde832a5e3344dc723cfe9cc37f8e54bde04565bfe6f136bc1bd31ab352e9fab
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    PREFIX "${SR_ARCHIVE_PREFIX}/libarchive"
+    PREFIX "${SR_ARCHIVE_BUILDS}/libarchive"
+    DOWNLOAD_DIR "${SR_ARCHIVE_DOWNLOADS}"
     DEPENDS sr_zlib_ep sr_xz_ep
     CMAKE_ARGS ${SR_ARCHIVE_COMMON_ARGS}
         -DZLIB_INCLUDE_DIR=${SR_ARCHIVE_INSTALL}/include
