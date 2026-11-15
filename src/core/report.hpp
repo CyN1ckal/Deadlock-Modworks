@@ -62,7 +62,7 @@ struct ArchiveReport {
 class ReportExporter {
 public:
     static constexpr const char* Scope =
-        "Hero models and AG2 animation-skeleton overrides. Non-blocking custom-rig differences are notes; in-game playback is not verified.";
+        "Hero models and AG2 animation-skeleton overrides, including the October 2026 root_motion camera frame. Non-blocking custom-rig differences are notes; in-game playback is not verified.";
 
     static std::string Serialize(std::string_view game_directory, const std::vector<ArchiveReport>& archives);
     // Returns the full path that was written.

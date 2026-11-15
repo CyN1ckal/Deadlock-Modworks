@@ -1,3 +1,4 @@
+#include "camera_attachment.hpp"
 #include "command_line.hpp"
 #include "product_version.hpp"
 #include "kv3.hpp"
@@ -26,6 +27,9 @@
 namespace {
 
 namespace fs = std::filesystem;
+using skeleton_repair::CameraAttachmentEdit;
+using skeleton_repair::CameraAttachmentRepair;
+using skeleton_repair::CameraFrame;
 using skeleton_repair::ArchiveReport;
 using skeleton_repair::CancellationSource;
 using skeleton_repair::CommandLine;
@@ -368,6 +372,87 @@ CliOutput Execute(const std::vector<std::string>& args, skeleton_repair::Cancell
 
 const std::vector<uint8_t> kGameModel = Model({.Names = {"root", "arm"}, .Parents = {-1, 0}, .Remap = std::vector<int>{0, 1}});
 const std::vector<uint8_t> kOldModel = Model({.Names = {"arm", "root"}, .Parents = {1, -1}, .Remap = std::vector<int>{0, 1}});
+
+std::vector<std::pair<std::string, std::vector<uint8_t>>> ReadBlocks(const std::vector<uint8_t>& file) {
+    uint32_t block_offset = 0;
+    int32_t count = 0;
+    std::memcpy(&block_offset, file.data() + 8, 4);
+    std::memcpy(&count, file.data() + 12, 4);
+    const size_t table = 8u + block_offset;
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> blocks;
+    for (int i = 0; i < count; ++i) {
+        const size_t pos = table + static_cast<size_t>(i) * 12;
+        uint32_t relative = 0;
+        uint32_t size = 0;
+        std::memcpy(&relative, file.data() + pos + 4, 4);
+        std::memcpy(&size, file.data() + pos + 8, 4);
+        const size_t absolute = pos + 4 + relative;
+        blocks.emplace_back(
+            std::string(reinterpret_cast<const char*>(file.data() + pos), 4),
+            std::vector<uint8_t>(file.begin() + absolute, file.begin() + absolute + size));
+    }
+    return blocks;
+}
+
+std::vector<uint8_t> PackBlocks(const std::vector<std::pair<std::string, std::vector<uint8_t>>>& blocks) {
+    const size_t table = 16;
+    size_t at = table + blocks.size() * 12;
+    std::vector<uint8_t> file(at);
+    for (const auto& block : blocks) {
+        file.insert(file.end(), block.second.begin(), block.second.end());
+    }
+    WriteU32(file, 0, static_cast<uint32_t>(file.size()));
+    WriteU16(file, 4, 12);
+    WriteU16(file, 6, 0);
+    WriteU32(file, 8, 8);
+    WriteI32(file, 12, static_cast<int32_t>(blocks.size()));
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        const size_t pos = table + i * 12;
+        std::memcpy(file.data() + pos, blocks[i].first.data(), 4);
+        WriteU32(file, pos + 4, static_cast<uint32_t>(at - (pos + 4)));
+        WriteU32(file, pos + 8, static_cast<uint32_t>(blocks[i].second.size()));
+        at += blocks[i].second.size();
+    }
+    return file;
+}
+
+KvValue CameraQuat(float x, float y, float z, float w) {
+    return KvValue::Array({KvValue::Float(x), KvValue::Float(y), KvValue::Float(z), KvValue::Float(w)});
+}
+
+KvValue CameraVec(float x, float y, float z) {
+    return KvValue::Array({KvValue::Float(x), KvValue::Float(y), KvValue::Float(z)});
+}
+
+std::vector<uint8_t> CameraMesh(float x, float y, float z, float w) {
+    KvValue pivot = KvValue::Object({});
+    pivot.Set("m_name", KvValue::String("standing_pivot"));
+    pivot.Set("m_influenceNames", Strings({"root_motion", "", ""}));
+    pivot.Set("m_vInfluenceRotations", KvValue::Array({CameraQuat(x, y, z, w), CameraQuat(0, 0, 0, 1), CameraQuat(0, 0, 0, 1)}));
+    pivot.Set("m_vInfluenceOffsets", KvValue::Array({CameraVec(0, 85, 0), CameraVec(0, 0, 0), CameraVec(0, 0, 0)}));
+    pivot.Set("m_influenceWeights", KvValue::Array({KvValue::Float(1), KvValue::Float(0), KvValue::Float(0)}));
+    pivot.Set("m_nInfluences", KvValue::Int64(1));
+    KvValue motion = KvValue::Object({});
+    motion.Set("m_boneName", KvValue::String("root_motion"));
+    motion.Set("m_invBindPose", KvValue::Array({
+        KvValue::Float(0), KvValue::Float(1), KvValue::Float(0), KvValue::Float(0),
+        KvValue::Float(0), KvValue::Float(0), KvValue::Float(1), KvValue::Float(0),
+        KvValue::Float(1), KvValue::Float(0), KvValue::Float(0), KvValue::Float(0),
+    }));
+    KvValue root = KvValue::Object({});
+    root.Set("m_skeleton", KvValue::Object({}));
+    root.Find("m_skeleton")->Set("m_bones", KvValue::Array({std::move(motion)}));
+    root.Set("m_attachments", KvValue::Array({std::move(pivot)}));
+    KvDocument document;
+    document.Root = std::move(root);
+    return skeleton_repair::WriteKv3(document);
+}
+
+std::vector<uint8_t> WithCamera(const std::vector<uint8_t>& model, float x, float y, float z, float w) {
+    auto blocks = ReadBlocks(model);
+    blocks.emplace_back("MDAT", CameraMesh(x, y, z, w));
+    return PackBlocks(blocks);
+}
 
 struct Pair {
     TempDir dir;
@@ -914,6 +999,7 @@ TEST(Updater, CliCommandsMatchTheContract) {
     const CliOutput help = Execute({"--help"});
     EXPECT_EQ(help.Code, 0);
     EXPECT_NE(help.Text.find(std::string(SR_PRODUCT_TITLE) + " — hero models and animation skeleton repairs"), std::string::npos);
+    EXPECT_NE(help.Text.find("root_motion camera attachments from before October 16, 2026"), std::string::npos);
     EXPECT_EQ(Execute({"-h"}).Code, 0);
     const CliOutput version = Execute({"--version"});
     EXPECT_EQ(version.Code, 0);
@@ -944,4 +1030,68 @@ TEST(Updater, OutputAtTheGameArchiveIsRejected) {
     ExpectError<InvalidOperation>(
         [&] { HeroModelUpdater::Update(Utf8(game_dir), Utf8(mod), Utf8(game_dir / "pak01_dir.vpk"), false, false); },
         "Output must not be placed beside the official game archives.");
+}
+
+TEST(Updater, OldCameraOnACurrentSkeletonIsRepairable) {
+    const std::vector<uint8_t> mod_model = WithCamera(kGameModel, -0.5f, -0.5f, -0.5f, 0.5f);
+    Pair pair({{kModel, mod_model}});
+    const auto before = ReadBytes(pair.mod_path);
+    const UpdateReport analysis = HeroModelUpdater::Analyze(pair.game, Utf8(pair.mod_path));
+    EXPECT_FALSE(analysis.WroteFile);
+    EXPECT_TRUE(analysis.CanRepair());
+    EXPECT_EQ(ReadBytes(pair.mod_path), before);
+    ASSERT_EQ(analysis.Results.size(), 1u);
+    EXPECT_EQ(analysis.Results[0].Outcome, ModelOutcome::Repairable);
+    EXPECT_NE(analysis.Results[0].Detail.find("October 16, 2026"), std::string::npos);
+    EXPECT_NE(analysis.Results[0].Detail.find("No supported skeleton differences"), std::string::npos);
+
+    const UpdateReport report = HeroModelUpdater::Update(pair.game, Utf8(pair.mod_path), std::nullopt, true, true);
+    EXPECT_TRUE(report.WroteFile);
+    ASSERT_EQ(report.Results.size(), 1u);
+    EXPECT_EQ(report.Results[0].Outcome, ModelOutcome::Updated);
+    const std::vector<uint8_t> written = EntryBytes(VpkArchive::Open(pair.mod_path), kModel);
+    const CameraAttachmentEdit camera = CameraAttachmentRepair::Inspect(written);
+    EXPECT_EQ(camera.Frame, CameraFrame::Current);
+    const CameraAttachmentEdit again = CameraAttachmentRepair::Apply(written);
+    EXPECT_FALSE(again.Bytes.has_value());
+}
+
+TEST(Updater, UnrecognizedCameraDoesNotBlockAnotherRepair) {
+    constexpr const char* kOther = "models/heroes/other/other.vmdl_c";
+    const std::vector<uint8_t> odd = WithCamera(kGameModel, 0.0f, 0.0f, 0.70710678f, 0.70710678f);
+    Pair pair(
+        {{kModel, odd}, {kOther, kOldModel}},
+        {{kModel, kGameModel}, {kOther, kGameModel}});
+    const UpdateReport analysis = HeroModelUpdater::Analyze(pair.game, Utf8(pair.mod_path));
+    EXPECT_FALSE(analysis.HasBlockers());
+    EXPECT_TRUE(analysis.CanRepair());
+    const ModelResult* camera = ResultFor(analysis, kModel);
+    const ModelResult* skeleton = ResultFor(analysis, kOther);
+    ASSERT_NE(camera, nullptr);
+    ASSERT_NE(skeleton, nullptr);
+    EXPECT_EQ(camera->Outcome, ModelOutcome::Current);
+    ASSERT_TRUE(camera->Warnings.has_value());
+    ASSERT_FALSE(camera->Warnings->empty());
+    EXPECT_NE(camera->Warnings->front().find("left unchanged"), std::string::npos);
+    EXPECT_EQ(skeleton->Outcome, ModelOutcome::Repairable);
+}
+
+TEST(Updater, CameraOnAModelThatNeedsReviewIsLeftInPlace) {
+    const std::vector<uint8_t> mod_model = WithCamera(Model({.Names = {"arm", "root"}, .Parents = {1, -1}}), -0.5f, -0.5f, -0.5f, 0.5f);
+    Pair pair({{kModel, mod_model}});
+    const auto before = ReadBytes(pair.mod_path);
+    const UpdateReport analysis = HeroModelUpdater::Analyze(pair.game, Utf8(pair.mod_path));
+    EXPECT_TRUE(analysis.HasBlockers());
+    EXPECT_FALSE(analysis.CanRepair());
+    EXPECT_EQ(ReadBytes(pair.mod_path), before);
+    ASSERT_EQ(analysis.Results.size(), 1u);
+    EXPECT_EQ(analysis.Results[0].Outcome, ModelOutcome::NeedsReview);
+    ASSERT_TRUE(analysis.Results[0].Warnings.has_value());
+    bool told = false;
+    for (const std::string& warning : *analysis.Results[0].Warnings) {
+        if (warning.find("needs review for another reason") != std::string::npos) {
+            told = true;
+        }
+    }
+    EXPECT_TRUE(told);
 }

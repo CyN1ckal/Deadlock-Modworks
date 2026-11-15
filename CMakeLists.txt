@@ -158,6 +158,7 @@ add_library(skeleton_repair_core STATIC
     src/core/archive_transaction.cpp
     src/core/kv3.cpp
     src/core/resource.cpp
+    src/core/camera_attachment.cpp
     src/core/animation.cpp
     src/core/model.cpp
     src/core/updater.cpp
@@ -199,6 +200,7 @@ add_executable(skeleton_repair_tests
     tests/vpk_tests.cpp
     tests/kv3_tests.cpp
     tests/resource_tests.cpp
+    tests/camera_attachment_tests.cpp
     tests/animation_tests.cpp
     tests/model_tests.cpp
     tests/updater_tests.cpp

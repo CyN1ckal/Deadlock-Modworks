@@ -15,7 +15,7 @@ The window title is **Deadlock Modworks 0.1.0**. The menu bar is **File**, **Edi
 | **Mod library** | Ctrl+1 | Skins and other files in the collection |
 | **VPK builder** | Ctrl+2 | The current pack, then **Build VPK...** |
 | **Version history** | Ctrl+3 | Stored models, packs, and versions |
-| **Skin repairs** | Ctrl+4 | Analyze and repair supported skeleton changes |
+| **Skin repairs** | Ctrl+4 | Analyze and repair supported skeleton changes and pre-October 2026 camera attachments |
 | **Model inspector** | Ctrl+5 | One model: **Preview** and **Compare versions** |
 | **Multi view** | Ctrl+6 | Up to four models of one character |
 | **Mods** | Ctrl+7 | Enabled mods, load order, profiles, and **Apply to game** |
@@ -208,7 +208,7 @@ The repair runs on the library's copy of the archive. Your original download is 
 
 **Save report...** writes JSON. The suggested name is `model-report.json`. The status line says **Saved** and the path, or the error.
 
-Supported repair is VPK version 2, hero `.vmdl_c` models, and AG2 `.vnmskel_c` animation-skeleton overrides. It can migrate compatible animation bindings, unambiguous case-only bone renames, and supported embedded skeletons, and it keeps authored poses and skin bindings. It does not treat every difference from the game as a defect. Custom proportions, helper bones, cloth, and reference poses can be intentional. It does not invent arbitrary renames, recompile source files, or rewrite animation clips, physics, or cloth. It reads the mod being repaired and the installed game, not the other addons in the library.
+Supported repair is VPK version 2, hero `.vmdl_c` models, and AG2 `.vnmskel_c` animation-skeleton overrides. It can migrate compatible animation bindings, unambiguous case-only bone renames, and supported embedded skeletons, and it keeps authored poses and skin bindings. It also moves root_motion camera attachments from before October 16, 2026 into the current frame and keeps the mod's own offsets. It does not treat every difference from the game as a defect. Custom proportions, helper bones, cloth, and reference poses can be intentional. It does not invent arbitrary renames, recompile source files, or rewrite animation clips, physics, or cloth. It reads the mod being repaired and the installed game, not the other addons in the library.
 
 Changing the game or the library clears the analysis. Selection is disabled while analysis, repair, or import is running.
 

@@ -1,6 +1,7 @@
 #include "updater.hpp"
 
 #include "animation.hpp"
+#include "camera_attachment.hpp"
 #include "archive_transaction.hpp"
 #include "content_hash.hpp"
 #include "repair_journal.hpp"
@@ -253,6 +254,49 @@ void ApplyDependencies(MigrationEdit& edit, std::span<const uint8_t> bytes, cons
         edit.Detail = "Rig dependencies are missing from the game and this mod: " + Join(missing, 6)
             + ". The mod may depend on another addon or need author repair.";
         edit.Warnings = warnings;
+    }
+}
+
+void AddWarning(MigrationEdit& edit, std::string text) {
+    std::vector<std::string> warnings = edit.Warnings.value_or(std::vector<std::string>{});
+    warnings.push_back(std::move(text));
+    edit.Warnings = std::move(warnings);
+}
+
+// Current and updated skeletons still carry the camera. Needs review keeps the old frame and says why.
+void ApplyCamera(MigrationEdit& edit, std::span<const uint8_t> original) {
+    const bool writable = edit.Outcome == ModelOutcome::Updated || edit.Outcome == ModelOutcome::Current;
+    if (!writable) {
+        if (edit.Outcome == ModelOutcome::NeedsReview) {
+            const CameraAttachmentEdit camera = CameraAttachmentRepair::Inspect(original);
+            if (camera.Frame == CameraFrame::Old) {
+                AddWarning(edit, "Camera attachments on root_motion still use the frame from before October 16, 2026. "
+                    "They were not moved because this model needs review for another reason.");
+            }
+        }
+        return;
+    }
+
+    const std::span<const uint8_t> source = edit.Bytes ? std::span<const uint8_t>(*edit.Bytes) : original;
+    CameraAttachmentEdit camera = CameraAttachmentRepair::Apply(source);
+    if (camera.Frame == CameraFrame::Old && camera.Bytes) {
+        if (edit.Outcome == ModelOutcome::Current) {
+            edit.Detail = edit.Detail.empty() ? camera.Detail : camera.Detail + " " + edit.Detail;
+        } else if (edit.Detail.empty()) {
+            edit.Detail = camera.Detail;
+        } else {
+            edit.Detail += " ";
+            edit.Detail += camera.Detail;
+        }
+        edit.Outcome = ModelOutcome::Updated;
+        edit.Bytes = std::move(camera.Bytes);
+        if (!camera.Warning.empty()) {
+            AddWarning(edit, camera.Warning);
+        }
+    } else if (camera.Frame == CameraFrame::Unrecognized) {
+        AddWarning(edit, camera.Detail.empty()
+            ? "A camera pivot on root_motion does not match the old or the current frame, so those attachments were left unchanged."
+            : camera.Detail);
     }
 }
 
@@ -707,9 +751,11 @@ UpdateReport HeroModelUpdater::Update(const std::string& game_directory, const s
             } else {
                 edits[i] = ModelMigration::Migrate(mod_bytes, plan.Entry.FullPath, game_bytes, *plan.Resolved);
             }
-            if (HeroPaths::IsHeroModel(plan.Entry.FullPath)
-                && (edits[i]->Outcome == ModelOutcome::Updated || edits[i]->Outcome == ModelOutcome::Current)) {
-                ApplyDependencies(*edits[i], mod_bytes, available);
+            if (HeroPaths::IsHeroModel(plan.Entry.FullPath)) {
+                if (edits[i]->Outcome == ModelOutcome::Updated || edits[i]->Outcome == ModelOutcome::Current) {
+                    ApplyDependencies(*edits[i], mod_bytes, available);
+                }
+                ApplyCamera(*edits[i], mod_bytes);
             }
         } catch (const InvalidData& ex) {
             edits[i] = FailedEdit(ex.what());

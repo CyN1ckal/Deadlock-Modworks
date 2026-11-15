@@ -1,6 +1,6 @@
 # Deadlock Modworks
 
-Deadlock Modworks 0.1.0 is a Windows app for a local collection of Deadlock mods. It browses skins, inspects and compares models, repairs supported skeleton changes, keeps a version history, shares that library, and assembles selected models into one VPK. Assembly does not install the pack, and it does not cover every kind of mod.
+Deadlock Modworks 0.1.0 is a Windows app for a local collection of Deadlock mods. It browses skins, inspects and compares models, repairs supported skeleton changes and pre-October 2026 camera attachments, keeps a version history, shares that library, and assembles selected models into one VPK. Assembly does not install the pack, and it does not cover every kind of mod.
 
 It also downloads Deadlock mods from GameBanana (**Get mods**, **Ctrl+8**) and turns library mods on or off in the game (**Mods**, **Ctrl+7**): you tick mods, set their load order and profiles, and **Apply to game** places them in `game\citadel\addons`. Modworks only changes the files it placed there. See [Mods](docs/USER_GUIDE.md#mods) and [Get mods](docs/USER_GUIDE.md#get-mods).
 

@@ -35,6 +35,7 @@ const char* OutcomeName(ModelOutcome outcome) {
 
 void Usage(const std::function<void(std::string_view)>& write) {
     write(std::string(SR_PRODUCT_TITLE) + " — hero models and animation skeleton repairs");
+    write("Repair also moves root_motion camera attachments from before October 16, 2026 into the current frame.");
     write("  --analyze <citadel-folder> <mod.vpk> [--report <report.json>]");
     write("  --update  <citadel-folder> <mod.vpk> <new-output.vpk> [--report <report.json>]");
     write("  --repair  <citadel-folder> <mod.vpk> [--report <report.json>]");

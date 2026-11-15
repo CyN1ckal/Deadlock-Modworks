@@ -107,6 +107,49 @@ LocatedData LocateDataBlock(std::span<const uint8_t> file) {
     return LocatedData{file_size, data_entry, data_abs, data_size, table_start, block_count};
 }
 
+std::vector<uint8_t> SpliceBlock(std::span<const uint8_t> file, int entry, int abs, int size, int table_start,
+    int block_count, uint32_t file_size, std::span<const uint8_t> new_data) {
+    const int data_end = abs + size;
+    const int64_t delta = static_cast<int64_t>(new_data.size()) - size;
+    const int64_t new_length = static_cast<int64_t>(file.size()) + delta;
+    if (new_length < 0 || new_length > std::numeric_limits<int>::max()) {
+        throw InvalidData("Replacing a block made the resource an invalid size.");
+    }
+
+    std::vector<uint8_t> result(static_cast<size_t>(new_length));
+    std::memcpy(result.data(), file.data(), static_cast<size_t>(abs));
+    if (!new_data.empty()) {
+        std::memcpy(result.data() + abs, new_data.data(), new_data.size());
+    }
+    std::memcpy(result.data() + abs + new_data.size(), file.data() + data_end, file.size() - static_cast<size_t>(data_end));
+
+    const int64_t new_file_size = static_cast<int64_t>(file_size) + delta;
+    if (new_file_size < 0 || new_file_size > std::numeric_limits<uint32_t>::max()) {
+        throw InvalidData("Resource file size does not fit.");
+    }
+    Write<uint32_t>(result, 0, static_cast<uint32_t>(new_file_size));
+    Write<uint32_t>(result, static_cast<size_t>(entry + 8), static_cast<uint32_t>(new_data.size()));
+
+    for (int i = 0; i < block_count; ++i) {
+        const int pos = table_start + i * 12;
+        if (pos == entry) {
+            continue;
+        }
+        const auto rel = Read<uint32_t>(file, static_cast<size_t>(pos + 4));
+        const int64_t block_abs = static_cast<int64_t>(pos) + 4 + rel;
+        if (block_abs < data_end) {
+            continue;
+        }
+        const int64_t new_rel = static_cast<int64_t>(rel) + delta;
+        if (new_rel < 0 || new_rel > std::numeric_limits<uint32_t>::max()) {
+            throw InvalidData("A block offset does not fit after the block replacement.");
+        }
+        Write<uint32_t>(result, static_cast<size_t>(pos + 4), static_cast<uint32_t>(new_rel));
+    }
+
+    return result;
+}
+
 }  // namespace
 
 std::span<const uint8_t> FindDataBlock(std::span<const uint8_t> file) {
@@ -132,50 +175,44 @@ std::vector<uint8_t> ReplaceDataBlock(std::span<const uint8_t> file, std::span<c
     }
 
     const LocatedData located = LocateDataBlock(file);
-    const uint32_t file_size = located.file_size;
-    const int data_entry = located.entry;
-    const int data_abs = located.abs;
-    const int data_size = located.size;
-    const int table_start = located.table_start;
-    const int block_count = located.block_count;
-    const int data_end = data_abs + data_size;
+    return SpliceBlock(file, located.entry, located.abs, located.size, located.table_start, located.block_count,
+        located.file_size, new_data);
+}
 
-    const int64_t delta = static_cast<int64_t>(new_data.size()) - data_size;
-    const int64_t new_length = static_cast<int64_t>(file.size()) + delta;
-    if (new_length < 0 || new_length > std::numeric_limits<int>::max()) {
-        throw InvalidData("Replacing DATA made the resource an invalid size.");
+std::vector<uint8_t> ReplaceResourceBlock(std::span<const uint8_t> file, int block_index, std::span<const uint8_t> new_bytes) {
+    if (file.size() < 16) {
+        throw InvalidData("Resource is too small.");
     }
-
-    std::vector<uint8_t> result(static_cast<size_t>(new_length));
-    std::memcpy(result.data(), file.data(), static_cast<size_t>(data_abs));
-    std::memcpy(result.data() + data_abs, new_data.data(), new_data.size());
-    std::memcpy(result.data() + data_abs + new_data.size(), file.data() + data_end, file.size() - static_cast<size_t>(data_end));
-
-    const int64_t new_file_size = static_cast<int64_t>(file_size) + delta;
-    if (new_file_size < 0 || new_file_size > std::numeric_limits<uint32_t>::max()) {
-        throw InvalidData("Resource file size does not fit.");
+    if (Read<uint16_t>(file, 4) != 12) {
+        throw InvalidData("Resource header is not version 12.");
     }
-    Write<uint32_t>(result, 0, static_cast<uint32_t>(new_file_size));
-    Write<uint32_t>(result, static_cast<size_t>(data_entry + 8), static_cast<uint32_t>(new_data.size()));
-
-    for (int i = 0; i < block_count; ++i) {
-        const int pos = table_start + i * 12;
-        if (pos == data_entry) {
-            continue;
-        }
-        const auto rel = Read<uint32_t>(file, static_cast<size_t>(pos + 4));
-        const int64_t abs = static_cast<int64_t>(pos) + 4 + rel;
-        if (abs < data_end) {
-            continue;
-        }
-        const int64_t new_rel = static_cast<int64_t>(rel) + delta;
-        if (new_rel < 0 || new_rel > std::numeric_limits<uint32_t>::max()) {
-            throw InvalidData("A block offset does not fit after the DATA replacement.");
-        }
-        Write<uint32_t>(result, static_cast<size_t>(pos + 4), static_cast<uint32_t>(new_rel));
+    const auto file_size = Read<uint32_t>(file, 0);
+    const auto block_offset = Read<uint32_t>(file, 8);
+    const auto block_count = Read<int32_t>(file, 12);
+    if (block_count <= 0 || block_offset < 8 || block_index < 0 || block_index >= block_count) {
+        throw InvalidData("Resource block index is invalid.");
     }
-
-    return result;
+    const int64_t table_start_long = 8LL + block_offset;
+    const int64_t table_bytes_long = static_cast<int64_t>(block_count) * 12;
+    if (table_start_long > static_cast<int64_t>(file.size()) || table_bytes_long > static_cast<int64_t>(file.size()) - table_start_long) {
+        throw InvalidData("Resource block table is outside the file.");
+    }
+    const int table_start = static_cast<int>(table_start_long);
+    const int entry = table_start + block_index * 12;
+    const auto rel = Read<uint32_t>(file, static_cast<size_t>(entry + 4));
+    const auto size = Read<int32_t>(file, static_cast<size_t>(entry + 8));
+    const int64_t abs = static_cast<int64_t>(entry) + 4 + rel;
+    if (size < 0 || abs > std::numeric_limits<int>::max()) {
+        throw InvalidData("A block location is invalid.");
+    }
+    if (static_cast<size_t>(abs) > file.size() || static_cast<size_t>(size) > file.size() - static_cast<size_t>(abs)) {
+        throw InvalidData("A block is outside the file.");
+    }
+    const int table_end = table_start + static_cast<int>(table_bytes_long);
+    if (abs < table_end) {
+        throw InvalidData("A block starts before the end of the block table.");
+    }
+    return SpliceBlock(file, entry, static_cast<int>(abs), size, table_start, block_count, file_size, new_bytes);
 }
 
 std::vector<std::string> ExternalReferenceNames(std::span<const uint8_t> file) {

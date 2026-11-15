@@ -10,6 +10,9 @@ namespace skeleton_repair {
 // Replaces the DATA block of a compiled Source 2 resource and patches the block table.
 std::vector<uint8_t> ReplaceDataBlock(std::span<const uint8_t> file, std::span<const uint8_t> new_data);
 
+// Replaces the block at `block_index` and slides every block that starts after it.
+std::vector<uint8_t> ReplaceResourceBlock(std::span<const uint8_t> file, int block_index, std::span<const uint8_t> new_bytes);
+
 // The DATA bytes inside a version 12 resource. The span points into `file`.
 std::span<const uint8_t> FindDataBlock(std::span<const uint8_t> file);
 
