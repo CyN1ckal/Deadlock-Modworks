@@ -93,9 +93,12 @@ struct ModConflict {
 // Every pair of mods that share files, by content id. Mods that cannot be opened are skipped.
 std::vector<ModConflict> FindModConflicts(const std::vector<DeployMod>& enabled, CancellationToken cancellation = {});
 
-// gameinfo.gi must list "Game citadel/addons" in SearchPaths for the game to load addons.
+// gameinfo.gi must list "Game citadel/addons" in SearchPaths for the game to load addons. False also when
+// that line is the first Game path without explicit Mod and Write lines: the engine would then use addons
+// as the MOD path and fail to load user settings such as keybinds.
 bool GameInfoMountsAddons(std::string_view gameinfo);
-// The text with that line added before the first "Game citadel" line of SearchPaths.
+// The text with that line added before the first "Game citadel" line of SearchPaths, plus "Mod citadel"
+// and "Write citadel" after it when the addons line would otherwise become the MOD or write path.
 // InvalidData when the file has no SearchPaths block.
 std::string AddAddonsToGameInfo(std::string_view gameinfo);
 // The citadel folder that holds gameinfo.gi and addons, from a game archive or folder path.

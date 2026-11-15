@@ -18,6 +18,7 @@
 - A gzip download is kept. The compressed `Content-Length` is no longer compared to the decoded file.
 - Archive extraction stops on a skipped file that expands past the size limit, and it does not open DOS device names such as `NUL.vpk`.
 - **Add the line and apply** does not change `gameinfo.gi` while Deadlock is running.
+- **Add the line and apply** no longer makes Deadlock crash with a failure to load user keybinds. The current `gameinfo.gi` has no `Mod` or `Write` lines, so putting `citadel/addons` first made it the game's MOD and write path, where user settings are read. Modworks now also adds `Mod citadel` and `Write citadel` after the addons line, matches the file's line endings, and offers to repair a `gameinfo.gi` that an earlier version patched.
 
 ### Changed
 

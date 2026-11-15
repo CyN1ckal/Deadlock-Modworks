@@ -447,9 +447,10 @@ void ModsPanel::DrawProfilePopups() {
     if (std::exchange(open_patch_gameinfo_, false)) ImGui::OpenPopup("Load the addons folder?");
     ImGui::SetNextWindowSize({ImGui::GetFontSize() * 30, 0}, ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("Load the addons folder?", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::TextWrapped("Deadlock's gameinfo.gi does not list citadel/addons, so the game would not load any mod placed there.");
-        ImGui::TextWrapped("Modworks can add that one line. The original is kept as gameinfo.gi.modworks.bak. A game update may "
-            "replace the file again; this page will tell you when that happens.");
+        ImGui::TextWrapped("Deadlock's gameinfo.gi does not load citadel/addons safely: either the line is missing, so no mod "
+            "placed there loads, or it comes first without Mod and Write lines, so the game looks for your keybinds and settings in addons.");
+        ImGui::TextWrapped("Modworks can add the addons line and, when needed, Mod citadel and Write citadel after it. The original "
+            "is kept as gameinfo.gi.modworks.bak. A game update may replace the file again; this page will tell you when that happens.");
         // Refresh only updates Running every couple of seconds, and this popup stays open across frames.
         const bool running = IsDeadlockRunning();
         if (running) ImGui::TextColored(ui::kWarning, "Close Deadlock first. It keeps its mod files open while it runs.");

@@ -430,12 +430,46 @@ std::vector<ModConflict> FindModConflicts(const std::vector<DeployMod>& enabled,
     return result;
 }
 
+namespace {
+// What the SearchPaths block says about addons and the MOD and write paths.
+struct SearchPathsInfo {
+    std::optional<size_t> Addons;   // the "Game citadel/addons" line
+    std::optional<size_t> FirstGame;
+    bool HasMod = false;
+    bool HasWrite = false;
+};
+
+SearchPathsInfo DescribeSearchPaths(const std::vector<std::string_view>& lines, std::pair<size_t, size_t> block) {
+    SearchPathsInfo info;
+    for (size_t i = block.first; i < block.second; ++i) {
+        const auto tokens = Tokens(lines[i]);
+        if (tokens.empty()) continue;
+        if (IsAddonsLine(tokens) && !info.Addons) info.Addons = i;
+        if (EqualsIgnoreCase(tokens[0], "Game") && !info.FirstGame) info.FirstGame = i;
+        if (EqualsIgnoreCase(tokens[0], "Mod")) info.HasMod = true;
+        if (EqualsIgnoreCase(tokens[0], "Write")) info.HasWrite = true;
+    }
+    return info;
+}
+
+// Without explicit Mod and Write lines the engine uses the first Game path for both. When that is
+// citadel/addons, user settings ("LegacyUserSettingsPathID" "MOD") resolve there and keybinds fail to load.
+bool AddonsTakeOverModPath(const SearchPathsInfo& info) {
+    return info.Addons && info.FirstGame == info.Addons && (!info.HasMod || !info.HasWrite);
+}
+
+std::string_view LineEnding(std::string_view line) {
+    if (line.size() >= 2 && line.substr(line.size() - 2) == "\r\n") return "\r\n";
+    return "\n";
+}
+}  // namespace
+
 bool GameInfoMountsAddons(std::string_view gameinfo) {
     const auto lines = Lines(gameinfo);
     const auto block = SearchPathsBlock(lines);
     if (!block) return false;
-    for (size_t i = block->first; i < block->second; ++i) if (IsAddonsLine(Tokens(lines[i]))) return true;
-    return false;
+    const auto info = DescribeSearchPaths(lines, *block);
+    return info.Addons && !AddonsTakeOverModPath(info);
 }
 
 std::string AddAddonsToGameInfo(std::string_view gameinfo) {
@@ -443,20 +477,39 @@ std::string AddAddonsToGameInfo(std::string_view gameinfo) {
     const auto lines = Lines(gameinfo);
     const auto block = SearchPathsBlock(lines);
     if (!block) throw InvalidData("gameinfo.gi has no SearchPaths section Modworks recognizes.");
-    const std::string newline = gameinfo.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
+    auto info = DescribeSearchPaths(lines, *block);
+
+    // Where new lines go, and the indent and line ending they copy.
+    const bool add_addons = !info.Addons;
     size_t insert = block->first;
     std::string indent = "\t\t\t";
-    for (size_t i = block->first; i < block->second; ++i) {
-        const auto tokens = Tokens(lines[i]);
-        if (tokens.size() >= 2 && EqualsIgnoreCase(tokens[0], "Game") && EqualsIgnoreCase(tokens[1], "citadel")) {
-            insert = i;
-            indent = std::string(lines[i].substr(0, lines[i].find_first_not_of(" \t")));
-            break;
+    if (!add_addons) {
+        insert = *info.Addons + 1;
+        indent = std::string(lines[*info.Addons].substr(0, lines[*info.Addons].find_first_not_of(" \t")));
+    } else {
+        for (size_t i = block->first; i < block->second; ++i) {
+            const auto tokens = Tokens(lines[i]);
+            if (tokens.size() >= 2 && EqualsIgnoreCase(tokens[0], "Game") && EqualsIgnoreCase(tokens[1], "citadel")) {
+                insert = i;
+                indent = std::string(lines[i].substr(0, lines[i].find_first_not_of(" \t")));
+                break;
+            }
         }
+        if (!info.FirstGame || insert <= *info.FirstGame) info.FirstGame = insert;
+        info.Addons = insert;
+    }
+    const std::string newline(LineEnding(lines[insert < lines.size() ? insert : lines.size() - 1]));
+
+    std::string added;
+    if (add_addons) added +=indent + "Game\t\t\t\tcitadel/addons" + newline;
+    if (AddonsTakeOverModPath(info)) {
+        // Keep the MOD and write paths on citadel, as they were before the addons line came first.
+        if (!info.HasMod) added += indent + "Mod\t\t\t\t\tcitadel" + newline;
+        if (!info.HasWrite) added += indent + "Write\t\t\t\tcitadel" + newline;
     }
     std::string result;
     for (size_t i = 0; i < lines.size(); ++i) {
-        if (i == insert) result += indent + "Game\t\t\t\tcitadel/addons" + newline;
+        if (i == insert) result += added;
         result += lines[i];
     }
     return result;

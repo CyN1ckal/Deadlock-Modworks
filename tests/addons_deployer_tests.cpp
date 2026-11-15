@@ -300,8 +300,8 @@ constexpr const char* kGameInfo =
 
 TEST(GameInfo, DetectsTheAddonsSearchPath) {
     EXPECT_FALSE(GameInfoMountsAddons(kGameInfo));
-    EXPECT_TRUE(GameInfoMountsAddons("SearchPaths\n{\n  Game \"citadel/addons\"\n  Game citadel\n}\n"));
-    EXPECT_TRUE(GameInfoMountsAddons("SearchPaths {\n  game citadel\\addons\\\n}\n"));
+    EXPECT_TRUE(GameInfoMountsAddons("SearchPaths\n{\n  Game \"citadel/addons\"\n  Mod citadel\n  Write citadel\n  Game citadel\n}\n"));
+    EXPECT_TRUE(GameInfoMountsAddons("SearchPaths {\n  game citadel\\addons\\\n  mod citadel\n  write citadel\n}\n"));
     EXPECT_FALSE(GameInfoMountsAddons("SearchPaths\n{\n  // Game citadel/addons\n  Game citadel\n}\n"));
     EXPECT_FALSE(GameInfoMountsAddons("Other\n{\n  Game citadel/addons\n}\n"));
 }
@@ -312,9 +312,44 @@ TEST(GameInfo, AddsTheSearchPathBeforeTheGameFolder) {
     const auto addons = patched.find("\t\t\tGame\t\t\t\tcitadel/addons\r\n");
     ASSERT_NE(addons, std::string::npos);
     EXPECT_LT(addons, patched.find("\t\t\tGame\t\t\t\tcitadel\r\n"));
-    EXPECT_EQ(patched.size(), std::string(kGameInfo).size() + std::string("\t\t\tGame\t\t\t\tcitadel/addons\r\n").size());
+    // kGameInfo has "Mod citadel" but no Write line, so the write path is kept on citadel too.
+    EXPECT_EQ(patched.size(), std::string(kGameInfo).size()
+        + std::string("\t\t\tGame\t\t\t\tcitadel/addons\r\n\t\t\tWrite\t\t\t\tcitadel\r\n").size());
     EXPECT_EQ(AddAddonsToGameInfo(patched), patched);
     EXPECT_THROW(AddAddonsToGameInfo("\"GameInfo\" { }"), InvalidData);
+}
+
+// The current Deadlock layout: no Mod or Write lines, LF endings, user settings read from the MOD path.
+constexpr const char* kGameInfoWithoutMod =
+    "\"GameInfo\"\n{\n\tFileSystem\n\t{\n\t\tSearchPaths\n\t\t{\n"
+    "\t\t\tGame_UILanguage\t\tcitadel_*LANGUAGE*\n\n\t\t\tGame_LowViolence\tcitadel_lv\n\n"
+    "\t\t\tGame\t\t\t\tcitadel\n\t\t\tGame\t\t\t\tcore\n\t\t}\n\n"
+    "\t\t\"UserSettingsPathID\"\t\t\"USRLOCAL\"\n\t\t\"LegacyUserSettingsPathID\"\t\"MOD\"\n\t}\n}\n";
+
+TEST(GameInfo, KeepsTheModPathOnCitadelWhenAddonsComeFirst) {
+    const auto patched = AddAddonsToGameInfo(kGameInfoWithoutMod);
+    EXPECT_TRUE(GameInfoMountsAddons(patched));
+    const std::string expected = "\t\t\tGame\t\t\t\tcitadel/addons\n\t\t\tMod\t\t\t\t\tcitadel\n"
+        "\t\t\tWrite\t\t\t\tcitadel\n\t\t\tGame\t\t\t\tcitadel\n";
+    EXPECT_NE(patched.find(expected), std::string::npos) << patched;
+    EXPECT_EQ(patched.find('\r'), std::string::npos);
+    EXPECT_EQ(AddAddonsToGameInfo(patched), patched);
+}
+
+TEST(GameInfo, RepairsAnAddonsLineThatTookOverTheModPath) {
+    // What earlier versions wrote: the addons line alone, first among the Game paths.
+    std::string broken = kGameInfoWithoutMod;
+    const auto at = broken.find("\t\t\tGame\t\t\t\tcitadel\n");
+    broken.insert(at, "\t\t\tGame\t\t\t\tcitadel/addons\r\n");
+    EXPECT_FALSE(GameInfoMountsAddons(broken));
+    const auto repaired = AddAddonsToGameInfo(broken);
+    EXPECT_TRUE(GameInfoMountsAddons(repaired));
+    EXPECT_NE(repaired.find("citadel/addons\r\n\t\t\tMod\t\t\t\t\tcitadel\n\t\t\tWrite\t\t\t\tcitadel\n\t\t\tGame\t\t\t\tcitadel\n"),
+        std::string::npos) << repaired;
+    // Explicit Mod and Write lines elsewhere already keep settings on citadel.
+    EXPECT_TRUE(GameInfoMountsAddons("SearchPaths\n{\n  Game citadel/addons\n  Mod citadel\n  Write citadel\n  Game citadel\n}\n"));
+    // An addons line after another Game path does not become the MOD path.
+    EXPECT_TRUE(GameInfoMountsAddons("SearchPaths\n{\n  Game citadel\n  Game citadel/addons\n}\n"));
 }
 
 TEST(GameInfo, PatchesTheFileAndKeepsABackup) {
