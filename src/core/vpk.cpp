@@ -18,6 +18,8 @@ namespace skeleton_repair {
 namespace {
 
 constexpr uint32_t kSignature = 0x55AA1234u;
+constexpr uint32_t kHeaderSizeV1 = 12;
+constexpr uint32_t kHeaderSizeV2 = 28;
 
 uint32_t ReadU32(const uint8_t* data) {
     return static_cast<uint32_t>(data[0])
@@ -468,9 +470,10 @@ void ReadLease::Release() {
 }
 
 VpkArchive::VpkArchive(std::filesystem::path directory, std::wstring base_name, std::vector<VpkEntry> entries,
-    uint32_t file_data_size, int32_t tree_size)
+    uint32_t header_size, uint32_t file_data_size, int32_t tree_size)
     : directory_(std::move(directory)),
       base_name_(std::move(base_name)),
+      header_size_(header_size),
       file_data_size_(file_data_size),
       tree_size_(tree_size),
       entries_(std::move(entries)) {}
@@ -499,26 +502,42 @@ std::string VpkArchive::Normalize(std::string path) {
 VpkArchive VpkArchive::Open(const std::filesystem::path& directory_path) {
     FileHandle file = OpenFile(directory_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING);
     const int64_t length = FileSize(file.get());
-    if (length < 28) {
+    if (length < kHeaderSizeV1) {
         throw InvalidData("VPK directory or embedded data is outside the file.");
     }
-    uint8_t header[28];
-    ReadExact(file.get(), header, 28);
+    uint8_t header[kHeaderSizeV2] = {};
+    ReadExact(file.get(), header, kHeaderSizeV1);
     const uint32_t signature = ReadU32(header);
     const uint32_t version = ReadU32(header + 4);
     const int32_t tree_size = ReadI32(header + 8);
-    const uint32_t file_data_size = ReadU32(header + 12);
-    if (signature != kSignature || version != 2) {
+    if (signature != kSignature || (version != 1 && version != 2)) {
         throw InvalidData(directory_path.filename().string() + " is not a Source 2 VPK.");
     }
-    // Bytes 16..28 are the archive MD5, other MD5, and signature sizes.
-    // Chunked game archives fill those in. The tree still begins after this header,
-    // and Write() emits a new embedded mod archive instead of copying those sections.
-    const int64_t tree_bytes = tree_size;
-    const int64_t data_bytes = file_data_size;
-    if (tree_size < 0 || tree_bytes > length - 28 || 28 + tree_bytes + data_bytes > length) {
+    if (tree_size < 0) {
         throw InvalidData("VPK directory or embedded data is outside the file.");
     }
+    const int64_t tree_bytes = tree_size;
+    uint32_t header_size = kHeaderSizeV1;
+    int64_t data_bytes = 0;
+    if (version == 2) {
+        if (length < kHeaderSizeV2) {
+            throw InvalidData("VPK directory or embedded data is outside the file.");
+        }
+        ReadExact(file.get(), header + kHeaderSizeV1, kHeaderSizeV2 - kHeaderSizeV1);
+        header_size = kHeaderSizeV2;
+        // Bytes 16..28 are the archive MD5, other MD5, and signature sizes.
+        // Chunked game archives fill those in. The tree still begins after this header,
+        // and Write() emits a new embedded mod archive instead of copying those sections.
+        data_bytes = ReadU32(header + 12);
+    } else if (tree_bytes <= length - kHeaderSizeV1) {
+        // Version 1 has no data size or footer: embedded data runs from the tree to the end of the file.
+        data_bytes = length - kHeaderSizeV1 - tree_bytes;
+    }
+    if (tree_bytes > length - header_size || header_size + tree_bytes + data_bytes > length
+        || data_bytes > std::numeric_limits<uint32_t>::max()) {
+        throw InvalidData("VPK directory or embedded data is outside the file.");
+    }
+    const uint32_t file_data_size = static_cast<uint32_t>(data_bytes);
     std::vector<uint8_t> tree(static_cast<size_t>(tree_size));
     if (tree_size > 0) {
         ReadExact(file.get(), tree.data(), static_cast<DWORD>(tree_size));
@@ -530,7 +549,7 @@ VpkArchive VpkArchive::Open(const std::filesystem::path& directory_path) {
             throw InvalidData("VPK contains duplicate resource paths.");
         }
     }
-    return VpkArchive(directory_path, StripDirSuffix(directory_path.stem().wstring()), std::move(entries), file_data_size, tree_size);
+    return VpkArchive(directory_path, StripDirSuffix(directory_path.stem().wstring()), std::move(entries), header_size, file_data_size, tree_size);
 }
 
 std::filesystem::path VpkArchive::ChunkPath(uint16_t index) const {
@@ -541,7 +560,7 @@ std::filesystem::path VpkArchive::ChunkPath(uint16_t index) const {
 
 int64_t VpkArchive::DataOffset(const VpkEntry& entry) const {
     if (entry.ArchiveIndex == EmbeddedArchive) {
-        return 28 + static_cast<int64_t>(tree_size_) + entry.Offset;
+        return static_cast<int64_t>(header_size_) + tree_size_ + entry.Offset;
     }
     return entry.Offset;
 }
