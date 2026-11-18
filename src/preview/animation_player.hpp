@@ -1,7 +1,7 @@
 #pragma once
 
 #include "animation_clip.hpp"
-#include "background.hpp"
+#include "latest_task.hpp"
 #include "resource_reader.hpp"
 
 #include <optional>

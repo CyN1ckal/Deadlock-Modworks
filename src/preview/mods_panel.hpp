@@ -1,7 +1,7 @@
 #pragma once
 
 #include "addons_deployer.hpp"
-#include "background.hpp"
+#include "latest_task.hpp"
 #include "mod_state.hpp"
 
 #include <atomic>

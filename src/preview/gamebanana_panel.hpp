@@ -1,6 +1,6 @@
 #pragma once
 
-#include "background.hpp"
+#include "latest_task.hpp"
 #include "gamebanana.hpp"
 #include "thumbnail_cache.hpp"
 

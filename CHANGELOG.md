@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- The model tools window releases its window, Vulkan device and Dear ImGui context when startup fails part way, and waits for the GPU before freeing viewports when it closes after an error.
+- `--game` and `--clip` without a value now stop with an error, like `--data-root`, instead of being opened as a file.
 - Version 1 VPKs, which some packing tools still write, are no longer rejected as "not a Source 2 VPK". They are read with their 12-byte header and, like any mod Modworks repairs or rebuilds, written back as version 2.
 - **Apply to game** puts moved and removed mods back when a later copy fails or you cancel, instead of deleting them.
 - A gzip download is kept. The compressed `Content-Length` is no longer compared to the decoded file.

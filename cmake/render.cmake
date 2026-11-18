@@ -82,22 +82,22 @@ target_link_libraries(sr_render PUBLIC skeleton_repair_core Vulkan::Vulkan)
 
 add_library(sr_model_tools STATIC
     src/preview/main.cpp
+    src/preview/shell_window.cpp
+    src/preview/vulkan_window.cpp
+    src/preview/shell_layout.cpp
+    src/preview/workspace.cpp
+    src/preview/model_inspection.cpp
     src/preview/model_viewport.cpp
     src/preview/animation_player.cpp
     src/preview/preview_panel.cpp
     src/preview/comparison_view.cpp
     src/preview/multi_view.cpp
-    src/preview/character_view.cpp
     src/preview/repair_panel.cpp
     src/preview/library_panel.cpp
     src/preview/mods_panel.cpp
     src/preview/gamebanana_panel.cpp
     src/preview/history_panel.cpp
-    src/preview/background.cpp
     src/preview/thumbnail_cache.cpp
-    src/preview/library_model.cpp
-    src/preview/store_reader.cpp
-    src/preview/history_compare.cpp
     src/preview/ui.cpp
     src/preview/theme.cpp
 )
@@ -133,10 +133,6 @@ add_executable(render_tests
 )
 target_link_libraries(render_tests PRIVATE sr_render sr_model_tools GTest::gtest_main)
 
-if(MSVC)
-    foreach(target sr_render sr_model_tools ModelPreview render_tests)
-        target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
-    endforeach()
-endif()
+sr_project_warnings(sr_render sr_model_tools ModelPreview render_tests)
 
 gtest_discover_tests(render_tests DISCOVERY_MODE PRE_TEST)

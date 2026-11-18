@@ -91,10 +91,11 @@ Maintainer packaging is [RELEASING.md](RELEASING.md). `scripts/Publish.ps1` buil
 ## Layout
 
 - `src/app` — process entry, command-line dispatch, and the repair-only window.
-- `src/core` — VPK and resource reading, the content store, export, and skeleton repair.
+- `src/core` — VPK and resource reading, the content store, export, skeleton repair, and everything else that does not draw: the library session and its background jobs, the archive cache, and the records the panels show.
 - `src/render` — Vulkan rendering and comparison data.
-- `src/preview` — the model-tools window. Menus and shortcuts are in `src/preview/main.cpp`.
+- `src/preview` — the model-tools window. `main.cpp` starts it; `shell_window` and `vulkan_window` own the Win32 window and the swapchain; `workspace` holds the menus, shortcuts, explorer and pages; each page is its own panel.
 - `tests` — core and rendering tests.
+- `cmake` — third-party dependencies (`dependencies.cmake`, `archive_deps.cmake`) and the model-tools GUI targets (`render.cmake`).
 - `assets/branding` — the icon sources embedded by the resource script.
 
 Binary KV3 and Source 2 resource layouts follow [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat) release 20.0.6980. That project is not linked. Attribution is in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
