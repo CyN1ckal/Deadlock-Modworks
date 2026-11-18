@@ -18,9 +18,9 @@ Start Deadlock Modworks. A normal start does not need a terminal or a build tool
 
 Double-click `DeadlockModworks.exe`. The window title is **Deadlock Modworks 0.1.0**. The menus are **File**, **Edit**, **View**, **Tools**, and **Help**.
 
-The window opens on **My mods**. The workspace tabs are **My mods**, **Discover**, and **Skins**, then the tools in dimmer labels: **Pack builder**, **Repairs**, **Inspector**, **Side by side**, and **History**. **Ctrl+1** to **Ctrl+8** follow that order.
+The window opens on **My mods**. The navigation down the left edge lists **My mods**, **Discover**, and **Skins** under **PLAY**, then the tools in dimmer labels under **TOOLS**: **Pack builder**, **Repairs**, **Inspector**, **Side by side**, and **History**. **Ctrl+1** to **Ctrl+8** follow that order. A card at the bottom says whether Deadlock was found, and **Settings** (**Ctrl+,**) is under it.
 
-The left **Explorer** has **MOD FILES**, **GAME**, and **LIBRARY**. It shows beside **Skins** and the tools, and not on **My mods** or **Discover**.
+The **mod files panel** lists **MOD FILES**. It shows beside **Skins** and the tools, and not on **My mods**, **Discover** or **Settings**.
 
 `vulkan-1.dll` is delay-loaded from the graphics driver. The zip does not include it. A missing loader is supposed to show **vulkan-1.dll was not found. Install or update the graphics driver that provides the Vulkan loader, then start Deadlock Modworks again. The model library was not opened.** That dialog was not observed. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
@@ -28,9 +28,9 @@ The left **Explorer** has **MOD FILES**, **GAME**, and **LIBRARY**. It shows bes
 
 Modworks finds a Steam install by itself. If it doesn't, use File > Locate Deadlock and choose game\citadel.
 
-If no game path was saved and `--game` was not passed, launch looks for Deadlock through Steam. A `gameDirectory` already in `store\settings.json`, a game archive stored with the library, or `--game` is used instead of that search. The status bar, and **GAME** in the explorer, say **Deadlock found** or **Deadlock not found**. While the archive is opening they say **Looking for Deadlock...**.
+If no game path was saved and `--game` was not passed, launch looks for Deadlock through Steam. A `gameDirectory` already in `store\settings.json`, a game archive stored with the library, or `--game` is used instead of that search. The status bar, the card at the bottom of the navigation, and **Settings** say **Deadlock found** or **Deadlock not found**. While the archive is opening they say **Looking for Deadlock...**.
 
-The explorer keeps a manual path. The field hint is **game\citadel or pak01_dir.vpk**. **Connect** uses a typed path. **Browse...** and **File > Locate Deadlock...** (**Ctrl+G**) open the file dialog. **Locate Deadlock** on an empty **Skins** page uses a typed path when the field is filled, and otherwise opens that dialog.
+**Settings** keeps a manual path under **Deadlock**. The field hint is **game\citadel or pak01_dir.vpk**. **Use this path** uses a typed path. **Browse...** and **File > Locate Deadlock...** (**Ctrl+G**) open the file dialog. **Locate Deadlock** on an empty **Skins** page uses a typed path when the field is filled, and otherwise opens that dialog.
 
 Select this file, not a mod and not a chunk:
 
@@ -52,19 +52,19 @@ To add VPKs you already have, use any of these:
 
 - **Add mods...** on **My mods** or on an empty **Skins** page
 - **File > Add mods...** (**Ctrl+O**)
-- **Add** in the explorer
+- **Add** in the mod files panel
 
 The empty page says you can drop mod VPKs on the window. A drop onto the window was not performed.
 
 The file dialog title is **Add reference mods (Ctrl / Shift to select multiple)**. **Ctrl-click** and **Shift-click** select more than one file.
 
-**File > Add folder...** (**Ctrl+Shift+O**), or **Folder** in the explorer, adds every mod VPK directly in a folder, such as Deadlock's `addons` folder. Chunk files and the game archive are skipped. If the folder has no mod VPKs, the status line says `No mod VPKs found in <folder>.`
+**File > Add folder...** (**Ctrl+Shift+O**), or **Folder** in the mod files panel, adds every mod VPK directly in a folder, such as Deadlock's `addons` folder. Chunk files and the game archive are skipped. If the folder has no mod VPKs, the status line says `No mod VPKs found in <folder>.`
 
 With an empty library, **My mods** says **No mods yet** and **Find mods on GameBanana, or add VPK files you already have. Then turn them on here and choose Apply to game.** The buttons are **Discover mods** and **Add mods...**.
 
 **Skins** says **No skins yet** and **Skins show up here once you add mods. Find mods on Discover (Ctrl+2), or add VPK files you already have.** The buttons are **Add mods...**, **Locate Deadlock** while the game is not found, and **Quick start**. The tooltip on **Locate Deadlock** lists what needs the game. Both pages say **You can also drop mod VPKs on the window.**
 
-An empty explorer list says **No mod files yet. Add some here, or find mods on Discover (Ctrl+2).**
+An empty mod files panel says **No mod files yet. Add some here, or find mods on Discover (Ctrl+2).**
 
 Import copies the files into the library. It does not modify the VPK you selected. Adding the same content again reuses what is already stored.
 
@@ -84,9 +84,9 @@ Tick the skins and other files that belong in the pack.
 
 On a skin card, the checkbox appears when the card is hovered or already included. **Space** does the same thing. The tooltip is **Include in pack** or **In the pack. Click to remove.**
 
-Right-click a skin and use **Pack** to include or remove the shown skins, or every skin of that source. Right-click a source in the explorer for **Include every skin in the pack** and **Remove every skin from the pack**.
+Right-click a skin and use **Pack** to include or remove the shown skins, or every skin of that source. Right-click a source in the mod files panel for **Include every skin in the pack** and **Remove every skin from the pack**.
 
-**In pack** on the **Skins** toolbar shows only the current selection. The **Pack builder** tab label includes the count once something is selected, for example **Pack builder (3)**. **Edit > Clear pack** clears the selection. **Build VPK...** stays unavailable until something is selected.
+**In pack** on the **Skins** toolbar shows only the current selection. The **Pack builder** entry in the navigation shows the count once something is selected, for example **3**. **Edit > Clear pack** clears the selection. **Build VPK...** stays unavailable until something is selected.
 
 ## Build
 

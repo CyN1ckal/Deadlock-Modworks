@@ -43,6 +43,10 @@ void BeginBanner(const ImVec4& tone);
 // The right edge of the banner's content, in screen space, for right-aligned buttons.
 float BannerRight();
 void EndBanner();
+// A full-width navigation row: an icon when the icon font is loaded, the label, and an optional muted badge on the
+// right. The selected row is filled and has an accent edge. `dim` draws the label in the secondary colour.
+bool NavItem(const char* icon, const char* label, bool selected, const char* badge = nullptr, bool dim = false,
+    const ImVec4* badge_color = nullptr);
 // A "(?)" marker with a tooltip, for help text that would otherwise take a line of its own.
 void HelpMarker(const char* text);
 

@@ -112,9 +112,12 @@ void PopPrimaryButton() {
 
 namespace {
 ImFont* g_heading = nullptr;
+bool g_icons = false;
 }
 
 void SetHeadingFont(ImFont* font) { g_heading = font; }
 ImFont* HeadingFont() { return g_heading; }
+void SetIconsLoaded(bool loaded) { g_icons = loaded; }
+bool IconsLoaded() { return g_icons; }
 
 }  // namespace skeleton_repair::theme

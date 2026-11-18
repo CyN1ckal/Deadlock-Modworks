@@ -2,6 +2,7 @@
 // The window, the GPU, Dear ImGui and the workspace are each owned by one object, released in reverse order.
 
 // Tracy's winsock2.h comes before windows.h.
+#include "icons.hpp"
 #include "profile.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -120,6 +121,19 @@ private:
             ImFontConfig merge;
             merge.MergeMode = true;
             io.Fonts->AddFontFromFileTTF(Narrow((fonts / L"seguisym.ttf").wstring()).c_str(), size, &merge, kSymbolRanges);
+        }
+        // Navigation icons. Windows 11 ships Segoe Fluent Icons, Windows 10 Segoe MDL2 Assets, with the same code points.
+        for (const wchar_t* name : {L"SegoeIcons.ttf", L"segmdl2.ttf"}) {
+            if (!std::filesystem::exists(fonts / name, error)) continue;
+            static const ImWchar kIconRanges[] = {icons::kFirst, icons::kLast, 0};
+            ImFontConfig merge;
+            merge.MergeMode = true;
+            merge.PixelSnapH = true;
+            merge.GlyphMinAdvanceX = std::round(size * 1.25f);
+            merge.GlyphOffset = {0, std::round(size * .12f)};
+            io.Fonts->AddFontFromFileTTF(Narrow((fonts / name).wstring()).c_str(), size * .95f, &merge, kIconRanges);
+            theme::SetIconsLoaded(true);
+            break;
         }
         // Headings use Segoe UI Bold at a larger size. Without it, ui::Heading keeps the body font.
         if (std::filesystem::exists(fonts / L"segoeuib.ttf", error)) {

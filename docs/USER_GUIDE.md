@@ -2,15 +2,15 @@
 
 Deadlock Modworks 0.1.0 is a desktop workspace for hero-model mods. It is not a marketplace, and **Build VPK...** does not install the file it writes. The procedural path is [QUICK_START.md](QUICK_START.md). Menu names below are the ones drawn by this version.
 
-The captures in `docs/screenshots/` are the real window, taken before the pages were renamed and reordered, so they show the earlier tab strip and empty library. `library.png`, `builder.png`, `history.png`, `repairs.png`, `inspector.png`, `shortcuts.png`, and `data-root-error.png` are an earlier pass with no model loaded. `library.png` is cropped to the window. `startup-empty-library.png` is the later empty library and shows **Connect game**, **Add mods**, and **Open quick start**. `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png` are the message boxes for those startup failures. A comparison of two loaded models was not captured, so this guide does not pretend that `inspector.png` shows one. The **Quick start** popup was not opened, and a drop onto the window was not performed.
+The captures in `docs/screenshots/` are the real window, taken before the navigation moved to the left edge, so they show the earlier tab strip and empty library. `library.png`, `builder.png`, `history.png`, `repairs.png`, `inspector.png`, `shortcuts.png`, and `data-root-error.png` are an earlier pass with no model loaded. `library.png` is cropped to the window. `startup-empty-library.png` is the later empty library and shows **Connect game**, **Add mods**, and **Open quick start**. `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png` are the message boxes for those startup failures. A comparison of two loaded models was not captured, so this guide does not pretend that `inspector.png` shows one. The **Quick start** popup was not opened, and a drop onto the window was not performed.
 
 ## The workspace
 
 The window title is **Deadlock Modworks 0.1.0**. The menu bar is **File**, **Edit**, **View**, **Tools**, and **Help**.
 
-**Workspace** is the tool area. The window opens on **My mods**. The first three tabs get mods into the game. The rest are tools, drawn with dimmer labels and listed under **Tools** in the **View** menu:
+The navigation runs down the left edge of the window. The window opens on **My mods**. The pages under **PLAY** get mods into the game. The ones under **TOOLS** are drawn with dimmer labels and are also listed under **Tools** in the **View** menu. Each page has an icon when Windows has Segoe Fluent Icons or Segoe MDL2 Assets; without them the labels show alone. **My mods** carries an **Apply** badge while changes aren't in the game yet, and **Pack builder** carries the number of skins in the pack:
 
-| Tab | Shortcut | What it is |
+| Page | Shortcut | What it is |
 | --- | --- | --- |
 | **My mods** | Ctrl+1 | Mods turned on, load order, profiles, and **Apply to game** |
 | **Discover** | Ctrl+2 | Browse, search and download Deadlock mods from GameBanana |
@@ -20,12 +20,17 @@ The window title is **Deadlock Modworks 0.1.0**. The menu bar is **File**, **Edi
 | **Inspector** | Ctrl+6 | One model: **Preview** and **Compare versions** |
 | **Side by side** | Ctrl+7 | Up to four models of one hero |
 | **History** | Ctrl+8 | Stored models, packs, and versions |
+| **Settings** | Ctrl+, | Deadlock's folder, where the library is stored, sharing, and the interface |
 
-**Explorer** is the left pane, with **MOD FILES**, **GAME**, and **LIBRARY**. It shows beside **Skins** and the tools. **My mods** and **Discover** have their own lists, so the explorer is not drawn there and the workspace takes the full width.
+At the bottom of the navigation, a card says **Deadlock found** with **Steam install** or **Custom folder**, or **Deadlock not found** with **Click to locate it**. Clicking it when the game is found opens **Locate Deadlock...**, **Reconnect**, **Copy path**, **Reveal in Explorer** and **Settings...**. When the game is not found, clicking it opens the file dialog.
 
-**View > Explorer** (**Ctrl+Shift+E**) shows or hides the explorer. Turning it on from **My mods** or **Discover** opens **Skins**. **View > Workspace** focuses the workspace. **View > Status bar** shows or hides the bar along the bottom. **View > Back** (**Alt+Left**) returns to the previous page. **View > Reset layout** puts the explorer on the left and the workspace on the right again. The tooltip says mods, the catalog, and thumbnails stay. It does not clear the library and it does not move the window. **View > Refresh library** (**F5**) reopens every source and reloads thumbnails.
+**Settings** has three sections. **Deadlock** shows the state and path, what needs the game, a path field with **Use this path**, **Browse...** and **Reconnect**, and any connection error. **Library** shows where your mods are stored, with **Open folder**, **Export library to share...** and **Import a shared library...**. **Interface** has the mod files panel and status bar switches and **Reset layout**.
 
-The first launch with no saved layout docks **Explorer** and **Workspace**. Later launches restore `layout.ini`. A floating **Explorer** or **Workspace** that does not overlap the work area is moved back on screen. Docked panes stay docked. Reset layout deletes only `layout.ini`.
+The **mod files panel** lists **MOD FILES** with **Add**, **Folder**, a filter and the sources. It shows beside **Skins** and the tools. **My mods**, **Discover** and **Settings** have their own lists, so the panel is not drawn there and the page takes the full width.
+
+**View > Mod files panel** (**Ctrl+Shift+E**) shows or hides the panel. Turning it on from **My mods** or **Discover** opens **Skins**. **View > Settings** (**Ctrl+,**) opens Settings. **View > Workspace** focuses the workspace. **View > Status bar** shows or hides the bar along the bottom. **View > Back** (**Alt+Left**) returns to the previous page. **View > Reset layout** puts the mod files panel on the left of the page again. The tooltip says mods, the catalog, and thumbnails stay. It does not clear the library and it does not move the window. **View > Refresh library** (**F5**) reopens every source and reloads thumbnails.
+
+The first launch with no saved layout docks the mod files panel (**Explorer** in `layout.ini`) and **Workspace** beside the navigation. Later launches restore `layout.ini`. A floating panel or **Workspace** that does not overlap the work area is moved back on screen. Docked panes stay docked. Reset layout deletes only `layout.ini`.
 
 The status bar starts with **Deadlock found**, **Looking for Deadlock...**, or **Deadlock not found**. It then shows import, library, repair, or history work, with **Cancel** while that work runs. The right side counts what is shown, how many skins and sources are loaded, and how many are in the pack.
 
@@ -45,9 +50,10 @@ These are the rows in the **Keyboard shortcuts** dialog.
 | F5 | Reopen every source and reload thumbnails |
 | Ctrl+1 ... Ctrl+8 | My mods, Discover, Skins, Pack builder, Repairs, Inspector, Side by side, History |
 | Alt+Left | Back to the previous page |
-| Ctrl+Shift+E | Show or hide the list of mod files |
+| Ctrl+Shift+E | Show or hide the mod files panel |
+| Ctrl+, | Settings |
 | View > Workspace | Focus the workspace |
-| View > Reset layout | Restore the explorer and workspace split |
+| View > Reset layout | Put the mod files panel back beside the page |
 | Double-click | Inspect a skin, list a package's files, or view a version |
 | Enter / Space | Inspect a skin or list a package's files / include it in the pack |
 | Ctrl+Wheel | Thumbnail size in the gallery |
@@ -64,9 +70,9 @@ These are the rows in the **Keyboard shortcuts** dialog.
 
 The window accepts dropped files, and the empty library says you can drop mod VPKs on it. A drop was not performed. Dropping files on the executable starts the app with those files. That launch path was not exercised for this note.
 
-An empty library says **No skins yet** and **Skins show up here once you add mods. Find mods on Discover (Ctrl+2), or add VPK files you already have.** The buttons are **Add mods...**, **Locate Deadlock** while the game is not found, and **Quick start**. The tooltip on **Locate Deadlock** says that browsing and adding mods work without a connected game, and that textures in the game, comparison, repair, and skin packs that use base-game files need the game archive. Under the buttons: **You can also drop mod VPKs on the window.** An empty explorer list says **No mod files yet. Add some here, or find mods on Discover (Ctrl+2).**
+An empty library says **No skins yet** and **Skins show up here once you add mods. Find mods on Discover (Ctrl+2), or add VPK files you already have.** The buttons are **Add mods...**, **Locate Deadlock** while the game is not found, and **Quick start**. The tooltip on **Locate Deadlock** says that browsing and adding mods work without a connected game, and that textures in the game, comparison, repair, and skin packs that use base-game files need the game archive. Under the buttons: **You can also drop mod VPKs on the window.** An empty mod files panel says **No mod files yet. Add some here, or find mods on Discover (Ctrl+2).**
 
-**Locate Deadlock** uses the explorer's typed path when that field is filled, and otherwise opens **File > Locate Deadlock...**. Steam fills the game archive when none is saved. **Connect** and **Browse...** stay under **GAME**. The field hint is **game\citadel or pak01_dir.vpk**.
+**Locate Deadlock** uses the path typed on **Settings** when that field is filled, and otherwise opens **File > Locate Deadlock...**. Steam fills the game archive when none is saved. **Use this path** and **Browse...** are on **Settings** under **Deadlock**. The field hint is **game\citadel or pak01_dir.vpk**.
 
 The toolbar has **Refresh**, the search field **Search skins, packages and sources (Ctrl+F)**, a source list whose first entry is **All sources**, **In pack** (on the library page only), **Grid**, and **List**. **Grid** is the thumbnail grid. **List** is a sortable table with columns for the pack checkbox, a thumbnail, **Name**, **Model path**, and **Source**.
 
@@ -91,7 +97,7 @@ Right-click a skin:
 
 With Deadlock connected, the game's own hero models, everything under `models/heroes*/<character>/` in `pak01_dir.vpk`, are listed for reference. They are not part of your library and nothing is copied.
 
-- **Base game** at the top of the explorer's source list, or in the library's source list, shows only them.
+- **Base game** at the top of the mod files panel, or in the source menu on the Skins toolbar, shows only them.
 - The **Base game** checkbox in the library toolbar also shows them beside your mods under **All sources**. Sorting by name puts a mod and the game's model of the same name next to each other.
 - Their cards carry a **GAME** tag and say **Base game** as their source. They have no pack checkbox, cannot be included in a pack, and have no **Analyze this model**.
 - Double-click one to open it in the **Inspector**, whose title is then **Inspect: Base game**. Right-click it for **Inspect**, **Side by side**, **Show only the base game**, and the copy items.
@@ -100,7 +106,7 @@ They are not counted as skins in the status bar.
 
 Right-click a non-model package card for **Show files** (**Enter**), which opens **Package files**, plus **Include in pack** and **Reveal source in Explorer**.
 
-Right-click a source in the explorer:
+Right-click a source in the mod files panel:
 
 - **Show skins**
 - **Include every skin in the pack** / **Remove every skin from the pack**
@@ -263,7 +269,7 @@ The toolbar has **Profile**, **Search my mods**, **Load order** and **Add mods..
 
 - **Profiles.** The **Profile** menu switches between named sets of enabled mods and shows how many are on in each. **New profile...** starts one, optionally with the mods enabled now. **Rename** and **Delete** change the current one. Every profile shares the one load order. The last profile cannot be deleted.
 - **Load order.** **Load order** shows each mod's position, a drag handle and up/down arrows, with **Which mod wins** beside the list. When two enabled mods contain the same file, the one higher in the list wins. Drag a card or use the arrows to change it. **Move to top** and **Move to bottom** are on the right-click menu in either view.
-- Right-click a card for **Turn on** or **Turn off**, **Turn all on** and **Turn all off**, **Show skins**, **Open GameBanana page** for downloaded mods, **Reveal in Explorer**, and **Copy** with the name, path and content id. Right-click empty space in the list for **Turn all on** and **Turn all off**. The explorer's right-click menu on a source has **Enable for the game** or **Disable for the game** too.
+- Right-click a card for **Turn on** or **Turn off**, **Turn all on** and **Turn all off**, **Show skins**, **Open GameBanana page** for downloaded mods, **Reveal in Explorer**, and **Copy** with the name, path and content id. Right-click empty space in the list for **Turn all on** and **Turn all off**. The mod files panel's right-click menu on a source has **Enable for the game** or **Disable for the game** too.
 - **Add mods...** adds mod VPKs you already have, including packs you exported with **Build VPK...** earlier, so you can turn them on here. **Build as mod...** in the pack builder adds a pack under a name you choose; see [Build as mod](#build-as-mod).
 
 Nothing reaches the game until **Apply to game**, in the bar under the list. It needs Deadlock found and closed. It makes `game\citadel\addons` hold exactly the enabled mods, as `pak01_dir.vpk`, `pak02_dir.vpk` and so on in load order: mods already in place stay, moved ones are renamed, new ones are copied, and Modworks files that are no longer enabled are removed.
@@ -290,9 +296,9 @@ These pages were exercised with a disposable data root and a stand-in game folde
 
 ## Sharing a library
 
-**File > Export library to share...**, or **Export...** under **LIBRARY**, writes one `.db` file. The tooltip says it saves mods, pack selections, and thumbnails. Nothing is written if the destination already exists. On success the status line says `Saved your whole library to <path>. Others can add it with Add library.` The menu item that adds it is **Add shared library...**, not a menu named Add library. The explorer button is **Add shared...**.
+**File > Export library to share...**, or the same button on **Settings** under **Library**, writes one `.db` file. The tooltip says it saves mods, pack selections, and thumbnails. Nothing is written if the destination already exists. On success the status line says `Saved your whole library to <path>. Others can add it with Add library.` The command that adds it is **Import a shared library...**, not a menu named Add library.
 
-**File > Import a shared library...**, or **Import...** under **LIBRARY**, adds that `.db` file's mods, pack selections, and thumbnails. The tooltip says nothing in your library is replaced. A game path from another computer is used only when that file exists on this computer. The same command also opens a JSON library list from an earlier release and imports the VPKs named there.
+**File > Import a shared library...**, or the same button on **Settings**, adds that `.db` file's mods, pack selections, and thumbnails. The tooltip says nothing in your library is replaced. A game path from another computer is used only when that file exists on this computer. The same command also opens a JSON library list from an earlier release and imports the VPKs named there.
 
 The first launch reads older files if they are present, and leaves them in place: `library.db`, `library.json`, `library.backup.json`, and VPKs under `mods`. Those files are not deleted after the merge.
 
@@ -311,7 +317,7 @@ The default root is `%LOCALAPPDATA%\DeadlockModManager`. Pass `--data-root <dire
 | `downloads\` | Temporary folders for GameBanana downloads. Each is removed when its import ends. |
 | `library.db`, `library.json`, `library.backup.json`, `mods\`, `thumbnails\` | Older releases. Read once if present, then left on disk. |
 
-**File > Open library folder** opens `store`, not the data root. The explorer prints that `store` path under **LIBRARY**.
+**File > Open library folder** opens `store`, not the data root. **Settings** prints that `store` path under **Library**, with **Open folder**.
 
 Do not open the live library from two copies of the app. The second open reports **The model library is in use by another process.**
 

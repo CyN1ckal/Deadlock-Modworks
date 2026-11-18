@@ -113,6 +113,8 @@ void Workspace::Frame(const std::vector<std::filesystem::path>& dropped) {
     // The menu and status bars take their rows before the dockspace fills the rest of the window.
     DrawMenuBar();
     DrawStatusBar();
+    // The navigation takes the left edge, so it stays put whether or not the mod files panel is docked beside a page.
+    DrawNavRail();
     const bool reset_layout = std::exchange(reset_layout_, false);
     if (reset_layout) {
         show_explorer_ = true;
@@ -561,11 +563,9 @@ void Workspace::RemoveSource(const std::filesystem::path& path) {
 
 // ---------- menus and bars ----------
 
-// Switches pages from code; the page tab bar follows on the next frame.
 void Workspace::ShowPage(Page page) {
     if (page != page_) previous_page_ = page_;
     page_ = page;
-    page_requested_ = true;
 }
 
 void Workspace::FindSkins() {
@@ -593,6 +593,7 @@ void Workspace::HandleShortcuts() {
     }
     if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_LeftArrow, global)) ShowPage(previous_page_);
     if (ImGui::Shortcut(ImGuiKey_F1, global)) open_shortcuts_ = true;
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, global)) ShowPage(Page::Settings);
     static_assert(std::size(kPages) <= 9);
     for (size_t i = 0; i < std::size(kPages); ++i) {
         const auto key = static_cast<ImGuiKey>(ImGuiKey_1 + static_cast<int>(i));
@@ -644,13 +645,14 @@ void Workspace::DrawMenuBar() {
             if (ImGui::MenuItem(kPages[i].Name, kPages[i].Keys, page_ == kPages[i].Value)) ShowPage(kPages[i].Value);
         }
         ImGui::Separator();
+        if (ImGui::MenuItem("Settings", "Ctrl+,", page_ == Page::Settings)) ShowPage(Page::Settings);
         if (ImGui::MenuItem("Back", "Alt+Left")) ShowPage(previous_page_);
         ImGui::Separator();
-        if (ImGui::MenuItem("Explorer", "Ctrl+Shift+E", &show_explorer_) && show_explorer_) {
+        if (ImGui::MenuItem("Mod files panel", "Ctrl+Shift+E", &show_explorer_) && show_explorer_) {
             focus_explorer_ = true;
             if (!ExplorerOnPage()) ShowPage(Page::Gallery);
         }
-        ImGui::SetItemTooltip("The list of mod files beside Skins, the pack builder and the tools. My mods and Discover do not show it.");
+        ImGui::SetItemTooltip("The list of mod files beside Skins, the pack builder and the tools. My mods, Discover and Settings do not show it.");
         if (ImGui::MenuItem("Workspace")) focus_workspace_ = true;
         ImGui::MenuItem("Status bar", nullptr, &show_status_bar_);
         ImGui::Separator();
@@ -820,7 +822,7 @@ void Workspace::DrawStatusBar() {
 
 // ---------- explorer ----------
 
-bool Workspace::ExplorerOnPage() const { return page_ != Page::Mods && page_ != Page::Browse; }
+bool Workspace::ExplorerOnPage() const { return page_ != Page::Mods && page_ != Page::Browse && page_ != Page::Settings; }
 
 void Workspace::DrawExplorer() {
     ZoneScopedN("Explorer");
@@ -845,67 +847,9 @@ void Workspace::DrawExplorer() {
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##sourcefilter", "Filter mod files", source_filter_, sizeof(source_filter_));
 
-    const std::string& save_error = library_.SaveError();
-    const float footer = ImGui::GetFrameHeightWithSpacing() * 6 + ImGui::GetTextLineHeightWithSpacing() * 2
-        + (game_error_.empty() ? 0.f : ImGui::GetTextLineHeightWithSpacing() * 2) + (save_error.empty() ? 0.f : ImGui::GetTextLineHeightWithSpacing() * 2);
-    ImGui::BeginChild("sources", {0, std::max(ImGui::GetFrameHeight() * 3, ImGui::GetContentRegionAvail().y - footer)}, ImGuiChildFlags_Borders);
+    ImGui::BeginChild("sources", {0, 0}, ImGuiChildFlags_Borders);
     DrawSourceList();
     ImGui::EndChild();
-
-    ui::SectionLabel("GAME");
-    ImVec4 color;
-    const char* label = nullptr;
-    GameState(color, label);
-    ImGui::TextColored(color, "\xE2\x97\x8F");
-    ImGui::SameLine(0, 4);
-    ui::TextEllipsis(label, ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("...").x - style.FramePadding.x * 2 - style.ItemSpacing.x);
-    if (ImGui::BeginPopupContextItem("game_menu")) {
-        GameMenuItems();
-        ImGui::EndPopup();
-    }
-    ImGui::SetItemTooltip("%s\nRight-click for more. %s", game_ ? game_name_.c_str() : "No game is connected.", GameResourceSummary().c_str());
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##manualgame", "game\\citadel or pak01_dir.vpk", manual_game_, sizeof(manual_game_));
-    const float game_button = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f;
-    ImGui::BeginDisabled(FilesBusy());
-    if (ImGui::Button("Connect", {game_button, 0})) ConnectManual(false);
-    ImGui::SameLine();
-    if (ImGui::Button("Browse...", {-1, 0})) ConnectManual(true);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Browse to game\\citadel\\pak01_dir.vpk (Ctrl+G). A typed path is used as entered.");
-    }
-    if (!game_error_.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
-        ImGui::TextWrapped("%s", game_error_.c_str());
-        ImGui::PopStyleColor();
-    }
-
-    ui::SectionLabel("LIBRARY");
-    if (const LocalModStore* store = library_.Store()) {
-        const auto folder = store->ContentDirectory();
-        ui::TextEllipsis(Narrow(folder.wstring()), 0, &style.Colors[ImGuiCol_TextDisabled]);
-        if (ImGui::BeginPopupContextItem("library_menu")) {
-            ui::PathMenuItems(folder);
-            ImGui::EndPopup();
-        }
-        ImGui::BeginDisabled(FilesBusy());
-        ImGui::BeginDisabled(!builder_.CanShare());
-        if (ImGui::Button("Export...", {ImGui::GetContentRegionAvail().x * .5f - style.ItemSpacing.x * .5f, 0})) builder_.ShareLibrary(window_);
-        ImGui::EndDisabled();
-        ImGui::SetItemTooltip("Save your mods, pack selections and thumbnails as one .db file others can add.");
-        ImGui::SameLine();
-        if (ImGui::Button("Import...", {-1, 0})) AddLibrary();
-        ImGui::SetItemTooltip("Add the mods and pack selections of a shared .db library to yours. Nothing in yours is replaced.");
-        ImGui::EndDisabled();
-    } else {
-        ImGui::TextDisabled("Local library storage is unavailable.");
-    }
-    if (!save_error.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ui::kError);
-        ImGui::TextWrapped("%s", save_error.c_str());
-        ImGui::PopStyleColor();
-    }
     ImGui::End();
     ImGui::PopStyleColor();
     if (focus) shell::BringOnScreen(shell::kExplorer, {40.f, 40.f});
@@ -1005,35 +949,178 @@ void Workspace::DrawSourceList() {
 
 // ---------- workspace pages ----------
 
-// The page tabs. A tab the user clicks becomes the page; a page shown from code selects its tab.
-void Workspace::DrawPageTabs() {
-    if (!ImGui::BeginTabBar("pages", ImGuiTabBarFlags_FittingPolicyScroll)) return;
-    Page visible = page_;
+// The navigation down the left of the window: the pages players use, the tools, then the game and Settings.
+void Workspace::DrawNavRail() {
+    ZoneScopedN("Navigation");
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, theme::kWorkspace);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
+    const bool visible = ImGui::BeginViewportSideBar("##nav", ImGui::GetMainViewport(), ImGuiDir_Left, ImGui::GetFontSize() * 12.f, flags);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+    if (!visible) {
+        ImGui::End();
+        return;
+    }
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {style.ItemSpacing.x, 2.f});
+    ImGui::Dummy({0, 2});
     for (size_t i = 0; i < std::size(kPages); ++i) {
         const auto& page = kPages[i];
-        std::string label = page.Name;
-        if (page.Value == Page::Pack && builder_.SelectedCount() > 0) label += " (" + std::to_string(builder_.SelectedCount()) + ")";
-        if (page.Value == Page::Inspect && !mod_name_.empty()) label = "Inspect: " + mod_name_;
-        label += std::string("###") + page.Id;
-        // Dimmed labels set the tools apart from the pages players use every day.
+        if (i == 0 || i == kPlayPages) {
+            if (i == kPlayPages) ImGui::Dummy({0, style.ItemSpacing.y * 2});
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + style.FramePadding.x * 1.5f);
+            ui::SectionLabel(i == 0 ? "PLAY" : "TOOLS");
+            ImGui::Dummy({0, 2});
+        }
+        std::string badge;
+        const ImVec4* badge_color = nullptr;
+        if (page.Value == Page::Mods && mods_.HasPendingChanges(ModEntries())) {
+            badge = "Apply";
+            badge_color = &ui::kWarning;
+        }
+        if (page.Value == Page::Pack && builder_.SelectedCount() > 0) badge = std::to_string(builder_.SelectedCount());
         const bool tool = i >= kPlayPages;
-        if (tool) ImGui::PushStyleColor(ImGuiCol_Text, theme::kSecondary);
-        const ImGuiTabItemFlags flags = page_requested_ && page.Value == page_ ? ImGuiTabItemFlags_SetSelected : 0;
-        const bool open = ImGui::BeginTabItem(label.c_str(), nullptr, flags);
-        if (tool) ImGui::PopStyleColor();
-        ImGui::SetItemTooltip("%s (%s)", page.Tooltip, page.Keys);
-        if (open) {
-            visible = page.Value;
-            ImGui::EndTabItem();
+        if (ui::NavItem(page.Icon, page.Name, page_ == page.Value, badge.c_str(), tool, badge_color)) ShowPage(page.Value);
+        if (page.Value == Page::Inspect && !mod_name_.empty()) ImGui::SetItemTooltip("%s (%s)\nOpen: %s", page.Tooltip, page.Keys, mod_name_.c_str());
+        else ImGui::SetItemTooltip("%s (%s)", page.Tooltip, page.Keys);
+    }
+
+    // The game and Settings sit at the bottom.
+    const float bottom = ImGui::GetFrameHeight() * 1.25f * 2 + ImGui::GetTextLineHeight() * 2 + style.FramePadding.y * 4 + 8.f;
+    const float y = ImGui::GetWindowHeight() - style.WindowPadding.y - bottom;
+    if (y > ImGui::GetCursorPosY()) ImGui::SetCursorPosY(y);
+    DrawGameCard();
+    ImGui::Dummy({0, 4});
+    if (ui::NavItem(icons::kSettings, "Settings", page_ == Page::Settings)) ShowPage(Page::Settings);
+    ImGui::SetItemTooltip("Deadlock's folder, your library, and the mod files panel (Ctrl+,)");
+    ImGui::PopStyleVar();
+    ImGui::End();
+}
+
+// Whether Deadlock was found, as a card. Clicking it locates the game, or offers Reconnect and the path when found.
+void Workspace::DrawGameCard() {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImVec4 color;
+    const char* label = nullptr;
+    GameState(color, label);
+    const char* detail = game_ ? (game_name_.find("steamapps") != std::string::npos ? "Steam install" : "Custom folder")
+        : game_loader_.Busy() ? "One moment" : "Click to locate it";
+    const float height = ImGui::GetTextLineHeight() * 2 + style.FramePadding.y * 4;
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const float width = ImGui::GetContentRegionAvail().x;
+    const bool pressed = ImGui::InvisibleButton("##gamecard", {width, height});
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(min, {min.x + width, min.y + height}, ImGui::GetColorU32(hovered ? theme::kRaisedHover : theme::kRaised), style.FrameRounding);
+    float x = min.x + style.FramePadding.x * 1.5f;
+    const float line = ImGui::GetTextLineHeight();
+    const float top = min.y + (height - line * 2) * .5f;
+    if (theme::IconsLoaded()) {
+        draw->AddText({x, min.y + (height - line) * .5f}, ImGui::GetColorU32(color), icons::kGame);
+        x += ImGui::GetFontSize() * 1.25f + style.ItemSpacing.x;
+    } else {
+        draw->AddText({x, top}, ImGui::GetColorU32(color), "\xE2\x97\x8F");
+        x += ImGui::GetFontSize() + style.ItemSpacing.x * .5f;
+    }
+    draw->AddText({x, top}, ImGui::GetColorU32(theme::kText), label);
+    draw->AddText({x, top + line}, ImGui::GetColorU32(theme::kDisabled), detail);
+    if (!ImGui::IsPopupOpen("game_card_menu")) {
+        ImGui::SetItemTooltip("%s", game_ ? game_name_.c_str() : game_loading_.empty() ? "Locate Deadlock (Ctrl+G)"
+            : Narrow(game_loading_.wstring()).c_str());
+    }
+    if (pressed) {
+        if (game_) ImGui::OpenPopup("game_card_menu");
+        else if (!FilesBusy() && !game_loader_.Busy()) ChooseGame();
+    }
+    if (ImGui::BeginPopupContextItem("game_card_menu")) {
+        GameMenuItems();
+        ImGui::Separator();
+        if (ImGui::MenuItem("Settings...", "Ctrl+,")) ShowPage(Page::Settings);
+        ImGui::EndPopup();
+    }
+}
+
+// Deadlock's folder, the library's storage and sharing, and the mod files panel.
+void Workspace::DrawSettingsPage() {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float column = std::min(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 40.f);
+    ui::Heading("Settings");
+
+    ImGui::SeparatorText("Deadlock");
+    ImVec4 color;
+    const char* label = nullptr;
+    GameState(color, label);
+    ImGui::TextColored(color, "\xE2\x97\x8F");
+    ImGui::SameLine(0, 4);
+    ImGui::TextUnformatted(label);
+    if (game_) {
+        ImGui::SameLine();
+        ui::TextEllipsis(game_name_, column - ImGui::GetCursorPosX(), &style.Colors[ImGuiCol_TextDisabled]);
+        if (ImGui::BeginPopupContextItem("game_path_menu")) {
+            ui::PathMenuItems(GamePath());
+            ImGui::EndPopup();
         }
     }
-    ImGui::EndTabBar();
-    if (page_requested_) {
-        if (visible == page_) page_requested_ = false;
-    } else if (visible != page_) {
-        previous_page_ = page_;
-        page_ = visible;
+    ImGui::PushTextWrapPos(column);
+    ImGui::TextDisabled("%s", GameResourceSummary().c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::SetNextItemWidth(column);
+    ImGui::InputTextWithHint("##manualgame", "game\\citadel or pak01_dir.vpk", manual_game_, sizeof(manual_game_));
+    ImGui::BeginDisabled(FilesBusy());
+    if (ImGui::Button("Use this path")) ConnectManual(false);
+    ImGui::SetItemTooltip("Use the folder or pak01_dir.vpk typed above, as entered.");
+    ImGui::SameLine();
+    if (ImGui::Button("Browse...")) ConnectManual(true);
+    ImGui::SetItemTooltip("Browse to game\\citadel\\pak01_dir.vpk (Ctrl+G).");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(configured_game_.empty() || game_loader_.Busy());
+    if (ImGui::Button("Reconnect")) OpenGame(configured_game_);
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    if (!game_error_.empty()) {
+        ImGui::PushTextWrapPos(column);
+        ImGui::TextColored(ui::kError, "%s", game_error_.c_str());
+        ImGui::PopTextWrapPos();
     }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Library");
+    if (const LocalModStore* store = library_.Store()) {
+        const auto folder = store->ContentDirectory();
+        ImGui::TextUnformatted("Your mods are stored in");
+        ImGui::SameLine();
+        ui::TextEllipsis(Narrow(folder.wstring()), column - ImGui::GetCursorPosX(), &style.Colors[ImGuiCol_TextDisabled]);
+        if (ImGui::BeginPopupContextItem("library_menu")) {
+            ui::PathMenuItems(folder);
+            ImGui::EndPopup();
+        }
+        if (ImGui::Button("Open folder")) ui::RevealInExplorer(folder);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(FilesBusy());
+        ImGui::BeginDisabled(!builder_.CanShare());
+        if (ImGui::Button("Export library to share...")) builder_.ShareLibrary(window_);
+        ImGui::EndDisabled();
+        ImGui::SetItemTooltip("Save your mods, pack selections and thumbnails as one .db file others can add.");
+        ImGui::SameLine();
+        if (ImGui::Button("Import a shared library...")) AddLibrary();
+        ImGui::SetItemTooltip("Add the mods and pack selections of a shared .db library to yours. Nothing in yours is replaced.");
+        ImGui::EndDisabled();
+    } else {
+        ImGui::TextDisabled("Local library storage is unavailable.");
+    }
+    if (const std::string& save_error = library_.SaveError(); !save_error.empty()) {
+        ImGui::PushTextWrapPos(column);
+        ImGui::TextColored(ui::kError, "%s", save_error.c_str());
+        ImGui::PopTextWrapPos();
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Interface");
+    ImGui::Checkbox("Show the mod files panel beside Skins and the tools (Ctrl+Shift+E)", &show_explorer_);
+    ImGui::Checkbox("Show the status bar", &show_status_bar_);
+    if (ImGui::Button("Reset layout")) reset_layout_ = true;
+    ImGui::SetItemTooltip("Puts the mod files panel on the left and the workspace on the right. Mods, the catalog and thumbnails stay.");
 }
 
 void Workspace::DrawWorkspace() {
@@ -1043,8 +1130,10 @@ void Workspace::DrawWorkspace() {
     if (focus) ImGui::SetNextWindowFocus();
     ImGui::PushStyleColor(ImGuiCol_WindowBg, theme::kPanel);
     ImGui::Begin(shell::kWorkspace, nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
-    DrawPageTabs();
     switch (page_) {
+    case Page::Settings:
+        DrawSettingsPage();
+        break;
     case Page::Gallery:
     case Page::Pack:
         builder_.Draw(window_, mod_paths_, GamePath(),

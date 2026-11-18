@@ -55,6 +55,9 @@ void PopPrimaryButton();
 // Heading() falls back to the body font.
 void SetHeadingFont(ImFont* font);
 ImFont* HeadingFont();
+// Whether main merged an icon font into the body font, for the navigation's icons::k* glyphs.
+void SetIconsLoaded(bool loaded);
+bool IconsLoaded();
 // The heading face is this many times the body font size.
 inline constexpr float kHeadingScale = 1.35f;
 
