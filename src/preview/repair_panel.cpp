@@ -274,7 +274,7 @@ void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) 
     }
 
     if (busy_) ImGui::ProgressBar(progress_.Total > 0 ? static_cast<float>(progress_.Completed) / progress_.Total : 0.f, {-1, 3}, "");
-    if (game_.empty()) ImGui::TextColored(ui::kWarning, "Connect Deadlock (File > Choose game archive) to enable analysis.");
+    if (game_.empty()) ImGui::TextColored(ui::kWarning, "Locate Deadlock (Ctrl+G) to check mods for problems.");
     ui::TextEllipsis(status_, 0, nullptr);
     if (!export_status_.empty()) ui::TextEllipsis(export_status_);
     ImGui::SetNextItemWidth(-1);

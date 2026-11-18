@@ -68,6 +68,23 @@ void SectionLabel(const char* text) {
     ImGui::PopStyleColor();
 }
 
+void Heading(const char* text) {
+    ImFont* font = theme::HeadingFont();
+    if (font) ImGui::PushFont(font);
+    ImGui::TextUnformatted(text);
+    if (font) ImGui::PopFont();
+    ImGui::Dummy({0, ImGui::GetStyle().ItemSpacing.y * .5f});
+}
+
+bool PrimaryButton(const char* label, const ImVec2& size, bool enabled) {
+    if (enabled) theme::PushPrimaryButton();
+    ImGui::BeginDisabled(!enabled);
+    const bool pressed = ImGui::Button(label, size);
+    ImGui::EndDisabled();
+    if (enabled) theme::PopPrimaryButton();
+    return pressed;
+}
+
 void HelpMarker(const char* text) {
     ImGui::TextDisabled("(?)");
     if (ImGui::BeginItemTooltip()) {

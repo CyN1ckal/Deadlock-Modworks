@@ -27,6 +27,10 @@ void ToolSeparator();
 void TextEllipsis(const std::string& text, float width = 0, const ImVec4* color = nullptr);
 // A small muted heading row for a sidebar or side pane section.
 void SectionLabel(const char* text);
+// A page or empty-state heading in the larger bold face, with a little space under it.
+void Heading(const char* text);
+// The page's one main action, in the primary fill. Disabled buttons keep the plain look.
+bool PrimaryButton(const char* label, const ImVec2& size = {0, 0}, bool enabled = true);
 // A "(?)" marker with a tooltip, for help text that would otherwise take a line of its own.
 void HelpMarker(const char* text);
 

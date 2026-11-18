@@ -832,13 +832,13 @@ void LibraryPanel::DrawModelMenu(const Card& card, const std::vector<Card>& show
                 if (name && EqualsIgnoreCase(*name, *character)) ++character_models;
             }
         }
-        if (ImGui::MenuItem("Multi view", nullptr, false, character.has_value())) open_multi_(model);
+        if (ImGui::MenuItem("Side by side", nullptr, false, character.has_value())) open_multi_(model);
         if (character) {
             char tip[160];
             std::snprintf(tip, sizeof(tip), "Show %zu %s models together. Orbit, pan and zoom stay linked.", character_models, character->c_str());
             ImGui::SetItemTooltip("%s", tip);
         } else {
-            ImGui::SetItemTooltip("Multi view groups models stored under models/heroes/<character>/.");
+            ImGui::SetItemTooltip("Side by side groups models stored under models/heroes/<character>/.");
         }
     }
     if (IsBase(index)) {
@@ -1141,14 +1141,14 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         theme::PopPrimaryButton();
         if (build_as_mod_) {
             ImGui::SameLine();
-            if (ui::ToolButton("Build as mod...", "Build the pack into your library as a named mod, which the Mods page can enable "
+            if (ui::ToolButton("Build as mod...", "Build the pack into your library as a named mod, which My mods can turn on "
                 "and apply to the game. Building again under the same name replaces it.", !locked && pack_ready)) build_as_mod_();
         }
         ImGui::SameLine();
         if (ui::ToolButton("Clear pack", "Remove every skin and package from the pack", !locked && pack_ready)) ClearPack();
         if (game.empty() && skins > 0) {
             ImGui::SameLine();
-            ImGui::TextColored(ui::kWarning, "Connect Deadlock to resolve base-game assets.");
+            ImGui::TextColored(ui::kWarning, "Locate Deadlock (Ctrl+G) so the pack can include the game's own files.");
         }
     }
     if (Busy()) {
@@ -1240,35 +1240,30 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         } else if (no_sources && !collection_ready) {
             ImGui::TextDisabled("Opening your library...");
         } else if (no_sources) {
-            ImGui::TextUnformatted("Your library has no mods yet.");
-            ImGui::PushTextWrapPos(0);
-            ImGui::TextWrapped("%s", GameResourceSummary().c_str());
-            ImGui::TextWrapped("Building a pack does not install it. Open quick start for how to install or remove one.");
+            ui::Heading("No skins yet");
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40);
+            ImGui::TextWrapped("Skins show up here once you add mods. Find mods on Discover (Ctrl+2), or add VPK files you already have.");
             ImGui::PopTextWrapPos();
             const bool can_add = static_cast<bool>(add) && !locked;
-            theme::PushPrimaryButton();
-            if (ImGui::Button("Connect game") && connect_game) connect_game();
-            theme::PopPrimaryButton();
+            if (ui::PrimaryButton("Add mods...", {}, can_add)) add();
             ImGui::SameLine();
-            ImGui::BeginDisabled(!can_add);
-            theme::PushPrimaryButton();
-            if (ImGui::Button("Add mods") && can_add) add();
-            theme::PopPrimaryButton();
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            if (ImGui::Button("Open quick start") && open_quick_start) open_quick_start();
-            ImGui::TextDisabled("You can also drop mod VPKs on the window. Your source files stay available for later builds.");
-            ImGui::TextDisabled("Get mods (Ctrl+8) downloads mods from GameBanana. Mods (Ctrl+7) turns them on in the game.");
+            if (game.empty()) {
+                if (ImGui::Button("Locate Deadlock") && connect_game) connect_game();
+                ImGui::SetItemTooltip("%s", GameResourceSummary().c_str());
+                ImGui::SameLine();
+            }
+            if (ImGui::Button("Quick start") && open_quick_start) open_quick_start();
+            ImGui::TextDisabled("You can also drop mod VPKs on the window.");
             if (base_count_ > 0) {
                 if (ImGui::Button("Browse base game models")) source_filter_ = base_archive_;
                 ImGui::SetItemTooltip("The installed game's own hero models, to inspect and compare with mods.");
             }
         } else if (pack_view && pack_empty) {
-            ImGui::TextUnformatted("The pack is empty.");
-            ImGui::TextDisabled("Tick skins in the library, include a mod's other files, or right-click them and choose Include in pack.");
+            ui::Heading("Your pack is empty");
+            ImGui::TextDisabled("Tick skins on the Skins page, or right-click a skin or mod file and choose Include in pack.");
         } else {
-            ImGui::TextUnformatted("No mods match.");
-            ImGui::TextDisabled("Change the search, or show every source.");
+            ImGui::TextUnformatted("Nothing matches.");
+            ImGui::TextDisabled("Change the search, or show every mod file.");
             if (ImGui::Button("Clear filters")) { filter_[0] = '\0'; source_filter_.clear(); selected_only_ = false; }
         }
     } else if (list_view_) {

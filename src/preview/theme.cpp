@@ -5,22 +5,22 @@ namespace skeleton_repair::theme {
 void Apply(float dpi_scale) {
     ImGui::StyleColorsDark();
     auto& style = ImGui::GetStyle();
-    style.WindowPadding = {6, 6};
-    style.FramePadding = {6, 3};
-    style.CellPadding = {4, 2};
-    style.ItemSpacing = {6, 4};
-    style.ItemInnerSpacing = {4, 4};
+    style.WindowPadding = {10, 8};
+    style.FramePadding = {8, 4};
+    style.CellPadding = {6, 3};
+    style.ItemSpacing = {8, 6};
+    style.ItemInnerSpacing = {6, 4};
     style.TouchExtraPadding = {0, 0};
     style.IndentSpacing = 14;
-    style.ScrollbarSize = 10;
+    style.ScrollbarSize = 12;
     style.GrabMinSize = 8;
     style.WindowRounding = 0;
-    style.ChildRounding = 2;
-    style.FrameRounding = 2;
-    style.PopupRounding = 3;
+    style.ChildRounding = 4;
+    style.FrameRounding = 4;
+    style.PopupRounding = 6;
     style.ScrollbarRounding = 3;
-    style.GrabRounding = 2;
-    style.TabRounding = 2;
+    style.GrabRounding = 4;
+    style.TabRounding = 4;
     style.WindowBorderSize = 0;
     style.ChildBorderSize = 1;
     style.PopupBorderSize = 1;
@@ -70,9 +70,11 @@ void Apply(float dpi_scale) {
     colors[ImGuiCol_ResizeGrip] = {0, 0, 0, 0};
     colors[ImGuiCol_ResizeGripHovered] = {kFocus.x, kFocus.y, kFocus.z, .55f};
     colors[ImGuiCol_ResizeGripActive] = kFocus;
-    colors[ImGuiCol_Tab] = kWorkspace;
+    // Unselected tabs are flat on the panel; the selected one takes the selection fill, so the current page
+    // reads at a glance instead of looking like the one tab that is not a button.
+    colors[ImGuiCol_Tab] = kPanel;
     colors[ImGuiCol_TabHovered] = kRaisedHover;
-    colors[ImGuiCol_TabSelected] = kPanel;
+    colors[ImGuiCol_TabSelected] = kSelection;
     colors[ImGuiCol_TabSelectedOverline] = kFocus;
     colors[ImGuiCol_TabDimmed] = kWorkspace;
     colors[ImGuiCol_TabDimmedSelected] = kPanel;
@@ -101,11 +103,18 @@ void PushPrimaryButton() {
     ImGui::PushStyleColor(ImGuiCol_Button, kPrimary);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kPrimaryHover);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, kPrimaryActive);
-    ImGui::PushStyleColor(ImGuiCol_Text, kText);
+    ImGui::PushStyleColor(ImGuiCol_Text, kOnPrimary);
 }
 
 void PopPrimaryButton() {
     ImGui::PopStyleColor(4);
 }
+
+namespace {
+ImFont* g_heading = nullptr;
+}
+
+void SetHeadingFont(ImFont* font) { g_heading = font; }
+ImFont* HeadingFont() { return g_heading; }
 
 }  // namespace skeleton_repair::theme

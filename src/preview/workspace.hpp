@@ -34,6 +34,20 @@ namespace skeleton_repair {
 class Workspace {
 public:
     enum class Page { Gallery, Pack, History, Inspect, Repair, Multi, Mods, Browse };
+    // Pages in tab order; Ctrl+1 to Ctrl+8 follow it. The first kPlayPages get mods into the game. The rest are
+    // tools for building, checking and comparing models.
+    struct PageInfo { Page Value; const char* Name; const char* Id; const char* Keys; const char* Tooltip; };
+    static constexpr PageInfo kPages[] = {
+        {Page::Mods, "My mods", "mods", "Ctrl+1", "Turn mods on or off, then apply them to the game"},
+        {Page::Browse, "Discover", "browse", "Ctrl+2", "Find and download Deadlock mods from GameBanana"},
+        {Page::Gallery, "Skins", "gallery", "Ctrl+3", "Every skin and file in your library"},
+        {Page::Pack, "Pack builder", "pack", "Ctrl+4", "Combine skins from several mods into one pack"},
+        {Page::Repair, "Repairs", "repair", "Ctrl+5", "Check and fix mods after a game update"},
+        {Page::Inspect, "Inspector", "inspect", "Ctrl+6", "Textures, animations and skeleton of one model"},
+        {Page::Multi, "Side by side", "multi", "Ctrl+7", "Several models of one hero, with one shared camera"},
+        {Page::History, "History", "history", "Ctrl+8", "Every stored copy of each model, and how repairs changed it"},
+    };
+    static constexpr size_t kPlayPages = 3;
 
     // `window` owns the dialogs the menus open. Starts reading the library under `data_root`.
     Workspace(const VulkanDevice& device, const std::filesystem::path& data_root, HWND__* window);
@@ -109,6 +123,8 @@ private:
     std::string* StatusMessage(ImVec4& color);
     void DrawStatusBar();
     void DrawExplorer();
+    // My mods and Discover have their own lists and filters, so the explorer gives its width back to them.
+    bool ExplorerOnPage() const;
     void DrawSourceList();
     void DrawPageTabs();
     void DrawWorkspace();
@@ -124,8 +140,8 @@ private:
     std::filesystem::path layout_ini_;
 
     // Pages and shell windows
-    Page page_ = Page::Gallery;
-    Page previous_page_ = Page::Gallery;
+    Page page_ = Page::Mods;
+    Page previous_page_ = Page::Mods;
     // Set while a page shown from code waits for its tab to become selected.
     bool page_requested_ = true;
     bool show_explorer_ = true;

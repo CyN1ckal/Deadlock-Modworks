@@ -17,9 +17,9 @@ Errors are appended to `<data-root>\logs\modworks.log`. The default data root is
 
 The static runtime means a missing `VCRUNTIME140.dll` or `MSVCP140.dll` is not a normal failure of this build. Those DLLs are not supposed to be beside the exe.
 
-## Deadlock is not connected
+## Deadlock is not found
 
-**Deadlock not connected** means no game archive is open. **File > Choose game archive...** (**Ctrl+G**) expects:
+**Deadlock not found** means no game archive is open. **File > Locate Deadlock...** (**Ctrl+G**) expects:
 
 ```text
 <Steam library>\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk
@@ -27,7 +27,7 @@ The static runtime means a missing `VCRUNTIME140.dll` or `MSVCP140.dll` is not a
 
 The dialog title is **Select game\citadel\pak01_dir.vpk**. The citadel folder has to contain that file. Choosing a mod VPK, a chunk such as `pak01_000.vpk`, or a shortcut does not connect the game.
 
-Steam fills the game archive when none is saved: no `--game`, no `gameDirectory` in `store\settings.json`, and no game archive already stored with the library. Automatic detection reads Steam's library list. The manual field, **Connect**, and **Browse...** stay on the explorer. If Steam is installed per-user in an unusual place, or the game is on a drive Steam is not showing, type a path or use **Browse...** / **Choose game archive...**. **Reconnect** opens the last chosen archive again. **Connect game** on an empty library uses the typed path when the field is filled, and otherwise opens the file dialog.
+Steam fills the game archive when none is saved: no `--game`, no `gameDirectory` in `store\settings.json`, and no game archive already stored with the library. Automatic detection reads Steam's library list. The manual field, **Connect**, and **Browse...** stay on the explorer. If Steam is installed per-user in an unusual place, or the game is on a drive Steam is not showing, type a path or use **Browse...** / **Locate Deadlock...**. **Reconnect** opens the last chosen archive again. **Locate Deadlock** on an empty **Skins** page uses the typed path when the field is filled, and otherwise opens the file dialog.
 
 The red or warning text under **GAME** is the error. A missing or unreadable `pak01_dir.vpk` stays on screen until a later open succeeds.
 
@@ -60,7 +60,7 @@ A tree in the gallery, **N source archives could not be read**, lists sources wh
 | --- | --- |
 | **Conflicting file** followed by two paths and **Deselect one of the models using this file.** | Two selected sources put different bytes at one internal path. Remove one model or one included package from the pack. |
 | **Missing dependency ... Connect the installed game or use a complete source VPK.** | Connect `pak01_dir.vpk`, or select a source that already contains that resource. Another mod in the library is not searched unless you selected it. |
-| **Output already exists. Choose a new filename; existing files will not be overwritten.** | Pick a path that is not already a file or a directory. This also applies to **Share library...** and **Assemble...**. |
+| **Output already exists. Choose a new filename; existing files will not be overwritten.** | Pick a path that is not already a file or a directory. This also applies to **Export library to share...** and **Assemble...**. |
 | **Choose an output distinct from every source archive.** | Do not export onto a VPK the pack is reading. |
 | **Output must be a .vpk file.** | Keep the `.vpk` extension. |
 | **Select at least one model.** | The pack was empty. |
@@ -80,7 +80,7 @@ A successful line is `Exported N file to <path>.` or `Exported N files to <path>
 
 **Current** means this repair had nothing supported to change. It does not mean the mod is compatible with the latest Deadlock update.
 
-If a repair is interrupted, **Cancelled. Completed results are shown below.** A repair that fails validation does not leave a `.new` file in place of the archive. The version from before a successful repair remains in **Version history**.
+If a repair is interrupted, **Cancelled. Completed results are shown below.** A repair that fails validation does not leave a `.new` file in place of the archive. The version from before a successful repair remains in **History**.
 
 Command-line `--repair` is harsher than the library button: it replaces the path you gave it. Undo is in [USER_GUIDE.md](USER_GUIDE.md). `--update` writes a second file and does not replace the input.
 

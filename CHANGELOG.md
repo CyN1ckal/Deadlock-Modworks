@@ -2,9 +2,16 @@
 
 ## Unreleased
 
+### Changed
+
+- Pages are renamed and reordered around getting mods into the game. The window opens on **My mods** (was **Mods**), then **Discover** (was **Get mods**) and **Skins** (was **Mod library**). The tools follow with dimmer labels: **Pack builder** (was **VPK builder**), **Repairs** (was **Skin repairs**), **Inspector** (was **Model inspector**), **Side by side** (was **Multi view**) and **History** (was **Version history**). **Ctrl+1** to **Ctrl+8** follow the new order.
+- The explorer is not drawn on **My mods** and **Discover**. Its source list is now **MOD FILES**.
+- Plainer wording: **File > Locate Deadlock...** (was **Choose game archive...**), **Deadlock found** / **Deadlock not found**, **Import a shared library...** and **Export library to share...**, **Tools > Check mods for problems** and **Fix supported problems**. My mods says **Up to date** or that changes aren't in the game yet, and explains a missing `gameinfo.gi` line in a tooltip. Empty pages lead with a heading and one sentence instead of a paragraph of caveats.
+- More spacing and rounder controls, a bold heading font, and a brighter primary button colour (`#2F6FAE` with white text) so the main action on a page stands out.
+
 ### Added
 
-- **Get mods** (**Ctrl+8**): browse, sort, filter and search Deadlock mods on GameBanana, or open a pasted mod link, then **Download** or **Download & enable** one of its files. Downloads are HTTPS-only from gamebanana.com, checked against GameBanana's MD5, and zip, 7z and rar archives are opened with libarchive. Only the `.vpk` files inside are written, and archive paths cannot leave the temporary folder.
+- **Get mods** (**Ctrl+8**, now **Discover**, **Ctrl+2**): browse, sort, filter and search Deadlock mods on GameBanana, or open a pasted mod link, then **Download** or **Download & enable** one of its files. Downloads are HTTPS-only from gamebanana.com, checked against GameBanana's MD5, and zip, 7z and rar archives are opened with libarchive. Only the `.vpk` files inside are written, and archive paths cannot leave the temporary folder.
 - **Mods** (**Ctrl+7**): enable library mods per profile, set the load order by dragging, see which enabled mods override each other's files, and **Apply to game**, which places the enabled mods in `game\citadel\addons` as `pakNN_dir.vpk`. Modworks records its files in `addons\.modworks.json` and never touches other files there. It checks `gameinfo.gi` for the addons search path and, when asked, adds it with a backup.
 - **Build as mod...** in the VPK builder builds the pack into the library as a named mod that the **Mods** page can enable and apply. Building again under the same name replaces it in place, keeping its load-order position and enabled state. A pack identical to a mod already in the library is refused rather than renaming that mod.
 - **Add VPKs...** on the **Mods** page, and **Built pack** as a mod source.

@@ -4,7 +4,7 @@
 
 The zip is `DeadlockModworks-0.1.0-win-x64.zip`. It is the release artifact. `v0.1.0` is not tagged, and that zip has not been published as a GitHub release. `scripts/Publish.ps1` was not run for this documentation update. Extract a zip you were given, or one a maintainer produced with [RELEASING.md](RELEASING.md). `LICENSE` is MIT, `Copyright (c) 2026 CyN1ckal`.
 
-`docs/screenshots/startup-empty-library.png` is a capture of the real window with an empty library. It shows **Connect game**, **Add mods**, and **Open quick start**. It does not show the **Quick start** popup. Two-model comparison was not captured. Other startup captures are `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png`.
+`docs/screenshots/startup-empty-library.png` is a capture of the real window with an empty library. It shows the earlier empty library with **Connect game**, **Add mods**, and **Open quick start**, from before the pages were renamed and reordered. It does not show the **Quick start** popup. Two-model comparison was not captured. Other startup captures are `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png`.
 
 ## Extract
 
@@ -18,17 +18,19 @@ Start Deadlock Modworks. A normal start does not need a terminal or a build tool
 
 Double-click `DeadlockModworks.exe`. The window title is **Deadlock Modworks 0.1.0**. The menus are **File**, **Edit**, **View**, **Tools**, and **Help**.
 
-The left **Explorer** has **SOURCES**, **GAME**, and **LIBRARY**. The workspace tabs are **Mod library**, **VPK builder**, **Version history**, **Skin repairs**, **Model inspector**, and **Multi view**.
+The window opens on **My mods**. The workspace tabs are **My mods**, **Discover**, and **Skins**, then the tools in dimmer labels: **Pack builder**, **Repairs**, **Inspector**, **Side by side**, and **History**. **Ctrl+1** to **Ctrl+8** follow that order.
+
+The left **Explorer** has **MOD FILES**, **GAME**, and **LIBRARY**. It shows beside **Skins** and the tools, and not on **My mods** or **Discover**.
 
 `vulkan-1.dll` is delay-loaded from the graphics driver. The zip does not include it. A missing loader is supposed to show **vulkan-1.dll was not found. Install or update the graphics driver that provides the Vulkan loader, then start Deadlock Modworks again. The model library was not opened.** That dialog was not observed. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
-## Connect
+## Locate Deadlock
 
-Connect the game. A Steam install is used when none is saved. You can type a path or browse to `game\citadel`.
+Modworks finds a Steam install by itself. If it doesn't, use File > Locate Deadlock and choose game\citadel.
 
-If no game path was saved and `--game` was not passed, launch looks for Deadlock through Steam. A `gameDirectory` already in `store\settings.json`, a game archive stored with the library, or `--game` is used instead of that search. The status bar, and **GAME** in the explorer, say **Deadlock connected** or **Deadlock not connected**. While the archive is opening they say **Connecting to Deadlock...**.
+If no game path was saved and `--game` was not passed, launch looks for Deadlock through Steam. A `gameDirectory` already in `store\settings.json`, a game archive stored with the library, or `--game` is used instead of that search. The status bar, and **GAME** in the explorer, say **Deadlock found** or **Deadlock not found**. While the archive is opening they say **Looking for Deadlock...**.
 
-The explorer keeps a manual path. The field hint is **game\citadel or pak01_dir.vpk**. **Connect** uses a typed path. **Browse...** and **File > Choose game archive...** (**Ctrl+G**) open the file dialog. **Connect game** on an empty library uses a typed path when the field is filled, and otherwise opens that dialog.
+The explorer keeps a manual path. The field hint is **game\citadel or pak01_dir.vpk**. **Connect** uses a typed path. **Browse...** and **File > Locate Deadlock...** (**Ctrl+G**) open the file dialog. **Locate Deadlock** on an empty **Skins** page uses a typed path when the field is filled, and otherwise opens that dialog.
 
 Select this file, not a mod and not a chunk:
 
@@ -36,19 +38,19 @@ Select this file, not a mod and not a chunk:
 <Steam library>\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk
 ```
 
-A right-click on the game status also has **Choose game archive...** and **Reconnect**.
+A right-click on the game status also has **Locate Deadlock...** and **Reconnect**.
 
-You can browse the library and add mods without a connected game. Textures stored in the game, comparison, repair, and skin packs that use base-game files need the game archive, because those bytes are not in the mod. A pack made only of other files is copied as stored and does not need the game. The builder shows **Connect Deadlock to resolve base-game assets.** when skins are selected and the game is not connected.
+You can browse the library and add mods without a connected game. Textures stored in the game, comparison, repair, and skin packs that use base-game files need the game archive, because those bytes are not in the mod. A pack made only of other files is copied as stored and does not need the game. The pack builder shows **Locate Deadlock (Ctrl+G) so the pack can include the game's own files.** when skins are selected and the game is not found.
 
-## Import
+## Get mods
 
-Get mods from GameBanana on the Get mods page, add mod VPKs, or drop them on the window. The library can be browsed before a game is connected.
+Find mods on GameBanana on the Discover page, add mod VPKs, or drop them on the window. This works before Deadlock is found.
 
-To get a mod from GameBanana, open **Get mods** (**Ctrl+8**), paste the mod's link or search for it, open it, and choose **Download & enable** on the file you want. The [user guide](USER_GUIDE.md#get-mods) has the details.
+To get a mod from GameBanana, open **Discover** (**Ctrl+2**), paste the mod's link or search for it, open it, and choose **Download & enable** on the file you want. The [user guide](USER_GUIDE.md#discover) has the details.
 
 To add VPKs you already have, use any of these:
 
-- **Add mods** on an empty library
+- **Add VPKs...** on **My mods**, or **Add mods...** on an empty **Skins** page
 - **File > Add mods...** (**Ctrl+O**)
 - **Add** in the explorer
 
@@ -58,13 +60,11 @@ The file dialog title is **Add reference mods (Ctrl / Shift to select multiple)*
 
 **File > Add folder...** (**Ctrl+Shift+O**), or **Folder** in the explorer, adds every mod VPK directly in a folder, such as Deadlock's `addons` folder. Chunk files and the game archive are skipped. If the folder has no mod VPKs, the status line says `No mod VPKs found in <folder>.`
 
-An empty library says **Your library has no mods yet.** Then:
+With an empty library, **My mods** says **No mods yet** and **Find mods on GameBanana, or add VPK files you already have. Then turn them on here and choose Apply to game.** The buttons are **Discover mods** and **Add VPKs...**.
 
-> You can browse the library and add mods without a connected game. Textures stored in the game, comparison, repair, and skin packs that use base-game files need the game archive, because those bytes are not in the mod. A pack made only of other files is copied as stored and does not need the game.
+**Skins** says **No skins yet** and **Skins show up here once you add mods. Find mods on Discover (Ctrl+2), or add VPK files you already have.** The buttons are **Add mods...**, **Locate Deadlock** while the game is not found, and **Quick start**. The tooltip on **Locate Deadlock** lists what needs the game. Both pages say **You can also drop mod VPKs on the window.**
 
-Then **Building a pack does not install it. Open quick start for how to install or remove one.** The buttons are **Connect game**, **Add mods**, and **Open quick start**. Under them: **You can also drop mod VPKs on the window. Your source files stay available for later builds.**
-
-An empty source list says **No sources yet. Connect the game, add mods, or open the quick start from the library.**
+An empty explorer list says **No mod files yet. Add some here, or find mods on Discover (Ctrl+2).**
 
 Import copies the files into the library. It does not modify the VPK you selected. Adding the same content again reuses what is already stored.
 
@@ -72,7 +72,7 @@ Import copies the files into the library. It does not modify the VPK you selecte
 
 Open a skin to view its model. Textures and the original skeleton that live in the game archive need the connected game.
 
-On **Mod library**, double-click a skin, or right-click it and choose **Inspect** (**Enter**). That opens **Model inspector**. The empty inspector says to do this, and has **Browse skins** back to the library.
+On **Skins**, double-click a skin, or right-click it and choose **Inspect** (**Enter**). That opens **Inspector**. The empty inspector says to do this, and has **Browse skins** back to the library.
 
 **Preview** shows the model. **Compare versions** is the other tab on that page. A compiled `.vmdl_c` opened by itself can be viewed. Its compare tab says **Comparison needs a model opened from a mod VPK.** A side-by-side capture of two loaded models was not made.
 
@@ -86,18 +86,18 @@ On a skin card, the checkbox appears when the card is hovered or already include
 
 Right-click a skin and use **Pack** to include or remove the shown skins, or every skin of that source. Right-click a source in the explorer for **Include every skin in the pack** and **Remove every skin from the pack**.
 
-**In pack** on the library toolbar shows only the current selection. The **VPK builder** tab label includes the count, for example **VPK builder (0)**. **Edit > Clear pack** clears the selection. **Build VPK...** stays unavailable until something is selected.
+**In pack** on the **Skins** toolbar shows only the current selection. The **Pack builder** tab label includes the count once something is selected, for example **Pack builder (3)**. **Edit > Clear pack** clears the selection. **Build VPK...** stays unavailable until something is selected.
 
 ## Build
 
 Build the VPK. Assembly writes a file. It does not install the pack and does not guarantee compatibility.
 
 1. Connect the game if the pack contains skins whose dependencies come from Deadlock.
-2. Open **VPK builder** (**Ctrl+2**). An empty pack says **The pack is empty.** and **Tick skins in the library, include a mod's other files, or right-click them and choose Include in pack.**
+2. Open **Pack builder** (**Ctrl+4**). An empty pack says **Your pack is empty** and **Tick skins on the Skins page, or right-click a skin or mod file and choose Include in pack.**
 3. Choose **Build VPK...** (**Ctrl+B**) and pick a new `.vpk` name. The button tooltip says skin dependencies are included automatically, a package copies its other files as stored, shared files are deduplicated, and conflicting files block the export.
 4. The status line says **Collecting files and validating your pack...** and then `Exported N file to <path>.` when one file is written, or `Exported N files to <path>.` otherwise. `N` is the file count and `<path>` is the path you chose.
 
-**Assemble...** on **Version history** uses `Assembled a pack at <path>.` for its result.
+**Assemble...** on **History** uses `Assembled a pack at <path>.` for its result.
 
 Either way, a modal titled **Pack assembled** shows that summary, then **Assembly writes a VPK. It does not install the pack and does not guarantee compatibility with Deadlock.** Then **Install or remove the pack from Deadlock yourself. The quick start has those steps.** The buttons are **Reveal in Explorer**, **Open quick start**, and **Close**. No pack was built while these notes were written, so that modal was not shown.
 
@@ -107,19 +107,19 @@ The status line still accepts a right-click **Copy message**. **File > Open libr
 
 ## Install or remove
 
-Turn mods on or off on the Mods page and choose Apply to game while Deadlock is closed. A pack you build is not installed; copy it into the addons folder yourself.
+Turn mods on or off in My mods and choose Apply to game while Deadlock is closed. A VPK file you build is not installed; choose Build as mod... instead, or copy the file into the addons folder yourself.
 
 ### Mods from your library
 
-1. Open **Mods** (**Ctrl+7**). Tick the mods you want. Drag them to set the load order; the higher mod wins when two change the same file.
+1. Open **My mods** (**Ctrl+1**). Tick the mods you want. Drag them to set the load order; the higher mod wins when two change the same file.
 2. Close Deadlock and choose **Apply to game**. If `gameinfo.gi` does not load the addons folder, the prompt offers to add that line and keeps a backup.
 3. Start Deadlock. To take a mod out, untick it and choose **Apply to game** again.
 
-Modworks only touches the `pakNN_dir.vpk` files it placed, which it records in `addons\.modworks.json`. Mods you or another manager put in `addons` stay where they are. See [USER_GUIDE.md](USER_GUIDE.md#mods).
+Modworks only touches the `pakNN_dir.vpk` files it placed, which it records in `addons\.modworks.json`. Mods you or another manager put in `addons` stay where they are. See [USER_GUIDE.md](USER_GUIDE.md#my-mods).
 
 ### A pack you built
 
-To let Modworks install your pack, choose **Build as mod...** instead of **Build VPK...** in the VPK builder, give it a name, and apply it from **Mods** like any other mod. Building again under the same name replaces it.
+To let Modworks install your pack, choose **Build as mod...** instead of **Build VPK...** in the pack builder, give it a name, and apply it from **My mods** like any other mod. Building again under the same name replaces it.
 
 To install an exported `.vpk` by hand instead, close Deadlock first. Copy only the exported `.vpk` into:
 
@@ -140,7 +140,7 @@ To remove the pack, close Deadlock and move or delete that exported file from `a
 | **vulkan-1.dll was not found. Install or update the graphics driver that provides the Vulkan loader, then start Deadlock Modworks again. The model library was not opened.** The loader is delay-loaded. This dialog was not observed. | Update the graphics driver that provides the Vulkan loader. Do not copy a DLL from the Vulkan SDK into the zip. |
 | A Modworks dialog says no Vulkan device was found, or the driver is not Vulkan 1.3 | Update the graphics driver. There is no GPU chooser. |
 | `--data-root needs a directory.` | Pass a directory after `--data-root`, or omit the flag. `docs/screenshots/startup-missing-data-root.png` shows that box. |
-| **Deadlock not connected** | Type a path and choose **Connect**, or use **Browse...** / **File > Choose game archive...** and select `pak01_dir.vpk` in `game\citadel`. |
+| **Deadlock not found** | Use **File > Locate Deadlock...**, or type a path under **GAME** and choose **Connect**, and select `pak01_dir.vpk` in `game\citadel`. |
 | **settings.json could not be read. Saved preferences were left unchanged, and the model library was not replaced.** | The file and `store\catalog.sqlite` stay in place. Fix `store\settings.json` yourself. Do not delete the catalog to get past this. `docs/screenshots/startup-corrupt-settings.png` shows the box. |
 | **Deadlock Modworks cannot write its data folder at ... The model library was not replaced.** | The data root or `catalog.sqlite` is not writable. A read-only catalog is not replaced. Use `--data-root` on a folder you can write, or clear the read-only attribute. `docs/screenshots/startup-readonly-data-root.png` shows the box. |
 | A mod is rejected, or the status line reports an error | Right-click the status line and choose **Copy message**, or use **Help > Copy diagnostic details**. Earlier imports stay in the library. |

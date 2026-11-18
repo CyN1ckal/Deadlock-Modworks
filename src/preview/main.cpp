@@ -121,6 +121,11 @@ private:
             merge.MergeMode = true;
             io.Fonts->AddFontFromFileTTF(Narrow((fonts / L"seguisym.ttf").wstring()).c_str(), size, &merge, kSymbolRanges);
         }
+        // Headings use Segoe UI Bold at a larger size. Without it, ui::Heading keeps the body font.
+        if (std::filesystem::exists(fonts / L"segoeuib.ttf", error)) {
+            theme::SetHeadingFont(io.Fonts->AddFontFromFileTTF(Narrow((fonts / L"segoeuib.ttf").wstring()).c_str(),
+                std::round(size * theme::kHeadingScale)));
+        }
     }
 
     void Shutdown() {

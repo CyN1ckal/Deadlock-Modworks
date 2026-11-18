@@ -219,20 +219,24 @@ void ModsPanel::DrawToolbar(const std::vector<ModEntry>& entries, const fs::path
     }
     ImGui::SameLine();
     if (ui::ToolButton("Add VPKs...", "Add mod VPKs you already have, such as packs you built, to the library (Ctrl+O). "
-        "The VPK builder's Build as mod... adds a pack under a name of your choice.", !files_busy && !Busy())) add_files();
+        "Build as mod... in the pack builder adds a pack under a name of your choice.", !files_busy && !Busy())) add_files();
     ui::ToolSeparator();
     ImGui::SetNextItemWidth(std::max(ImGui::GetFontSize() * 8, ImGui::GetContentRegionAvail().x - ImGui::GetFontSize() * 9));
     ImGui::InputTextWithHint("##modfilter", "Filter mods", filter_, sizeof(filter_));
     ImGui::SameLine();
     const bool can_apply = !Busy() && !files_busy && check_.Citadel && !check_.Running;
     const char* apply_tip = Busy() ? "Applying..." : files_busy ? "Wait for the library to finish its current work."
-        : !check_.Citadel ? "Connect the game first." : check_.Running ? "Close Deadlock first." : "Place the enabled mods in Deadlock's addons folder.";
+        : !check_.Citadel ? "Locate Deadlock first (Ctrl+G)." : check_.Running ? "Close Deadlock first."
+        : "Put the mods that are on into Deadlock's addons folder. Modworks only changes files it placed there.";
+    // Apply is the page's main action. It takes the primary fill once there is something to apply.
     const bool pending = HasPendingChanges(entries);
-    if (pending) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    ImGui::BeginDisabled(!can_apply);
-    const bool apply = ImGui::Button("Apply to game", {-1, 0});
-    ImGui::EndDisabled();
-    if (pending) ImGui::PopStyleColor();
+    bool apply = false;
+    if (pending) apply = ui::PrimaryButton("Apply to game", {-1, 0}, can_apply);
+    else {
+        ImGui::BeginDisabled(!can_apply);
+        apply = ImGui::Button("Apply to game", {-1, 0});
+        ImGui::EndDisabled();
+    }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", apply_tip);
     if (apply) {
         if (!check_.MountsAddons) open_patch_gameinfo_ = true;
@@ -248,13 +252,16 @@ void ModsPanel::DrawGameState(const std::vector<ModEntry>& entries) {
         ImGui::SameLine();
         if (ImGui::SmallButton("Cancel##deploy")) deploy_cancel_.Cancel();
     } else if (!check_.Citadel) {
-        ImGui::TextColored(ui::kWarning, "Connect the game (File > Choose game archive) to apply mods. You can still enable them now.");
+        ImGui::TextColored(ui::kWarning, "Deadlock wasn't found. Locate it (Ctrl+G) to apply mods. You can still turn them on now.");
     } else {
-        if (check_.Running) ImGui::TextColored(ui::kWarning, "Deadlock is running. Close it before applying, and restart it to load changes.");
-        else if (HasPendingChanges(entries)) ImGui::TextColored(ui::kWarning, "Changes not applied yet. Choose Apply to game.");
-        else ImGui::TextColored(ui::kGood, "\xE2\x97\x8F The addons folder matches the enabled mods.");
-        if (!check_.MountsAddons && check_.Error.empty())
-            ImGui::TextColored(ui::kWarning, "gameinfo.gi does not load the addons folder, so Deadlock would ignore every mod. Apply offers to fix it.");
+        if (check_.Running) ImGui::TextColored(ui::kWarning, "\xE2\x97\x8F Close Deadlock to apply. Start it again afterwards to load the changes.");
+        else if (HasPendingChanges(entries)) ImGui::TextColored(ui::kWarning, "\xE2\x97\x8F You have changes that aren't in the game yet.");
+        else ImGui::TextColored(ui::kGood, "\xE2\x97\x8F Up to date. The game has the mods you turned on.");
+        if (!check_.MountsAddons && check_.Error.empty()) {
+            ImGui::TextColored(ui::kWarning, "Deadlock isn't set up to load mods yet. Apply to game will set it up.");
+            ImGui::SameLine();
+            ui::HelpMarker("Deadlock only loads the addons folder when gameinfo.gi lists it. Apply offers to add that one line.");
+        }
         if (!check_.Error.empty()) ImGui::TextColored(ui::kError, "%s", check_.Error.c_str());
     }
     if (!status_.empty()) {
@@ -269,9 +276,9 @@ void ModsPanel::DrawGameState(const std::vector<ModEntry>& entries) {
     }
     if (check_.Citadel && (!check_.Scan.ForeignFiles.empty() || !check_.Scan.Notes.empty())) {
         char header[96];
-        std::snprintf(header, sizeof(header), "Other files in addons (%zu)###foreign", check_.Scan.ForeignFiles.size());
+        std::snprintf(header, sizeof(header), "Files from other tools (%zu)###foreign", check_.Scan.ForeignFiles.size());
         if (ImGui::CollapsingHeader(header)) {
-            ImGui::TextDisabled("Installed by hand or by another manager. Modworks leaves them alone and skips their numbers.");
+            ImGui::TextDisabled("Installed by hand or by another mod manager. Modworks won't touch these.");
             for (const auto& file : check_.Scan.ForeignFiles) ImGui::BulletText("%s", file.c_str());
             for (const auto& note : check_.Scan.Notes) ImGui::TextColored(ui::kWarning, "%s", note.c_str());
             if (ImGui::SmallButton("Open addons folder")) ui::RevealInExplorer(*check_.Citadel / L"addons");
@@ -284,13 +291,16 @@ void ModsPanel::DrawList(const std::vector<ModEntry>& entries, const std::functi
     const auto ordered = state_.Ordered(Ids(entries));
     if (ordered.empty()) {
         ImGui::Spacing();
-        ImGui::TextWrapped("Your library has no mods yet. Download some from GameBanana, add VPKs you already have, "
-            "or build a pack in the VPK builder and choose Build as mod...");
-        if (ImGui::Button("Get mods")) get_mods();
+        ui::Heading("No mods yet");
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40);
+        ImGui::TextWrapped("Find mods on GameBanana, or add VPK files you already have. Then turn them on here and choose Apply to game.");
+        ImGui::PopTextWrapPos();
+        if (ui::PrimaryButton("Discover mods")) get_mods();
         ImGui::SameLine();
         ImGui::BeginDisabled(files_busy || Busy());
         if (ImGui::Button("Add VPKs...")) add_files();
         ImGui::EndDisabled();
+        ImGui::TextDisabled("You can also drop mod VPKs on the window.");
         return;
     }
     // Conflict summary per mod.

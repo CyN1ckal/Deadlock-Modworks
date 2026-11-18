@@ -586,14 +586,17 @@ void Workspace::HandleShortcuts() {
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_F, global)) FindSkins();
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E, global)) {
         show_explorer_ = !show_explorer_;
-        if (show_explorer_) focus_explorer_ = true;
+        if (show_explorer_) {
+            focus_explorer_ = true;
+            if (!ExplorerOnPage()) ShowPage(Page::Gallery);
+        }
     }
     if (ImGui::Shortcut(ImGuiMod_Alt | ImGuiKey_LeftArrow, global)) ShowPage(previous_page_);
     if (ImGui::Shortcut(ImGuiKey_F1, global)) open_shortcuts_ = true;
-    const Page pages[] = {Page::Gallery, Page::Pack, Page::History, Page::Repair, Page::Inspect, Page::Multi, Page::Mods, Page::Browse};
-    const ImGuiKey keys[] = {ImGuiKey_1, ImGuiKey_2, ImGuiKey_3, ImGuiKey_4, ImGuiKey_5, ImGuiKey_6, ImGuiKey_7, ImGuiKey_8};
-    for (size_t i = 0; i < std::size(pages); ++i) {
-        if (ImGui::Shortcut(ImGuiMod_Ctrl | keys[i], global)) ShowPage(pages[i]);
+    static_assert(std::size(kPages) <= 9);
+    for (size_t i = 0; i < std::size(kPages); ++i) {
+        const auto key = static_cast<ImGuiKey>(ImGuiKey_1 + static_cast<int>(i));
+        if (ImGui::Shortcut(ImGuiMod_Ctrl | key, global)) ShowPage(kPages[i].Value);
     }
 }
 
@@ -605,17 +608,18 @@ void Workspace::DrawMenuBar() {
         if (ImGui::MenuItem("Add mods...", "Ctrl+O", false, !FilesBusy())) AddMods();
         if (ImGui::MenuItem("Add folder...", "Ctrl+Shift+O", false, !FilesBusy())) AddFolder();
         ImGui::SetItemTooltip("Adds every mod VPK in a folder, such as Deadlock's addons folder. Chunk files and the game archive are skipped.");
-        if (ImGui::MenuItem("Get mods from GameBanana", "Ctrl+8")) ShowPage(Page::Browse);
+        if (ImGui::MenuItem("Discover mods on GameBanana", "Ctrl+2")) ShowPage(Page::Browse);
         ImGui::Separator();
-        if (ImGui::MenuItem("Manage mods", "Ctrl+7")) ShowPage(Page::Mods);
-        ImGui::SetItemTooltip("Enable mods, set their load order and apply them to Deadlock's addons folder.");
+        if (ImGui::MenuItem("My mods", "Ctrl+1")) ShowPage(Page::Mods);
+        ImGui::SetItemTooltip("Turn mods on or off, set their load order and apply them to Deadlock's addons folder.");
         ImGui::Separator();
-        if (ImGui::MenuItem("Add shared library...", nullptr, false, !FilesBusy())) AddLibrary();
+        if (ImGui::MenuItem("Import a shared library...", nullptr, false, !FilesBusy())) AddLibrary();
         ImGui::SetItemTooltip("Adds the mods and pack selections of a shared .db library to yours. Nothing in your library is replaced.");
-        if (ImGui::MenuItem("Share library...", nullptr, false, !FilesBusy() && builder_.CanShare())) builder_.ShareLibrary(window_);
+        if (ImGui::MenuItem("Export library to share...", nullptr, false, !FilesBusy() && builder_.CanShare())) builder_.ShareLibrary(window_);
         ImGui::SetItemTooltip("Saves your mods, pack selections and thumbnails as one .db file others can add.");
         ImGui::Separator();
-        if (ImGui::MenuItem("Choose game archive...", "Ctrl+G", false, !FilesBusy())) ChooseGame();
+        if (ImGui::MenuItem("Locate Deadlock...", "Ctrl+G", false, !FilesBusy())) ChooseGame();
+        ImGui::SetItemTooltip("Choose game\\citadel\\pak01_dir.vpk if Modworks did not find Deadlock through Steam.");
         ImGui::Separator();
         if (ImGui::MenuItem("Build VPK...", "Ctrl+B", false, !PackBusy() && builder_.SelectedCount() > 0)) {
             ShowPage(Page::Pack);
@@ -635,16 +639,18 @@ void Workspace::DrawMenuBar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
-        const struct { const char* Label; const char* Keys; Page Value; } pages[] = {
-            {"Mod library", "Ctrl+1", Page::Gallery}, {"VPK builder", "Ctrl+2", Page::Pack}, {"Version history", "Ctrl+3", Page::History},
-            {"Skin repairs", "Ctrl+4", Page::Repair}, {"Model inspector", "Ctrl+5", Page::Inspect},
-            {"Multi view", "Ctrl+6", Page::Multi}, {"Mods", "Ctrl+7", Page::Mods}, {"Get mods", "Ctrl+8", Page::Browse}};
-        for (const auto& page : pages) {
-            if (ImGui::MenuItem(page.Label, page.Keys, page_ == page.Value)) ShowPage(page.Value);
+        for (size_t i = 0; i < std::size(kPages); ++i) {
+            if (i == kPlayPages) ImGui::SeparatorText("Tools");
+            if (ImGui::MenuItem(kPages[i].Name, kPages[i].Keys, page_ == kPages[i].Value)) ShowPage(kPages[i].Value);
         }
+        ImGui::Separator();
         if (ImGui::MenuItem("Back", "Alt+Left")) ShowPage(previous_page_);
         ImGui::Separator();
-        if (ImGui::MenuItem("Explorer", "Ctrl+Shift+E", &show_explorer_) && show_explorer_) focus_explorer_ = true;
+        if (ImGui::MenuItem("Explorer", "Ctrl+Shift+E", &show_explorer_) && show_explorer_) {
+            focus_explorer_ = true;
+            if (!ExplorerOnPage()) ShowPage(Page::Gallery);
+        }
+        ImGui::SetItemTooltip("The list of mod files beside Skins, the pack builder and the tools. My mods and Discover do not show it.");
         if (ImGui::MenuItem("Workspace")) focus_workspace_ = true;
         ImGui::MenuItem("Status bar", nullptr, &show_status_bar_);
         ImGui::Separator();
@@ -655,11 +661,11 @@ void Workspace::DrawMenuBar() {
     }
     if (ImGui::BeginMenu("Tools")) {
         const bool repair_allowed = !builder_.Busy() && !library_.Busy() && !mods_.Busy();
-        if (ImGui::MenuItem("Analyze mods", nullptr, false, repair_allowed && repair_.CanAnalyze())) {
+        if (ImGui::MenuItem("Check mods for problems", nullptr, false, repair_allowed && repair_.CanAnalyze())) {
             ShowPage(Page::Repair);
             repair_.Analyze();
         }
-        if (ImGui::MenuItem("Repair supported mods", nullptr, false, repair_allowed && repair_.CanRepair())) {
+        if (ImGui::MenuItem("Fix supported problems", nullptr, false, repair_allowed && repair_.CanRepair())) {
             ShowPage(Page::Repair);
             repair_.Repair([&] { ReleaseArchives(); });
         }
@@ -693,17 +699,17 @@ void Workspace::OpenLogs() {
 
 // Context menu items for the game connection, shared by the explorer and the status bar.
 void Workspace::GameMenuItems() {
-    if (ImGui::MenuItem("Choose game archive...", "Ctrl+G", false, !FilesBusy())) ChooseGame();
+    if (ImGui::MenuItem("Locate Deadlock...", "Ctrl+G", false, !FilesBusy())) ChooseGame();
     if (ImGui::MenuItem("Reconnect", nullptr, false, !FilesBusy() && !configured_game_.empty() && !game_loader_.Busy())) OpenGame(configured_game_);
     ImGui::Separator();
     ui::PathMenuItems(game_ ? GamePath() : game_loading_);
 }
 
 void Workspace::GameState(ImVec4& color, const char*& label) const {
-    if (game_) { color = ui::kGood; label = "Deadlock connected"; }
-    else if (game_loader_.Busy()) { color = ui::kWarning; label = "Connecting to Deadlock..."; }
-    else if (!game_error_.empty()) { color = ui::kError; label = "Deadlock not connected"; }
-    else { color = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled); label = "Deadlock not connected"; }
+    if (game_) { color = ui::kGood; label = "Deadlock found"; }
+    else if (game_loader_.Busy()) { color = ui::kWarning; label = "Looking for Deadlock..."; }
+    else if (!game_error_.empty()) { color = ui::kError; label = "Deadlock not found"; }
+    else { color = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled); label = "Deadlock not found"; }
 }
 
 // The most important message for the status bar, with a way to dismiss it.
@@ -734,7 +740,7 @@ void Workspace::DrawStatusBar() {
         ImGui::PopStyleColor();
         if (!open) {
             ImGui::SetItemTooltip("%s", game_ ? game_name_.c_str()
-                : game_loading_.empty() ? "Choose the game archive to connect" : Narrow(game_loading_.wstring()).c_str());
+                : game_loading_.empty() ? "Locate Deadlock (Ctrl+G)" : Narrow(game_loading_.wstring()).c_str());
         }
         if (open) {
             GameMenuItems();
@@ -814,9 +820,11 @@ void Workspace::DrawStatusBar() {
 
 // ---------- explorer ----------
 
+bool Workspace::ExplorerOnPage() const { return page_ != Page::Mods && page_ != Page::Browse; }
+
 void Workspace::DrawExplorer() {
     ZoneScopedN("Explorer");
-    if (!show_explorer_) return;
+    if (!show_explorer_ || !ExplorerOnPage()) return;
     shell::DockWithoutTab();
     const bool focus = std::exchange(focus_explorer_, false);
     if (focus) ImGui::SetNextWindowFocus();
@@ -827,7 +835,7 @@ void Workspace::DrawExplorer() {
         ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(labels).x - style.FramePadding.x * 4 - style.ItemSpacing.x);
     };
 
-    ui::SectionLabel("SOURCES");
+    ui::SectionLabel("MOD FILES");
     ImGui::SameLine();
     ImGui::TextDisabled("%zu", mod_paths_.size());
     right_aligned("AddFolder");
@@ -835,7 +843,7 @@ void Workspace::DrawExplorer() {
     ImGui::SameLine();
     if (ui::ToolButton("Folder", "Add every mod VPK in a folder (Ctrl+Shift+O)", !FilesBusy())) AddFolder();
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##sourcefilter", "Filter sources", source_filter_, sizeof(source_filter_));
+    ImGui::InputTextWithHint("##sourcefilter", "Filter mod files", source_filter_, sizeof(source_filter_));
 
     const std::string& save_error = library_.SaveError();
     const float footer = ImGui::GetFrameHeightWithSpacing() * 6 + ImGui::GetTextLineHeightWithSpacing() * 2
@@ -883,11 +891,11 @@ void Workspace::DrawExplorer() {
         }
         ImGui::BeginDisabled(FilesBusy());
         ImGui::BeginDisabled(!builder_.CanShare());
-        if (ImGui::Button("Share...", {ImGui::GetContentRegionAvail().x * .5f - style.ItemSpacing.x * .5f, 0})) builder_.ShareLibrary(window_);
+        if (ImGui::Button("Export...", {ImGui::GetContentRegionAvail().x * .5f - style.ItemSpacing.x * .5f, 0})) builder_.ShareLibrary(window_);
         ImGui::EndDisabled();
         ImGui::SetItemTooltip("Save your mods, pack selections and thumbnails as one .db file others can add.");
         ImGui::SameLine();
-        if (ImGui::Button("Add shared...", {-1, 0})) AddLibrary();
+        if (ImGui::Button("Import...", {-1, 0})) AddLibrary();
         ImGui::SetItemTooltip("Add the mods and pack selections of a shared .db library to yours. Nothing in yours is replaced.");
         ImGui::EndDisabled();
     } else {
@@ -914,7 +922,7 @@ void Workspace::DrawSourceList() {
         ImGui::TextDisabled("%s", text);
     };
     if (!mod_paths_.empty() && !filter.IsActive()) {
-        if (ImGui::Selectable("All sources", active.empty() && library_page)) {
+        if (ImGui::Selectable("All mod files", active.empty() && library_page)) {
             builder_.SetSourceFilter({});
             if (page_ != Page::Pack) ShowPage(Page::Gallery);
         }
@@ -967,7 +975,7 @@ void Workspace::DrawSourceList() {
             if (const auto id = store ? store->ContentId(path) : std::nullopt) {
                 const bool enabled = mods_.State().Enabled(*id);
                 if (ImGui::MenuItem(enabled ? "Disable for the game" : "Enable for the game")) mods_.SetEnabled(*id, !enabled);
-                ImGui::SetItemTooltip("Changes the current mod profile. Apply it on the Mods page (Ctrl+7).");
+                ImGui::SetItemTooltip("Changes the current mod profile. Apply it on My mods (Ctrl+1).");
             }
             if (ImGui::MenuItem("Rename...", nullptr, false, !FilesBusy() && store != nullptr)) {
                 rename_target_ = path;
@@ -989,7 +997,7 @@ void Workspace::DrawSourceList() {
     }
     if (mod_paths_.empty()) {
         ImGui::PushTextWrapPos();
-        ImGui::TextDisabled("No sources yet. Connect the game, add mods, or open the quick start from the library.");
+        ImGui::TextDisabled("No mod files yet. Add some here, or find mods on Discover (Ctrl+2).");
         ImGui::PopTextWrapPos();
     }
     if (remove) RemoveSource(*remove);
@@ -1000,26 +1008,22 @@ void Workspace::DrawSourceList() {
 // The page tabs. A tab the user clicks becomes the page; a page shown from code selects its tab.
 void Workspace::DrawPageTabs() {
     if (!ImGui::BeginTabBar("pages", ImGuiTabBarFlags_FittingPolicyScroll)) return;
-    char pack_label[48];
-    std::snprintf(pack_label, sizeof(pack_label), "VPK builder (%zu)###pack", builder_.SelectedCount());
-    const std::string inspect_label = (mod_name_.empty() ? std::string("Model inspector") : "Inspect: " + mod_name_) + "###inspect";
-    const struct { const char* Label; const char* Tooltip; Page Value; } tabs[] = {
-        {"Mod library###gallery", "Browse every skin in your library (Ctrl+1)", Page::Gallery},
-        {pack_label, "Choose skins and other files, then export them as one VPK (Ctrl+2)", Page::Pack},
-        {"Version history###history", "Every stored copy of each model, and how repairs changed it (Ctrl+3)", Page::History},
-        {"Skin repairs###repair", "Check and repair your mods after game updates (Ctrl+4)", Page::Repair},
-        {inspect_label.c_str(), "Textures, animations and skeleton of one model (Ctrl+5)", Page::Inspect},
-        {"Multi view###multi", "Several models of one character, with one shared camera (Ctrl+6)", Page::Multi},
-        {"Mods###mods", "Enable mods, set their load order and profiles, and apply them to the game (Ctrl+7)", Page::Mods},
-        {"Get mods###browse", "Browse, search and download Deadlock mods from GameBanana (Ctrl+8)", Page::Browse},
-    };
     Page visible = page_;
-    for (const auto& tab : tabs) {
-        const ImGuiTabItemFlags flags = page_requested_ && tab.Value == page_ ? ImGuiTabItemFlags_SetSelected : 0;
-        const bool open = ImGui::BeginTabItem(tab.Label, nullptr, flags);
-        ImGui::SetItemTooltip("%s", tab.Tooltip);
+    for (size_t i = 0; i < std::size(kPages); ++i) {
+        const auto& page = kPages[i];
+        std::string label = page.Name;
+        if (page.Value == Page::Pack && builder_.SelectedCount() > 0) label += " (" + std::to_string(builder_.SelectedCount()) + ")";
+        if (page.Value == Page::Inspect && !mod_name_.empty()) label = "Inspect: " + mod_name_;
+        label += std::string("###") + page.Id;
+        // Dimmed labels set the tools apart from the pages players use every day.
+        const bool tool = i >= kPlayPages;
+        if (tool) ImGui::PushStyleColor(ImGuiCol_Text, theme::kSecondary);
+        const ImGuiTabItemFlags flags = page_requested_ && page.Value == page_ ? ImGuiTabItemFlags_SetSelected : 0;
+        const bool open = ImGui::BeginTabItem(label.c_str(), nullptr, flags);
+        if (tool) ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("%s (%s)", page.Tooltip, page.Keys);
         if (open) {
-            visible = tab.Value;
+            visible = page.Value;
             ImGui::EndTabItem();
         }
     }
@@ -1129,7 +1133,7 @@ void Workspace::DrawInspectPage() {
                 builder_.SetSourceFilter(active_mod_);
                 ShowPage(Page::Gallery);
             }
-            if (ImGui::MenuItem("Multi view", nullptr, false, CharacterOfModel(selected_).has_value())) {
+            if (ImGui::MenuItem("Side by side", nullptr, false, CharacterOfModel(selected_).has_value())) {
                 multi_.Open({active_mod_, selected_}, builder_.Models());
                 ShowPage(Page::Multi);
             }
@@ -1211,7 +1215,7 @@ void Workspace::DrawBuildModPopup() {
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {.5f, .5f});
     ImGui::SetNextWindowSize({ImGui::GetFontSize() * 28, 0}, ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Build as mod", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
-    ImGui::TextWrapped("Builds the pack into your library as a mod with this name. Turn it on and off on the Mods page like any other mod.");
+    ImGui::TextWrapped("Builds the pack into your library as a mod with this name. Turn it on and off in My mods like any other mod.");
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-1);
     const bool entered = ImGui::InputTextWithHint("##modname", "Mod name", build_mod_name_, sizeof(build_mod_name_), ImGuiInputTextFlags_EnterReturnsTrue);

@@ -242,7 +242,7 @@ TEST_F(StartupTest, ErrorLogIsUnderTheDataRootAndStartupCanStayQuiet) {
 TEST(StartupMessages, QuickStartAndGameNeedsStaySpecific) {
     const std::span<const GuideStep> steps = QuickStartSteps();
     ASSERT_EQ(steps.size(), 8u);
-    const char* titles[] = {"Extract", "Launch", "Connect", "Import", "Inspect", "Select", "Build", "Install or remove"};
+    const char* titles[] = {"Extract", "Launch", "Locate Deadlock", "Get mods", "Inspect", "Select", "Build", "Install or remove"};
     for (std::size_t i = 0; i < steps.size(); ++i) {
         EXPECT_STREQ(steps[i].Title, titles[i]);
         EXPECT_NE(steps[i].Detail, nullptr);
