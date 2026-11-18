@@ -1,6 +1,6 @@
 # User guide
 
-Deadlock Modworks 0.1.0 is a desktop workspace for hero-model mods. It is not a marketplace, and **Build VPK...** does not install the file it writes. The procedural path is [QUICK_START.md](QUICK_START.md). Menu names below are the ones drawn by this version.
+Deadlock Modworks 0.1.0 is a desktop workspace for hero-model mods. It is not a marketplace, and **Build VPK file...** does not install the file it writes; **Add to My mods...** keeps the pack in your library so **Apply to game** can install it. The procedural path is [QUICK_START.md](QUICK_START.md). Menu names below are the ones drawn by this version.
 
 The captures in `docs/screenshots/` are the real window, taken before the navigation moved to the left edge, so they show the earlier tab strip and empty library. `library.png`, `builder.png`, `history.png`, `repairs.png`, `inspector.png`, `shortcuts.png`, and `data-root-error.png` are an earlier pass with no model loaded. `library.png` is cropped to the window. `startup-empty-library.png` is the later empty library and shows **Connect game**, **Add mods**, and **Open quick start**. `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png` are the message boxes for those startup failures. A comparison of two loaded models was not captured, so this guide does not pretend that `inspector.png` shows one. The **Quick start** popup was not opened, and a drop onto the window was not performed.
 
@@ -15,7 +15,7 @@ The navigation runs down the left edge of the window. The window opens on **My m
 | **My mods** | Ctrl+1 | Mods turned on, load order, profiles, and **Apply to game** |
 | **Discover** | Ctrl+2 | Browse, search and download Deadlock mods from GameBanana |
 | **Skins** | Ctrl+3 | Skins and other files in the collection |
-| **Pack builder** | Ctrl+4 | The current pack, then **Build VPK...** or **Build as mod...** |
+| **Pack builder** | Ctrl+4 | The current pack, then **Add to My mods...** or **Build VPK file...** |
 | **Repairs** | Ctrl+5 | Check and fix supported skeleton changes and pre-October 2026 camera attachments |
 | **Inspector** | Ctrl+6 | One model: **Preview** and **Compare versions** |
 | **Side by side** | Ctrl+7 | Up to four models of one hero |
@@ -123,9 +123,9 @@ Import does not change the original file. After a successful import, that origin
 
 ## Pack builder
 
-The builder is the same listing, restricted to the pack, plus a line such as **0 skins in pack**, **Build VPK...**, and **Clear pack**. **File > Build VPK...** (**Ctrl+B**) is enabled only when the pack is not empty and no import, repair, or build is running.
+The builder is the same listing, restricted to the pack, plus a line such as **0 skins in pack**, **Add to My mods...** with an arrow that holds **Build VPK file...**, and **Clear pack**. **File > Build VPK file...** (**Ctrl+B**) is enabled only when the pack is not empty and no import, repair, or build is running.
 
-**Build VPK...** asks for a new `.vpk`. The status line then says **Collecting files and validating your pack...**. On success it says `Exported N file to <path>.` or `Exported N files to <path>.`
+**Build VPK file...** asks for a new `.vpk`. The status line then says **Collecting files and validating your pack...**. On success it says `Exported N file to <path>.` or `Exported N files to <path>.`
 
 What the export includes:
 
@@ -146,14 +146,14 @@ Different bytes at the same path fail with **Conflicting file**, the two source 
 
 The app does not copy the result into `addons`. Right-click the status line for **Copy message** or **Dismiss**. That menu is not **Reveal in Explorer**. After a successful build, a modal titled **Pack assembled** shows the summary, then **Assembly writes a VPK. It does not install the pack and does not guarantee compatibility with Deadlock.** Then **Install or remove the pack from Deadlock yourself. The quick start has those steps.** The buttons are **Reveal in Explorer**, **Open quick start**, and **Close**. No pack was built for this note, so that modal was not shown. To try the pack in Deadlock, close the game and copy the `.vpk` into `game\citadel\addons`. Do not replace `pak01_dir.vpk` or the game's chunk files. Close the game and remove that file from `addons` to uninstall it. See [QUICK_START.md](QUICK_START.md).
 
-### Build as mod
+### Add to My mods
 
-**Build as mod...**, beside **Build VPK...**, builds the same pack but keeps it in your library as a mod with the name you type, instead of writing a file you place yourself. It then appears on **My mods** with **Built pack** as its source, ready to enable and apply like any other mod. **Enable it in the current profile** is ticked by default.
+**Add to My mods...** is the pack builder's main button. It builds the pack and keeps it in your library as a mod with the name you type, instead of writing a file you place yourself. The arrow beside it has **Build VPK file...** (**Ctrl+B**), which writes the file as described above. When the pack builder runs without a library, the main button is **Build VPK...** instead. It then appears on **My mods** with **Built pack** as its source, ready to enable and apply like any other mod. **Enable it in the current profile** is ticked by default.
 
 - Building again under the same name, in any letter case, replaces the earlier build. The prompt says so. The new build takes the earlier one's place in the load order and stays enabled in every profile where it was enabled, and the earlier build leaves the collection. It stays in **History**.
 - The pack selection is kept after a build, so you can change it and build again.
 - A pack whose files are exactly those of one mod already in your library is refused with **The pack has exactly the same files as ..., which is already in your library. Turn that mod on in My mods instead.** The library keeps identical files once, so naming such a pack would rename that mod.
-- The build follows the same rules as **Build VPK...**: dependencies, conflicts and the connected game work the same way.
+- The build follows the same rules as **Build VPK file...**: dependencies, conflicts and the connected game work the same way.
 
 A built mod also shows in the gallery, because its skins are in your library.
 
@@ -194,6 +194,19 @@ The page fills viewports from `models/heroes/<character>/...`: the model you ope
 ## Repairs
 
 Close Deadlock, and wait until Steam is finished updating it, before repairing. The help marker on this page says the same thing.
+
+### After a game update
+
+Modworks remembers which build of Deadlock your mods were last checked against: the `ClientVersion` in `game\citadel\steam.inf`, or the size and date of `pak01_dir.vpk` when that file has none. The first game it finds is taken as checked. When a later launch finds a different build and the library has mods, **My mods** shows **Deadlock has updated since your mods were last checked.** with **Check my mods** and **Not now**.
+
+- **Check my mods** runs **Analyze** on every mod. While it runs the banner shows its progress and **Cancel**.
+- When some mods can be fixed, the banner says how many and offers **Fix n mods**, **Review in Repairs** and **Not now**. **Fix** runs the same repair as **Repair n supported** on this page, which saves a new version of each mod and keeps the original. Afterwards the banner says to **Apply to game** when the fixed versions aren't in the game yet.
+- When nothing can be fixed, the banner says so, with **Review in Repairs** and **Dismiss**. Mods that need review are listed on this page.
+- **Not now**, or cancelling, asks again on the next launch. The new build is recorded once the check finds nothing to fix and you dismiss it, or once the fix finishes. It is saved in `mods.json`.
+
+This was exercised with the disposable data root and stand-in game folder by adding a `steam.inf`. The stand-in mods had nothing to fix, so **Fix n mods** was not run.
+
+### Analyze
 
 **Analyze** checks every mod in the library against the installed game. It does not write a VPK. **Tools > Check mods for problems** opens this page and starts that check. Without a game, the page says **Locate Deadlock (Ctrl+G) to check mods for problems.**
 
@@ -257,11 +270,13 @@ Click a mod to see its screenshots, its description and its files, newest first.
 
 ## My mods
 
+Until your first mod is in the game, **My mods** shows **Get your first mod into Deadlock** above the list, with four steps: **Find Deadlock**, **Get a mod**, **Turn it on** and **Apply to game**. A step is ticked once it and the ones before it are done. The current step has its button: **Locate Deadlock...**, or **Discover mods** and **Add mods...**. The checklist goes away for good once every step is done, or with **Hide**. A library that already has mods in the game never shows it.
+
 **My mods** (**Ctrl+1**) lists every mod in the library as a card with an on/off switch. A mod that is on is enabled in the current profile. Double-clicking a card flips it too. Under the name, each card says where the mod came from: **GameBanana** and the file name, **Built in Pack builder**, or **Added from a file**.
 
 Badges on the right of a card:
 
-- **Your pack** for a pack you built with [Build as mod](#build-as-mod).
+- **Your pack** for a pack you built with [Add to My mods](#add-to-my-mods).
 - **Wins n files** or **Loses n files** when two mods that are on contain the same file. Hover it to see which mods share files and how many.
 - **Not in game yet** or **Still in game** when the mod's switch differs from what is in `addons`.
 
@@ -270,7 +285,7 @@ The toolbar has **Profile**, **Search my mods**, **Load order** and **Add mods..
 - **Profiles.** The **Profile** menu switches between named sets of enabled mods and shows how many are on in each. **New profile...** starts one, optionally with the mods enabled now. **Rename** and **Delete** change the current one. Every profile shares the one load order. The last profile cannot be deleted.
 - **Load order.** **Load order** shows each mod's position, a drag handle and up/down arrows, with **Which mod wins** beside the list. When two enabled mods contain the same file, the one higher in the list wins. Drag a card or use the arrows to change it. **Move to top** and **Move to bottom** are on the right-click menu in either view.
 - Right-click a card for **Turn on** or **Turn off**, **Turn all on** and **Turn all off**, **Show skins**, **Open GameBanana page** for downloaded mods, **Reveal in Explorer**, and **Copy** with the name, path and content id. Right-click empty space in the list for **Turn all on** and **Turn all off**. The mod files panel's right-click menu on a source has **Enable for the game** or **Disable for the game** too.
-- **Add mods...** adds mod VPKs you already have, including packs you exported with **Build VPK...** earlier, so you can turn them on here. **Build as mod...** in the pack builder adds a pack under a name you choose; see [Build as mod](#build-as-mod).
+- **Add mods...** adds mod VPKs you already have, including packs you exported with **Build VPK...** earlier, so you can turn them on here. **Add to My mods...** in the pack builder adds a pack under a name you choose; see [Add to My mods](#add-to-my-mods).
 
 Nothing reaches the game until **Apply to game**, in the bar under the list. It needs Deadlock found and closed. It makes `game\citadel\addons` hold exactly the enabled mods, as `pak01_dir.vpk`, `pak02_dir.vpk` and so on in load order: mods already in place stay, moved ones are renamed, new ones are copied, and Modworks files that are no longer enabled are removed.
 
@@ -290,7 +305,7 @@ Deadlock only reads `addons` when `game\citadel\gameinfo.gi` lists `Game citadel
 
 Enabled mods, the load order, profiles and download sources are saved in `<data-root>\mods.json`. A damaged `mods.json` is left as it is and the page says so; changes made in that session are not saved over it. **Export library to share...** does not include it.
 
-The pack builder works as before. **Apply to game** does not install a file written by **Build VPK...**; use **Build as mod...** instead, or add that file with **Add mods...** and turn it on.
+The pack builder works as before. **Apply to game** does not install a file written by **Build VPK file...**; use **Add to My mods...** instead, or add that file with **Add mods...** and turn it on.
 
 These pages were exercised with a disposable data root and a stand-in game folder: browsing, a pasted link, and **Download & enable** followed by **Apply to game** with the mod `haze black recolor`, next to a foreign `pak03_dir.vpk` that stayed untouched. They were not run against a real Deadlock install, so loading in game was not observed.
 
@@ -313,7 +328,7 @@ The default root is `%LOCALAPPDATA%\DeadlockModManager`. Pass `--data-root <dire
 | `cache\` | VPKs rebuilt from the library so the gallery can open them. Safe to delete while Modworks is closed. The next launch rebuilds what the collection still needs. |
 | `store\catalog.sqlite` | The catalog: file identities, versions, the collection, pack selections, the connected game archive, and thumbnails. |
 | `store\blobs\sha256\` | File bytes, one blob per SHA-256. |
-| `mods.json` | Enabled mods, load order, profiles and GameBanana sources for **My mods**. |
+| `mods.json` | Enabled mods, load order, profiles and GameBanana sources for **My mods**, the game build the mods were last checked against, and whether the first-run checklist is done. |
 | `downloads\` | Temporary folders for GameBanana downloads. Each is removed when its import ends. |
 | `library.db`, `library.json`, `library.backup.json`, `mods\`, `thumbnails\` | Older releases. Read once if present, then left on disk. |
 

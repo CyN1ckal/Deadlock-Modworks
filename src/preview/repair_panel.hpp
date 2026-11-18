@@ -31,6 +31,8 @@ public:
     // before_repair releases the browser's read locks before replacement starts.
     void Repair(const std::function<void()>& before_repair) { if (CanRepair()) { before_repair(); Start(true); } }
     const std::string& Status() const { return status_; }
+    // Whether the last analysis or repair ran to the end, rather than being cancelled or failing.
+    bool Completed() const { return !busy_ && completed_.load(); }
     // Returns true after a write operation finishes, so the browser can reopen its archive.
     bool Poll();
     // before_repair releases the browser's read locks before replacement starts.
@@ -51,6 +53,7 @@ private:
     std::thread worker_;
     CancellationSource cancellation_;
     std::atomic<bool> done_ = false;
+    std::atomic<bool> completed_ = false;
     std::mutex mutex_;
     std::vector<ArchiveReport> pending_reports_;
     UpdateProgress pending_progress_;

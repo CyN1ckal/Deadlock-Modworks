@@ -92,6 +92,14 @@ public:
     // The stored mods downloaded from a GameBanana mod.
     std::vector<std::string> FromGameBanana(int64_t mod) const;
 
+    // The game build (GameBuildId) the library's skins were last checked against after an update. Empty until the
+    // first time a game is found.
+    const std::string& CheckedGameBuild() const { return checked_game_build_; }
+    void SetCheckedGameBuild(std::string build) { checked_game_build_ = std::move(build); }
+    // Whether the first-run checklist on My mods was finished or hidden.
+    bool GuideDone() const { return guide_done_; }
+    void SetGuideDone(bool done) { guide_done_ = done; }
+
     bool operator==(const ModState&) const = default;
 
 private:
@@ -101,6 +109,8 @@ private:
     std::vector<ModProfile> profiles_;
     std::string active_;
     std::map<std::string, ModOrigin> origins_;
+    std::string checked_game_build_;
+    bool guide_done_ = false;
 };
 
 }  // namespace skeleton_repair

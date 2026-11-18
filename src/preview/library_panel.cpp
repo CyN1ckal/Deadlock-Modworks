@@ -1134,15 +1134,26 @@ void LibraryPanel::Draw(void* owner, const std::vector<std::filesystem::path>& s
         ImGui::TextUnformatted(pack_label.c_str());
         ImGui::SameLine();
         const bool pack_ready = skins > 0 || packages > 0;
+        static constexpr const char* kBuildVpkTip = "Export the pack as one VPK file (Ctrl+B). Skin dependencies are included automatically. "
+            "A package copies its other files as stored. Shared files are deduplicated; conflicting files block the export.";
         theme::PushPrimaryButton();
-        if (ui::ToolButton("Build VPK...", "Export the pack as one VPK (Ctrl+B). Skin dependencies are included automatically. "
-            "A package copies its other files as stored. Shared files are deduplicated; conflicting files block the export.",
-            !locked && pack_ready)) BuildPack(owner, game);
-        theme::PopPrimaryButton();
         if (build_as_mod_) {
-            ImGui::SameLine();
-            if (ui::ToolButton("Build as mod...", "Build the pack into your library as a named mod, which My mods can turn on "
+            // Adding the pack to My mods is what most people want. Writing a VPK file is on the arrow beside it.
+            if (ui::ToolButton("Add to My mods...", "Build the pack into your library as a named mod, which My mods can turn on "
                 "and apply to the game. Building again under the same name replaces it.", !locked && pack_ready)) build_as_mod_();
+            ImGui::SameLine(0, 1);
+            ImGui::BeginDisabled(locked || !pack_ready);
+            if (ImGui::ArrowButton("##buildmore", ImGuiDir_Down)) ImGui::OpenPopup("build_more");
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("More ways to build the pack");
+        } else if (ui::ToolButton("Build VPK...", kBuildVpkTip, !locked && pack_ready)) {
+            BuildPack(owner, game);
+        }
+        theme::PopPrimaryButton();
+        if (ImGui::BeginPopup("build_more")) {
+            if (ImGui::MenuItem("Build VPK file...", "Ctrl+B")) BuildPack(owner, game);
+            ImGui::SetItemTooltip("%s", kBuildVpkTip);
+            ImGui::EndPopup();
         }
         ImGui::SameLine();
         if (ui::ToolButton("Clear pack", "Remove every skin and package from the pack", !locked && pack_ready)) ClearPack();

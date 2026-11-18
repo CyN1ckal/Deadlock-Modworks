@@ -74,6 +74,9 @@ private:
     void DrawToolbar(const std::vector<ModEntry>& entries, bool files_busy, const std::function<void()>& add_files);
     void DrawProfileMenu();
     void DrawNotices();
+    // The first-run checklist, until every step was done once or it is hidden. Sets guide_shown_.
+    void DrawGuide(const std::vector<ModEntry>& entries, bool files_busy, const std::function<void()>& get_mods,
+        const std::function<void()>& add_files, const std::function<void()>& locate_game);
     void DrawList(const std::vector<ModEntry>& entries, const std::function<void(const std::filesystem::path&)>& show_in_library,
         const std::function<void()>& get_mods, const std::function<void()>& add_files, bool files_busy);
     void DrawConflicts(const std::vector<ModEntry>& entries);
@@ -92,6 +95,7 @@ private:
     // The load order view: positions, drag handles, arrows and the conflict list.
     bool load_order_ = false;
     bool open_other_files_ = false;
+    bool guide_shown_ = false;
     std::optional<std::string> new_error_;
     char filter_[128] = {};
 

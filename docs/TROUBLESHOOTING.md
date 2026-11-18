@@ -54,7 +54,7 @@ A tree in the gallery, **N source archives could not be read**, lists sources wh
 
 ## Export conflicts and other build failures
 
-**Build VPK...** writes nothing until the output has been validated. These messages are the whole failure. Fix the selection and build to a new name.
+**Build VPK file...** and **Add to My mods...** write nothing until the output has been validated. These messages are the whole failure. Fix the selection and build to a new name.
 
 | Message | What to do |
 | --- | --- |

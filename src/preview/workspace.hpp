@@ -130,6 +130,11 @@ private:
     void DrawNavRail();
     void DrawGameCard();
     void DrawSettingsPage();
+    // After Deadlock updates: offers to check the library's mods, then to fix the ones Repairs can fix.
+    void PollGameUpdate();
+    void DrawGameUpdate();
+    // Records the connected game's build as the one the mods were checked against.
+    void AcceptGameBuild();
     void DrawWorkspace();
     void DrawInspectPage();
     void DrawDialogs();
@@ -144,6 +149,12 @@ private:
 
     // Pages and shell windows
     Page page_ = Page::Mods;
+    // Where the check after a game update stands. Found until the user checks, Checked until they fix or dismiss it.
+    enum class GameUpdate { None, Found, Checking, Checked, Fixing, Fixed };
+    GameUpdate game_update_ = GameUpdate::None;
+    // GameBuildId of the connected game, and how many mods the last check after an update can fix.
+    std::string game_build_;
+    size_t update_fixable_ = 0;
     Page previous_page_ = Page::Mods;
     // Set while a page shown from code waits for its tab to become selected.
     bool show_explorer_ = true;

@@ -108,6 +108,7 @@ void Workspace::Frame(const std::vector<std::filesystem::path>& dropped) {
     if (const auto rename = std::exchange(pending_rename_, std::nullopt)) StartRename(rename->first, rename->second);
     // A repair from the version history may replace one of the gallery's stored copies too.
     if (repair_.Poll() | history_.TakeRepaired()) AfterRepair();
+    PollGameUpdate();
     if (!dropped.empty() && !FilesBusy()) AddPaths(dropped);
 
     // The menu and status bars take their rows before the dockspace fills the rest of the window.
@@ -394,6 +395,11 @@ void Workspace::PollGame() {
         game_name_ = Narrow(game_loading_.wstring());
         game_directory_ = Narrow(game_loading_.parent_path().wstring());
         multi_.SetGame(game_, GamePath());
+        game_build_ = GameBuildId(game_loading_.parent_path());
+        // The first game found is the one the mods are taken to work with. A different build later is an update.
+        if (!game_build_.empty() && mods_.State().CheckedGameBuild().empty()) AcceptGameBuild();
+        else if (!game_build_.empty() && mods_.State().CheckedGameBuild() != game_build_) game_update_ = GameUpdate::Found;
+        else game_update_ = GameUpdate::None;
     } catch (const std::exception& error) {
         std::error_code missing;
         if (!std::filesystem::is_regular_file(game_loading_, missing)) game_error_ = MissingGameMessage(game_loading_);
@@ -404,6 +410,118 @@ void Workspace::PollGame() {
     // The comparison and textures depend on the game, so reload the model being inspected.
     if (!active_mod_.empty()) StartInspect(active_mod_, selected_);
     SyncSources();
+}
+
+void Workspace::AcceptGameBuild() {
+    if (game_build_.empty()) return;
+    mods_.State().SetCheckedGameBuild(game_build_);
+    mods_.Save();
+}
+
+void Workspace::PollGameUpdate() {
+    switch (game_update_) {
+    case GameUpdate::Found:
+        // Nothing to check in an empty library.
+        if (!library_.Restoring() && library_.CanPersist() && mod_paths_.empty()) {
+            AcceptGameBuild();
+            game_update_ = GameUpdate::None;
+        }
+        break;
+    case GameUpdate::Checking:
+        if (repair_.Busy()) break;
+        if (!repair_.Completed()) {
+            game_update_ = GameUpdate::Found;
+            break;
+        }
+        update_fixable_ = repair_.RepairableCount();
+        game_update_ = GameUpdate::Checked;
+        break;
+    case GameUpdate::Fixing:
+        if (repair_.Busy()) break;
+        if (!repair_.Completed()) {
+            update_fixable_ = repair_.RepairableCount();
+            game_update_ = GameUpdate::Checked;
+            break;
+        }
+        AcceptGameBuild();
+        game_update_ = GameUpdate::Fixed;
+        break;
+    default:
+        break;
+    }
+}
+
+// A banner above My mods while a game update needs a look.
+void Workspace::DrawGameUpdate() {
+    if (game_update_ == GameUpdate::None) return;
+    const auto mods_label = [](size_t count) { return count == 1 ? std::string("1 mod") : std::to_string(count) + " mods"; };
+    switch (game_update_) {
+    case GameUpdate::Found: {
+        ui::BeginBanner(ui::kWarning);
+        ImGui::TextWrapped("Deadlock has updated since your mods were last checked. Some skins may need a fix to work again.");
+        const bool can = repair_.CanAnalyze() && !FilesBusy();
+        ImGui::BeginDisabled(!can);
+        if (ImGui::SmallButton("Check my mods")) {
+            repair_.Analyze();
+            game_update_ = GameUpdate::Checking;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", can ? "Checks every mod against the new game. Nothing changes until you choose to fix them."
+                : "Wait for the library to finish its current work.");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Not now")) game_update_ = GameUpdate::None;
+        ImGui::SetItemTooltip("Ask again next time Modworks starts.");
+        ui::EndBanner();
+        break;
+    }
+    case GameUpdate::Checking:
+    case GameUpdate::Fixing:
+        ui::BeginBanner(ui::kAccent);
+        ImGui::TextWrapped("%s", game_update_ == GameUpdate::Checking ? "Checking your mods against the new game..."
+            : ("Fixing " + mods_label(update_fixable_) + "...").c_str());
+        ImGui::TextDisabled("%s", repair_.Status().c_str());
+        if (ImGui::SmallButton("Cancel##update")) repair_.Cancel();
+        ui::EndBanner();
+        break;
+    case GameUpdate::Checked: {
+        if (update_fixable_ == 0) {
+            ui::BeginBanner(ui::kGood);
+            ImGui::TextWrapped("Nothing needs a fix after the update. Repairs has the full results.");
+        } else {
+            ui::BeginBanner(ui::kWarning);
+            ImGui::TextWrapped("%s need a fix after the update. Fixing saves a new version of each and keeps the original.",
+                mods_label(update_fixable_).c_str());
+            const std::string fix = "Fix " + mods_label(update_fixable_);
+            ImGui::BeginDisabled(!repair_.CanRepair() || FilesBusy());
+            if (ImGui::SmallButton(fix.c_str())) {
+                game_update_ = GameUpdate::Fixing;
+                repair_.Repair([&] { ReleaseArchives(); });
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+        }
+        if (ImGui::SmallButton("Review in Repairs")) ShowPage(Page::Repair);
+        ImGui::SameLine();
+        if (ImGui::SmallButton(update_fixable_ == 0 ? "Dismiss##update" : "Not now")) {
+            if (update_fixable_ == 0) AcceptGameBuild();
+            game_update_ = GameUpdate::None;
+        }
+        ui::EndBanner();
+        break;
+    }
+    case GameUpdate::Fixed:
+        ui::BeginBanner(ui::kGood);
+        ImGui::TextWrapped("%s", mods_.HasPendingChanges(ModEntries())
+            ? "Mods fixed. Apply to game to put the fixed versions in Deadlock."
+            : "Mods fixed. Repairs has the results.");
+        if (ImGui::SmallButton("Dismiss##update")) game_update_ = GameUpdate::None;
+        ui::EndBanner();
+        break;
+    default:
+        break;
+    }
 }
 
 void Workspace::ChooseGame() {
@@ -622,7 +740,7 @@ void Workspace::DrawMenuBar() {
         if (ImGui::MenuItem("Locate Deadlock...", "Ctrl+G", false, !FilesBusy())) ChooseGame();
         ImGui::SetItemTooltip("Choose game\\citadel\\pak01_dir.vpk if Modworks did not find Deadlock through Steam.");
         ImGui::Separator();
-        if (ImGui::MenuItem("Build VPK...", "Ctrl+B", false, !PackBusy() && builder_.SelectedCount() > 0)) {
+        if (ImGui::MenuItem("Build VPK file...", "Ctrl+B", false, !PackBusy() && builder_.SelectedCount() > 0)) {
             ShowPage(Page::Pack);
             builder_.BuildPack(window_, GamePath());
         }
@@ -657,7 +775,7 @@ void Workspace::DrawMenuBar() {
         ImGui::MenuItem("Status bar", nullptr, &show_status_bar_);
         ImGui::Separator();
         if (ImGui::MenuItem("Reset layout")) reset_layout_ = true;
-        ImGui::SetItemTooltip("Puts the explorer on the left and the workspace on the right. Mods, the catalog and thumbnails stay.");
+        ImGui::SetItemTooltip("Puts the mod files panel back beside the page. Mods, the catalog and thumbnails stay.");
         if (ImGui::MenuItem("Refresh library", "F5", false, !PackBusy())) builder_.Reload(mod_paths_);
         ImGui::EndMenu();
     }
@@ -1173,6 +1291,7 @@ void Workspace::DrawWorkspace() {
         multi_.Draw(builder_.Models());
         break;
     case Page::Mods:
+        DrawGameUpdate();
         mods_.Draw(ModEntries(), configured_game_, LibraryWorkBusy(),
             [&](const std::filesystem::path& source) {
                 builder_.SetSourceFilter(source);
@@ -1300,10 +1419,10 @@ void Workspace::DrawRenamePopup() {
 }
 
 void Workspace::DrawBuildModPopup() {
-    if (std::exchange(open_build_mod_, false)) ImGui::OpenPopup("Build as mod");
+    if (std::exchange(open_build_mod_, false)) ImGui::OpenPopup("Add to My mods");
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, {.5f, .5f});
     ImGui::SetNextWindowSize({ImGui::GetFontSize() * 28, 0}, ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("Build as mod", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+    if (!ImGui::BeginPopupModal("Add to My mods", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
     ImGui::TextWrapped("Builds the pack into your library as a mod with this name. Turn it on and off in My mods like any other mod.");
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-1);
@@ -1316,7 +1435,7 @@ void Workspace::DrawBuildModPopup() {
     ImGui::Checkbox("Enable it in the current profile", &build_mod_enable_);
     const bool can_build = !name.empty() && !FilesBusy() && !library_.Restoring();
     ImGui::BeginDisabled(!can_build);
-    if (ImGui::Button("Build") || (entered && can_build)) {
+    if (ui::PrimaryButton("Add to My mods", {0, 0}, can_build) || (entered && can_build)) {
         StartBuildMod(name, build_mod_enable_);
         ImGui::CloseCurrentPopup();
     }

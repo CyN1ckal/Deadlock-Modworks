@@ -164,6 +164,8 @@ TEST(ModState, SavesAndLoads) {
     state.SetEnabled("c", true);
     state.SetOrigin("c", {691764, 1746166, "haze.zip", "https://gamebanana.com/mods/691764", 1783303978});
     state.SetOrigin("b", {0, 0, "", "", 0, true});
+    state.SetCheckedGameBuild("client 6011");
+    state.SetGuideDone(true);
     state.Save(file);
     const auto loaded = ModState::Load(file);
     EXPECT_EQ(loaded, state);

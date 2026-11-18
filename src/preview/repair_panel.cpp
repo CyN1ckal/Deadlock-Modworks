@@ -110,6 +110,7 @@ void RepairPanel::Start(bool repair, std::optional<std::pair<std::string, std::s
     if (worker_.joinable()) worker_.join();
     cancellation_ = CancellationSource{};
     done_ = false;
+    completed_ = false;
     busy_ = true;
     repairing_ = repair;
     export_status_.clear();
@@ -176,6 +177,7 @@ void RepairPanel::Start(bool repair, std::optional<std::pair<std::string, std::s
             else if (one_model && one_repairable) pending_status_ = "Checked " + *jobs.front().Model + ". Use Repair this model to update it.";
             else if (one_model) pending_status_ = "Checked " + *jobs.front().Model + ". Other models in that archive were not checked.";
             else pending_status_ = "Analysis finished. Supported archives can now be repaired.";
+            completed_ = true;
         } catch (const OperationCancelled&) {
             std::lock_guard lock(mutex_);
             pending_status_ = "Cancelled. Completed results are shown below.";

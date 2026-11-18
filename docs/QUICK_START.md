@@ -68,6 +68,34 @@ An empty mod files panel says **No mod files yet. Add some here, or find mods on
 
 Import copies the files into the library. It does not modify the VPK you selected. Adding the same content again reuses what is already stored.
 
+## Install or remove
+
+Turn mods on in My mods, close Deadlock and choose Apply to game. Turn one off and apply again to take it out. After a game update, My mods offers to check and fix them.
+
+### Mods from your library
+
+1. Open **My mods** (**Ctrl+1**). Tick the mods you want. Drag them to set the load order; the higher mod wins when two change the same file.
+2. Close Deadlock and choose **Apply to game**. If `gameinfo.gi` does not load the addons folder, the prompt offers to add that line and keeps a backup.
+3. Start Deadlock. To take a mod out, untick it and choose **Apply to game** again.
+
+Modworks only touches the `pakNN_dir.vpk` files it placed, which it records in `addons\.modworks.json`. Mods you or another manager put in `addons` stay where they are. See [USER_GUIDE.md](USER_GUIDE.md#my-mods).
+
+### A pack you built
+
+To let Modworks install your pack, choose **Add to My mods...** in the pack builder (the main button; **Build VPK file...** is on the arrow beside it), give it a name, and apply it from **My mods** like any other mod. Building again under the same name replaces it.
+
+To install an exported `.vpk` by hand instead, close Deadlock first. Copy only the exported `.vpk` into:
+
+```text
+<Steam library>\steamapps\common\Deadlock\game\citadel\addons
+```
+
+That is the folder **Add folder...** describes as Deadlock's addons folder. Do not replace `pak01_dir.vpk` or the `pak01_###.vpk` chunk files beside it. The exporter also refuses to write its output next to those official archives.
+
+Start Deadlock and see whether the pack behaves. Export does not repair models and does not guarantee that the game will accept the pack.
+
+To remove the pack, close Deadlock and move or delete that exported file from `addons`. Leave `pak01_dir.vpk` and the game's chunk files in place. Removing the file from `addons` does not remove it from Modworks. **Remove from library** does not delete the exported file. See [USER_GUIDE.md](USER_GUIDE.md). Installing and removing a pack was not performed for this note.
+
 ## Inspect
 
 Open a skin to view its model. Textures and the original skeleton that live in the game archive need the connected game.
@@ -86,15 +114,15 @@ On a skin card, the checkbox appears when the card is hovered or already include
 
 Right-click a skin and use **Pack** to include or remove the shown skins, or every skin of that source. Right-click a source in the mod files panel for **Include every skin in the pack** and **Remove every skin from the pack**.
 
-**In pack** on the **Skins** toolbar shows only the current selection. The **Pack builder** entry in the navigation shows the count once something is selected, for example **3**. **Edit > Clear pack** clears the selection. **Build VPK...** stays unavailable until something is selected.
+**In pack** on the **Skins** toolbar shows only the current selection. The **Pack builder** entry in the navigation shows the count once something is selected, for example **3**. **Edit > Clear pack** clears the selection. **Add to My mods...** and **Build VPK file...** stay unavailable until something is selected.
 
 ## Build
 
-Build the VPK. Assembly writes a file. It does not install the pack and does not guarantee compatibility.
+Choose Add to My mods... in Pack builder to install the pack like any other mod. Build VPK file... writes a file instead, which is not installed; assembly does not guarantee compatibility.
 
 1. Connect the game if the pack contains skins whose dependencies come from Deadlock.
 2. Open **Pack builder** (**Ctrl+4**). An empty pack says **Your pack is empty** and **Tick skins on the Skins page, or right-click a skin or mod file and choose Include in pack.**
-3. Choose **Build VPK...** (**Ctrl+B**) and pick a new `.vpk` name. The button tooltip says skin dependencies are included automatically, a package copies its other files as stored, shared files are deduplicated, and conflicting files block the export.
+3. Choose **Build VPK file...** (**Ctrl+B**, or the arrow beside **Add to My mods...**) and pick a new `.vpk` name. The button tooltip says skin dependencies are included automatically, a package copies its other files as stored, shared files are deduplicated, and conflicting files block the export.
 4. The status line says **Collecting files and validating your pack...** and then `Exported N file to <path>.` when one file is written, or `Exported N files to <path>.` otherwise. `N` is the file count and `<path>` is the path you chose.
 
 **Assemble...** on **History** uses `Assembled a pack at <path>.` for its result.
@@ -104,34 +132,6 @@ Either way, a modal titled **Pack assembled** shows that summary, then **Assembl
 **Cancel** on that page, **Tools > Cancel VPK build**, or **Cancel** in the status bar stops the export. A cancelled export reports **Cancelled.** Existing files are never overwritten. If the name is taken, the message is **Output already exists. Choose a new filename; existing files will not be overwritten.**
 
 The status line still accepts a right-click **Copy message**. **File > Open library folder** opens the library `store` folder, not the export. **Reveal in Explorer** on **Pack assembled** is the control that selects the exported file.
-
-## Install or remove
-
-Turn mods on or off in My mods and choose Apply to game while Deadlock is closed. A VPK file you build is not installed; choose Build as mod... instead, or copy the file into the addons folder yourself.
-
-### Mods from your library
-
-1. Open **My mods** (**Ctrl+1**). Tick the mods you want. Drag them to set the load order; the higher mod wins when two change the same file.
-2. Close Deadlock and choose **Apply to game**. If `gameinfo.gi` does not load the addons folder, the prompt offers to add that line and keeps a backup.
-3. Start Deadlock. To take a mod out, untick it and choose **Apply to game** again.
-
-Modworks only touches the `pakNN_dir.vpk` files it placed, which it records in `addons\.modworks.json`. Mods you or another manager put in `addons` stay where they are. See [USER_GUIDE.md](USER_GUIDE.md#my-mods).
-
-### A pack you built
-
-To let Modworks install your pack, choose **Build as mod...** instead of **Build VPK...** in the pack builder, give it a name, and apply it from **My mods** like any other mod. Building again under the same name replaces it.
-
-To install an exported `.vpk` by hand instead, close Deadlock first. Copy only the exported `.vpk` into:
-
-```text
-<Steam library>\steamapps\common\Deadlock\game\citadel\addons
-```
-
-That is the folder **Add folder...** describes as Deadlock's addons folder. Do not replace `pak01_dir.vpk` or the `pak01_###.vpk` chunk files beside it. The exporter also refuses to write its output next to those official archives.
-
-Start Deadlock and see whether the pack behaves. Export does not repair models and does not guarantee that the game will accept the pack.
-
-To remove the pack, close Deadlock and move or delete that exported file from `addons`. Leave `pak01_dir.vpk` and the game's chunk files in place. Removing the file from `addons` does not remove it from Modworks. **Remove from library** does not delete the exported file. See [USER_GUIDE.md](USER_GUIDE.md). Installing and removing a pack was not performed for this note.
 
 ## When a step fails
 

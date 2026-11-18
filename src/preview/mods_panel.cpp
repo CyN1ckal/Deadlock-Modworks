@@ -181,6 +181,7 @@ void ModsPanel::Draw(const std::vector<ModEntry>& entries, const fs::path& game,
     UpdateConflicts(entries);
     DrawToolbar(entries, files_busy, add_files);
     DrawNotices();
+    DrawGuide(entries, files_busy, get_mods, add_files, locate_game);
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const bool show_bar = !entries.empty() || !Deployed().empty() || Busy();
@@ -292,9 +293,102 @@ void ModsPanel::DrawNotices() {
     }
 }
 
+void ModsPanel::DrawGuide(const std::vector<ModEntry>& entries, bool files_busy, const std::function<void()>& get_mods,
+    const std::function<void()>& add_files, const std::function<void()>& locate_game) {
+    guide_shown_ = false;
+    if (state_.GuideDone()) return;
+    const auto enabled = state_.EnabledInOrder(Ids(entries));
+    // Each step counts once the ones before it are done, so mods another library left in the game don't tick the last.
+    bool done[] = {check_.Citadel.has_value(), !entries.empty(), !enabled.empty(), check_.Citadel && !Deployed().empty() && !HasPendingChanges(entries)};
+    for (size_t i = 1; i < std::size(done); ++i) done[i] = done[i] && done[i - 1];
+    // Someone who already has mods in the game never sees it.
+    if (std::all_of(std::begin(done), std::end(done), [](bool step) { return step; })) {
+        state_.SetGuideDone(true);
+        Save();
+        return;
+    }
+    guide_shown_ = true;
+    const size_t current = static_cast<size_t>(std::find(std::begin(done), std::end(done), false) - std::begin(done));
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float frame = ImGui::GetFrameHeight();
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kRaised);
+    ImGui::BeginChild("guide", {0, 0}, ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleColor();
+    if (ImFont* heading = theme::HeadingFont()) ImGui::PushFont(heading);
+    ImGui::TextUnformatted("Get your first mod into Deadlock");
+    if (theme::HeadingFont()) ImGui::PopFont();
+    ImGui::SameLine();
+    const float hide_width = ImGui::CalcTextSize("Hide").x + style.FramePadding.x * 2;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - hide_width));
+    if (ImGui::SmallButton("Hide##guide")) {
+        state_.SetGuideDone(true);
+        Save();
+    }
+    ImGui::SetItemTooltip("Hide these steps. Help > Quick start has them too.");
+
+    const char* labels[] = {"Find Deadlock", "Get a mod", "Turn it on", "Apply to game"};
+    std::string details[4];
+    details[0] = done[0] ? "Deadlock found." : "Modworks looks for a Steam install. If it isn't found, point it at game\\citadel.";
+    details[1] = done[1] ? (entries.size() == 1 ? "1 mod in your library." : std::to_string(entries.size()) + " mods in your library.")
+        : "Download one from GameBanana, or add a VPK you already have.";
+    details[2] = done[2] ? (enabled.size() == 1 ? "1 mod is on." : std::to_string(enabled.size()) + " mods are on.")
+        : "Use the switch on a mod's card.";
+    details[3] = check_.Running ? "Close Deadlock, then use Apply to game in the bar below."
+        : "Use Apply to game in the bar below, then start Deadlock.";
+    const float label_x = ImGui::GetCursorPosX() + frame + style.ItemSpacing.x;
+    const float detail_x = label_x + ImGui::GetFontSize() * 8;
+    for (size_t i = 0; i < std::size(labels); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float radius = ImGui::GetTextLineHeight() * .55f;
+        const ImVec2 center{at.x + frame * .5f, at.y + frame * .5f};
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        if (done[i]) {
+            draw->AddCircleFilled(center, radius, ImGui::GetColorU32(theme::kSuccess));
+            const ImVec2 tick[] = {{center.x - radius * .45f, center.y + radius * .02f}, {center.x - radius * .1f, center.y + radius * .38f},
+                {center.x + radius * .48f, center.y - radius * .35f}};
+            draw->AddPolyline(tick, 3, ImGui::GetColorU32(theme::kRaised), 0, 2.f);
+        } else {
+            draw->AddCircle(center, radius, ImGui::GetColorU32(i == current ? theme::kFocus : theme::kSecondary), 0, 1.5f);
+            const std::string number = std::to_string(i + 1);
+            const ImVec2 size = ImGui::CalcTextSize(number.c_str());
+            draw->AddText({center.x - size.x * .5f, center.y - size.y * .5f}, ImGui::GetColorU32(i == current ? theme::kText : theme::kSecondary),
+                number.c_str());
+        }
+        ImGui::Dummy({frame, frame});
+        ImGui::SameLine(label_x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(i == current ? theme::kText : theme::kSecondary, "%s", labels[i]);
+        ImGui::SameLine(detail_x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(i == current ? theme::kSecondary : theme::kDisabled, "%s", details[i].c_str());
+        if (i == current && i == 0 && locate_game) {
+            ImGui::SameLine();
+            if (ui::PrimaryButton("Locate Deadlock...")) locate_game();
+        }
+        if (i == current && i == 1) {
+            ImGui::SameLine();
+            if (ui::PrimaryButton("Discover mods")) get_mods();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(files_busy || Busy());
+            if (ImGui::Button("Add mods...")) add_files();
+            ImGui::EndDisabled();
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    ImGui::Spacing();
+}
+
 void ModsPanel::DrawList(const std::vector<ModEntry>& entries, const std::function<void(const fs::path&)>& show_in_library,
     const std::function<void()>& get_mods, const std::function<void()>& add_files, bool files_busy) {
     const auto ordered = state_.Ordered(Ids(entries));
+    if (ordered.empty() && guide_shown_) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("Mods you add show up here. You can also drop mod VPKs on the window.");
+        return;
+    }
     if (ordered.empty()) {
         ImGui::Spacing();
         ui::Heading("No mods yet");
@@ -452,7 +546,7 @@ void ModsPanel::DrawList(const std::vector<ModEntry>& entries, const std::functi
             ui::Badge(tag.Text.c_str(), tag.Color);
             badge_x = ImGui::GetItemRectMax().x + style.ItemSpacing.x * .5f;
             if (!ImGui::BeginItemTooltip()) continue;
-            if (tag.Kind == TagKind::Pack) ImGui::TextUnformatted("Built in Pack builder with Build as mod...\nBuilding again under the same name replaces it.");
+            if (tag.Kind == TagKind::Pack) ImGui::TextUnformatted("Built in Pack builder with Add to My mods...\nBuilding again under the same name replaces it.");
             if (tag.Kind == TagKind::Conflict) {
                 if (won != wins.end()) for (const auto* conflict : won->second)
                     ImGui::Text("Wins %zu shared %s over %s", conflict->Files, conflict->Files == 1 ? "file" : "files", name_of(conflict->Loser).c_str());
@@ -531,10 +625,21 @@ void ModsPanel::DrawApplyBar(const std::vector<ModEntry>& entries, const fs::pat
         const auto* entry = Find(entries, id);
         return entry ? entry->Name : std::string("a removed mod");
     };
+    // Up to three names, then a count. Mods no longer in the library are counted together.
     const auto names = [&](const std::vector<std::string>& ids) {
+        std::vector<std::string> known;
+        size_t removed = 0;
+        for (const auto& id : ids) {
+            if (Find(entries, id)) known.push_back(name_of(id));
+            else ++removed;
+        }
         std::string text;
-        for (size_t i = 0; i < ids.size() && i < 3; ++i) text += (i ? ", " : "") + name_of(ids[i]);
-        if (ids.size() > 3) text += " and " + std::to_string(ids.size() - 3) + " more";
+        for (size_t i = 0; i < known.size() && i < 3; ++i) text += (i ? ", " : "") + known[i];
+        if (known.size() > 3) text += " and " + std::to_string(known.size() - 3) + " more";
+        if (removed > 0) {
+            text += (text.empty() ? "" : ", and ") + (removed == 1 ? std::string("1 mod") : std::to_string(removed) + " mods")
+                + " no longer in your library";
+        }
         return text;
     };
 

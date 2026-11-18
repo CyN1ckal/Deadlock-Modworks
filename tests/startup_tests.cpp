@@ -242,15 +242,16 @@ TEST_F(StartupTest, ErrorLogIsUnderTheDataRootAndStartupCanStayQuiet) {
 TEST(StartupMessages, QuickStartAndGameNeedsStaySpecific) {
     const std::span<const GuideStep> steps = QuickStartSteps();
     ASSERT_EQ(steps.size(), 8u);
-    const char* titles[] = {"Extract", "Launch", "Locate Deadlock", "Get mods", "Inspect", "Select", "Build", "Install or remove"};
+    const char* titles[] = {"Extract", "Launch", "Locate Deadlock", "Get mods", "Install or remove", "Inspect", "Select", "Build"};
     for (std::size_t i = 0; i < steps.size(); ++i) {
         EXPECT_STREQ(steps[i].Title, titles[i]);
         EXPECT_NE(steps[i].Detail, nullptr);
         EXPECT_STRNE(steps[i].Detail, "");
     }
-    EXPECT_NE(std::string(steps[6].Detail).find("does not install"), std::string::npos);
-    EXPECT_NE(std::string(steps[7].Detail).find("Apply to game"), std::string::npos);
+    EXPECT_NE(std::string(steps[4].Detail).find("Apply to game"), std::string::npos);
+    EXPECT_NE(std::string(steps[7].Detail).find("Add to My mods"), std::string::npos);
     EXPECT_NE(std::string(steps[7].Detail).find("not installed"), std::string::npos);
+    EXPECT_NE(std::string(steps[7].Detail).find("does not guarantee"), std::string::npos);
     const std::string needs = GameResourceSummary();
     EXPECT_NE(needs.find("without a connected game"), std::string::npos);
     EXPECT_NE(needs.find("base-game"), std::string::npos);
