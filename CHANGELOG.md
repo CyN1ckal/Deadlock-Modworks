@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-18
+
+A reworked interface for players who aren't developers: My mods, Discover and GameBanana downloads, Apply to game, a first-run checklist and a check after game updates. The advanced tools are unchanged under **TOOLS**.
 
 ### Changed
 
@@ -43,7 +45,7 @@
 - The quick start's Import and Install or remove steps describe **Get mods** and **Apply to game**. Building a pack still does not install it.
 - Repairs wait while mods are applied, because both use the stored mod files.
 
-## 0.1.0 — not tagged, not published
+## 0.1.0 — 2026-10-13
 
 The commits below are `8470d845c656fba0c60bcf02644fbb7537a6070a` through `68b8ebf2362556d66e0019107d66bbba659e0134`, plus the documentation commit that describes the empty-library actions. Nothing in this list has been pushed, and `v0.1.0` has not been tagged. A GitHub release does not exist yet. The draft workflow in `.github/workflows/release.yml` has not been run. `scripts/Publish.ps1` was not run on this documentation commit.
 

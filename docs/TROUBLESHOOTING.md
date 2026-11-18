@@ -6,7 +6,7 @@ Errors are appended to `<data-root>\logs\modworks.log`. The default data root is
 
 `vulkan-1.dll` is delay-loaded from the graphics driver. The zip does not contain it. A missing loader is supposed to show a message instead of failing in the static imports. The message is **vulkan-1.dll was not found. Install or update the graphics driver that provides the Vulkan loader, then start Deadlock Modworks again. The model library was not opened.** That dialog was not observed. Do not copy `vulkan-1.dll` out of a Vulkan SDK into the extracted folder. That DLL has to match the driver.
 
-- If the DLL loads and startup still fails, Modworks shows a dialog titled **Deadlock Modworks 0.1.0**. The text is one of:
+- If the DLL loads and startup still fails, Modworks shows a dialog titled **Deadlock Modworks 0.2.0**. The text is one of:
   - **No Vulkan device was found.**
   - **The Vulkan driver does not support version 1.3.**
   - **The Vulkan device cannot present to this window.**
@@ -105,7 +105,7 @@ Command-line `--repair` is harsher than the library button: it replaces the path
 
 Include:
 
-1. The version. **Help > About** shows **Deadlock Modworks 0.1.0** and **Build** plus the commit. From a terminal, `DeadlockModworks.exe --version` prints `Deadlock Modworks 0.1.0 (<commit>)`. **Help > Copy diagnostic details** copies that title, the build, the data root, and the waiting error.
+1. The version. **Help > About** shows **Deadlock Modworks 0.2.0** and **Build** plus the commit. From a terminal, `DeadlockModworks.exe --version` prints `Deadlock Modworks 0.2.0 (<commit>)`. **Help > Copy diagnostic details** copies that title, the build, the data root, and the waiting error.
 2. What you did, what you expected, and the exact text you saw. Right-click a status line and choose **Copy message**. Copy the startup dialog if there was one. For repairs, attach the JSON from **Save report...** if the report is not huge and does not contain paths you consider private.
 3. Whether the game was connected, and whether you used `--data-root` or `DEADLOCK_MODWORKS_DATA_ROOT`. The path itself is enough. Do not zip the data root.
 4. Windows version and the GPU name, if the failure is a black window or a Vulkan dialog.

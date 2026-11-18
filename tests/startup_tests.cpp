@@ -223,12 +223,12 @@ TEST_F(StartupTest, ErrorLogIsUnderTheDataRootAndStartupCanStayQuiet) {
     EXPECT_FALSE(fs::exists(paths.LogFile));
     EXPECT_FALSE(fs::exists(dir / "modworks.log"));
 
-    const std::string details = DiagnosticText("Deadlock Modworks 0.1.0", "abc123", paths.Root, kCorruptSettingsMessage);
-    EXPECT_NE(details.find("Deadlock Modworks 0.1.0"), std::string::npos);
+    const std::string details = DiagnosticText("Deadlock Modworks 0.2.0", "abc123", paths.Root, kCorruptSettingsMessage);
+    EXPECT_NE(details.find("Deadlock Modworks 0.2.0"), std::string::npos);
     EXPECT_NE(details.find("abc123"), std::string::npos);
     EXPECT_NE(details.find("modworks data"), std::string::npos);
     EXPECT_NE(details.find(kCorruptSettingsMessage), std::string::npos);
-    EXPECT_NE(DiagnosticText("Deadlock Modworks 0.1.0", "abc123", paths.Root, {}).find("No error is waiting."), std::string::npos);
+    EXPECT_NE(DiagnosticText("Deadlock Modworks 0.2.0", "abc123", paths.Root, {}).find("No error is waiting."), std::string::npos);
 
     ASSERT_TRUE(AppendErrorLog(paths.LogFile, details));
     ASSERT_TRUE(AppendErrorLog(paths.LogFile, "second error"));

@@ -1,12 +1,12 @@
 # Deadlock Modworks
 
-Deadlock Modworks 0.1.0 is a Windows app for a local collection of Deadlock mods. It browses skins, inspects and compares models, repairs supported skeleton changes and pre-October 2026 camera attachments, keeps a version history, shares that library, and assembles selected models into one VPK. Assembly does not install the pack, and it does not cover every kind of mod.
+Deadlock Modworks 0.2.0 is a Windows app for a local collection of Deadlock mods. It browses skins, inspects and compares models, repairs supported skeleton changes and pre-October 2026 camera attachments, keeps a version history, shares that library, and assembles selected models into one VPK. Assembly does not install the pack, and it does not cover every kind of mod.
 
 It also downloads Deadlock mods from GameBanana (**Discover**, **Ctrl+2**) and turns library mods on or off in the game (**My mods**, **Ctrl+1**), the page it opens on: you tick mods, set their load order and profiles, and **Apply to game** places them in `game\citadel\addons`. Modworks only changes the files it placed there. See [My mods](docs/USER_GUIDE.md#my-mods) and [Discover](docs/USER_GUIDE.md#discover).
 
-The program is `DeadlockModworks.exe`. The release artifact is `DeadlockModworks-0.1.0-win-x64.zip`. `v0.1.0` is not tagged, and a GitHub release has not been published. Publishing that zip is still a draft step. Until a maintainer publishes it, use a zip built with the steps in [Releasing](docs/RELEASING.md), or build from source. `scripts/Publish.ps1` was not run for this documentation update, so this commit did not produce a zip.
+The program is `DeadlockModworks.exe`. The release artifact is `DeadlockModworks-0.2.0-win-x64.zip`. Download it from [Releases](https://github.com/CyN1ckal/Deadlock-Modworks/releases), or build it yourself with the steps in [Releasing](docs/RELEASING.md).
 
-![Deadlock Modworks 0.1.0 with an empty library. The page shows Connect game, Add mods, and Open quick start](docs/screenshots/startup-empty-library.png)
+![Deadlock Modworks 0.2.0 with an empty library. The page shows Connect game, Add mods, and Open quick start](docs/screenshots/startup-empty-library.png)
 
 That picture is `docs/screenshots/startup-empty-library.png`, a capture of the real window. The library is empty and shows **Connect game**, **Add mods**, and **Open quick start**. The capture includes desktop around the window. It predates the current page names and empty-library wording described below. A side-by-side comparison of two models was not captured. The **Quick start** popup was not opened for this picture.
 
@@ -22,7 +22,7 @@ There is no installer, automatic update, code signing, or GameBanana account sig
 
 ## First run
 
-1. Extract `DeadlockModworks-0.1.0-win-x64.zip`. No installer or administrator prompt is required.
+1. Extract `DeadlockModworks-0.2.0-win-x64.zip`. No installer or administrator prompt is required.
 2. Double-click `DeadlockModworks.exe`. A normal start does not need a terminal or a build tool.
 3. The window opens on **My mods**. Until your first mod is in the game, a checklist above the list walks through **Find Deadlock**, **Get a mod**, **Turn it on** and **Apply to game**. The **Skins** page (**Ctrl+3**) says **No skins yet** and offers **Add mods...**, **Locate Deadlock** while the game is not found, and **Quick start**. **Help > Quick start** opens a modal titled **Quick start**. That popup was not clicked. Its eight steps are in the [quick start](docs/QUICK_START.md).
 4. Steam fills the game archive when none is saved. The status bar says **Deadlock found** when that succeeds. You can still use **File > Locate Deadlock...** (**Ctrl+G**), or type `game\citadel` or `pak01_dir.vpk` under **Deadlock** on **Settings** (**Ctrl+,**) and choose **Use this path**.

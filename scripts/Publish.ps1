@@ -8,8 +8,8 @@
 # Default build: build/release (preset windows-release, Visual Studio 18 2026, Release).
 # An existing cache in that directory is reused. This script does not delete it.
 # Staging: build/package-staging/<id>
-# Zip:     dist/DeadlockModworks-0.1.0-win-x64.zip
-# Checksum: dist/DeadlockModworks-0.1.0-win-x64.zip.sha256
+# Zip:     dist/DeadlockModworks-0.2.0-win-x64.zip
+# Checksum: dist/DeadlockModworks-0.2.0-win-x64.zip.sha256
 param(
     [string]$BuildDirectory = '',
     [string]$Configuration = 'Release',
@@ -20,11 +20,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ExpectedVersion = '0.1.0'
+$ExpectedVersion = '0.2.0'
 $ExpectedProduct = 'Deadlock Modworks'
 $ExpectedExecutable = 'DeadlockModworks'
 $ExpectedExe = 'DeadlockModworks.exe'
-$ExpectedZip = 'DeadlockModworks-0.1.0-win-x64.zip'
+$ExpectedZip = 'DeadlockModworks-0.2.0-win-x64.zip'
 $OwnerSuffix = '.owner'
 
 $Repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
@@ -409,15 +409,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
 $headerPath = Join-Path $BuildDirectory 'generated\product_version.hpp'
 $header = Read-RequiredText $headerPath 'product_version.hpp'
 foreach ($needle in @(
-    '#define SR_PRODUCT_VERSION "0.1.0"',
+    '#define SR_PRODUCT_VERSION "0.2.0"',
     '#define SR_PRODUCT_NAME "Deadlock Modworks"',
     '#define SR_PRODUCT_EXECUTABLE "DeadlockModworks"'
 )) {
     if ($header.IndexOf($needle) -lt 0) { throw "Generated version header does not contain $needle" }
 }
 $cacheText = Read-RequiredText $cache 'CMakeCache.txt'
-if ($cacheText -notmatch '(?m)^CMAKE_PROJECT_VERSION:STATIC=0\.1\.0\r?$') {
-    throw 'CMake cache version is not 0.1.0.'
+if ($cacheText -notmatch '(?m)^CMAKE_PROJECT_VERSION:STATIC=0\.2\.0\r?$') {
+    throw 'CMake cache version is not 0.2.0.'
 }
 if ($cacheText -notmatch '(?m)^SR_BUILD_MODEL_TOOLS:BOOL=ON\r?$') {
     throw 'Refusing to package a build with SR_BUILD_MODEL_TOOLS off.'

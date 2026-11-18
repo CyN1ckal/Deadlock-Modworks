@@ -1,6 +1,6 @@
 # Building from source
 
-Users who have `DeadlockModworks-0.1.0-win-x64.zip` do not need this page. Extract it and follow [QUICK_START.md](QUICK_START.md).
+Users who have `DeadlockModworks-0.2.0-win-x64.zip` do not need this page. Extract it and follow [QUICK_START.md](QUICK_START.md).
 
 The project builds on 64-bit Windows. CMake stops on any other host.
 
@@ -86,7 +86,7 @@ For Visual Studio 2026, use `-G "Visual Studio 18 2026"`. That build opens the r
 
 ## Package
 
-Maintainer packaging is [RELEASING.md](RELEASING.md). `scripts/Publish.ps1` builds Release, stages under `build\package-staging\<id>`, and writes `dist\DeadlockModworks-0.1.0-win-x64.zip`. Do not point it at an arbitrary directory.
+Maintainer packaging is [RELEASING.md](RELEASING.md). `scripts/Publish.ps1` builds Release, stages under `build\package-staging\<id>`, and writes `dist\DeadlockModworks-0.2.0-win-x64.zip`. Do not point it at an arbitrary directory.
 
 ## Layout
 

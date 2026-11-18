@@ -1,12 +1,12 @@
 # User guide
 
-Deadlock Modworks 0.1.0 is a desktop workspace for hero-model mods. It is not a marketplace, and **Build VPK file...** does not install the file it writes; **Add to My mods...** keeps the pack in your library so **Apply to game** can install it. The procedural path is [QUICK_START.md](QUICK_START.md). Menu names below are the ones drawn by this version.
+Deadlock Modworks 0.2.0 is a desktop workspace for hero-model mods. It is not a marketplace, and **Build VPK file...** does not install the file it writes; **Add to My mods...** keeps the pack in your library so **Apply to game** can install it. The procedural path is [QUICK_START.md](QUICK_START.md). Menu names below are the ones drawn by this version.
 
 The captures in `docs/screenshots/` are the real window, taken before the navigation moved to the left edge, so they show the earlier tab strip and empty library. `library.png`, `builder.png`, `history.png`, `repairs.png`, `inspector.png`, `shortcuts.png`, and `data-root-error.png` are an earlier pass with no model loaded. `library.png` is cropped to the window. `startup-empty-library.png` is the later empty library and shows **Connect game**, **Add mods**, and **Open quick start**. `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png` are the message boxes for those startup failures. A comparison of two loaded models was not captured, so this guide does not pretend that `inspector.png` shows one. The **Quick start** popup was not opened, and a drop onto the window was not performed.
 
 ## The workspace
 
-The window title is **Deadlock Modworks 0.1.0**. The menu bar is **File**, **Edit**, **View**, **Tools**, and **Help**.
+The window title is **Deadlock Modworks 0.2.0**. The menu bar is **File**, **Edit**, **View**, **Tools**, and **Help**.
 
 The navigation runs down the left edge of the window. The window opens on **My mods**. The pages under **PLAY** get mods into the game. The ones under **TOOLS** are drawn with dimmer labels and are also listed under **Tools** in the **View** menu. Each page has an icon when Windows has Segoe Fluent Icons or Segoe MDL2 Assets; without them the labels show alone. **My mods** carries an **Apply** badge while changes aren't in the game yet, and **Pack builder** carries the number of skins in the pack:
 
@@ -411,7 +411,7 @@ A corrupt `settings.json` shows **settings.json could not be read. Saved prefere
 ## What 0.1 does not do
 
 - It does not install, update, or remove mods inside Deadlock by itself. **Pack assembled** says so, and **Install or remove** in the quick start is still a manual copy.
-- It does not ship an installer, an auto-updater, code signing, or a mod marketplace. `v0.1.0` is not tagged, and nothing has been published. A clean-machine launch, code signing, and `scripts/Publish.ps1` on this documentation update were not run.
+- It does not ship an installer, an auto-updater, code signing, or a mod marketplace. The executable is not code-signed.
 - It does not repair every mod. Archives that need review are left unchanged.
 - It does not embed `vulkan-1.dll`. The missing-loader dialog was not observed.
 - It does not treat a clicked **Quick start** popup, a finished **Pack assembled** modal, a two-model comparison screenshot, or a drag-and-drop as something this documentation update ran. The labels above are the ones in source. The quick-start sentences were not given an extra step.

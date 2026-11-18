@@ -2,7 +2,7 @@
 
 **Help > Quick start**, and **Open quick start** on an empty library, open a modal titled **Quick start**. The modal says these steps are the whole first run, and that assembly does not install the pack. The eight steps are the sentences from `QuickStartSteps()`. There is no ninth step. The popup itself was not clicked; the sentences below are the ones in source.
 
-The zip is `DeadlockModworks-0.1.0-win-x64.zip`. It is the release artifact. `v0.1.0` is not tagged, and that zip has not been published as a GitHub release. `scripts/Publish.ps1` was not run for this documentation update. Extract a zip you were given, or one a maintainer produced with [RELEASING.md](RELEASING.md). `LICENSE` is MIT, `Copyright (c) 2026 CyN1ckal`.
+The zip is `DeadlockModworks-0.2.0-win-x64.zip`. Download it from [Releases](https://github.com/CyN1ckal/Deadlock-Modworks/releases), or use one a maintainer produced with [RELEASING.md](RELEASING.md). `LICENSE` is MIT, `Copyright (c) 2026 CyN1ckal`.
 
 `docs/screenshots/startup-empty-library.png` is a capture of the real window with an empty library. It shows the earlier empty library with **Connect game**, **Add mods**, and **Open quick start**, from before the pages were renamed and reordered. It does not show the **Quick start** popup. Two-model comparison was not captured. Other startup captures are `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png`.
 
@@ -16,7 +16,7 @@ Extract the zip. No installer or administrator prompt is required.
 
 Start Deadlock Modworks. A normal start does not need a terminal or a build tool.
 
-Double-click `DeadlockModworks.exe`. The window title is **Deadlock Modworks 0.1.0**. The menus are **File**, **Edit**, **View**, **Tools**, and **Help**.
+Double-click `DeadlockModworks.exe`. The window title is **Deadlock Modworks 0.2.0**. The menus are **File**, **Edit**, **View**, **Tools**, and **Help**.
 
 The window opens on **My mods**. The navigation down the left edge lists **My mods**, **Discover**, and **Skins** under **PLAY**, then the tools in dimmer labels under **TOOLS**: **Pack builder**, **Repairs**, **Inspector**, **Side by side**, and **History**. **Ctrl+1** to **Ctrl+8** follow that order. A card at the bottom says whether Deadlock was found, and **Settings** (**Ctrl+,**) is under it.
 
