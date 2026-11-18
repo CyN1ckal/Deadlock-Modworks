@@ -45,6 +45,9 @@ enum class Node : uint8_t {
     Int32AsByte = 23,
     ArrayByteLength = 24,
     ArrayAux = 25,
+    // Newer encoders write unsigned 0 and 1 as payload-free constants, like Int64Zero and Int64One.
+    UInt32Zero = 26,
+    UInt32One = 27,
 };
 
 enum class Compression : uint32_t { None = 0, Lz4 = 1, Zstd = 2 };
@@ -320,9 +323,11 @@ std::pair<Node, KvFlag> ReadType(Context& ctx) {
     case Node::Int32AsByte:
     case Node::ArrayByteLength:
     case Node::ArrayAux:
+    case Node::UInt32Zero:
+    case Node::UInt32One:
         return {static_cast<Node>(byte), flag};
     default:
-        throw InvalidData("KV3 value type is not supported.");
+        throw InvalidData("KV3 value type " + std::to_string(byte) + " is not supported.");
     }
 }
 
@@ -348,6 +353,10 @@ KvValue ReadPayload(Context& ctx, Node type, int depth) {
         return KvValue::Double(0.0);
     case Node::DoubleOne:
         return KvValue::Double(1.0);
+    case Node::UInt32Zero:
+        return KvValue::UInt32(0);
+    case Node::UInt32One:
+        return KvValue::UInt32(1);
     case Node::Boolean:
         return KvValue::Bool(buf.b1.Take<uint8_t>() == 1);
     case Node::Int32AsByte:
