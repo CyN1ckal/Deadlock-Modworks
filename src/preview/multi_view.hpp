@@ -1,6 +1,7 @@
 #pragma once
 
-#include "background.hpp"
+#include "archive_cache.hpp"
+#include "latest_task.hpp"
 #include "character_view.hpp"
 #include "animation_player.hpp"
 #include "model_viewport.hpp"

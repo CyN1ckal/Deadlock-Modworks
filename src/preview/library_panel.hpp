@@ -1,5 +1,6 @@
 #pragma once
-#include "background.hpp"
+#include "archive_cache.hpp"
+#include "latest_task.hpp"
 #include "model_library.hpp"
 #include "model_viewport.hpp"
 #include "mod_store.hpp"

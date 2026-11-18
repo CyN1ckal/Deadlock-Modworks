@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- The model tools window releases its window, Vulkan device and Dear ImGui context when startup fails part way, and waits for the GPU before freeing viewports when it closes after an error.
+- `--game` and `--clip` without a value now stop with an error, like `--data-root`, instead of being opened as a file.
 - Version 1 VPKs, which some packing tools still write, are no longer rejected as "not a Source 2 VPK". They are read with their 12-byte header and, like any mod Modworks repairs or rebuilds, written back as version 2.
 - Models compiled by newer tools preview again instead of failing with "KV3 value type is not supported". Their KV3 data uses two newer value types for unsigned 0 and 1, which are now read. Modworks writes them back as ordinary unsigned integers. An unknown type is now named in the error.
 - **Apply to game** puts moved and removed mods back when a later copy fails or you cancel, instead of deleting them.
