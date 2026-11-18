@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- Version 1 VPKs, which some packing tools still write, are no longer rejected as "not a Source 2 VPK". They are read with their 12-byte header and, like any mod Modworks repairs or rebuilds, written back as version 2.
 - **Apply to game** puts moved and removed mods back when a later copy fails or you cancel, instead of deleting them.
 - A gzip download is kept. The compressed `Content-Length` is no longer compared to the decoded file.
 - Archive extraction stops on a skipped file that expands past the size limit, and it does not open DOS device names such as `NUL.vpk`.

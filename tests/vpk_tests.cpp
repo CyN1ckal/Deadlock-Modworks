@@ -207,6 +207,75 @@ TEST(Vpk, RejectsAFileThatIsNotASource2Vpk) {
     }
 }
 
+TEST(Vpk, ReadsVersionOneArchivesAndRepacksThemAsVersionTwo) {
+    TempDir dir;
+    const fs::path path = dir.Path() / "legacy_dir.vpk";
+    const std::vector<uint8_t> material{5, 6, 7};
+    const std::vector<uint8_t> model{1, 2, 3, 4};
+
+    std::vector<uint8_t> tree;
+    auto append_string = [&](const std::string& text) {
+        tree.insert(tree.end(), text.begin(), text.end());
+        tree.push_back(0);
+    };
+    auto append_entry = [&](const std::string& name, const std::vector<uint8_t>& data, uint32_t offset) {
+        append_string(name);
+        AppendU32(tree, VpkArchive::Crc(data));
+        AppendU16(tree, 0);
+        AppendU16(tree, VpkArchive::EmbeddedArchive);
+        AppendU32(tree, offset);
+        AppendU32(tree, static_cast<uint32_t>(data.size()));
+        AppendU16(tree, 0xFFFF);
+    };
+    append_string("vmat_c");
+    append_string(" ");
+    append_entry("root material", material, 0);
+    tree.push_back(0);
+    tree.push_back(0);
+    append_string("vmdl_c");
+    append_string("models/heroes_wip/artist");
+    append_entry("artist", model, static_cast<uint32_t>(material.size()));
+    tree.push_back(0);
+    tree.push_back(0);
+    tree.push_back(0);
+
+    std::vector<uint8_t> bytes;
+    AppendU32(bytes, 0x55AA1234u);
+    AppendU32(bytes, 1u);
+    AppendU32(bytes, static_cast<uint32_t>(tree.size()));
+    bytes.insert(bytes.end(), tree.begin(), tree.end());
+    bytes.insert(bytes.end(), material.begin(), material.end());
+    bytes.insert(bytes.end(), model.begin(), model.end());
+    WriteBytes(path, bytes);
+
+    const VpkArchive archive = VpkArchive::Open(path);
+    ASSERT_EQ(archive.Entries().size(), 2u);
+    archive.Validate();
+    EXPECT_EQ(archive.Entries().at(0).FullPath, "root material.vmat_c");
+    EXPECT_EQ(archive.Read(archive.Entries().at(0)), material);
+    EXPECT_EQ(archive.Entries().at(1).FullPath, "models/heroes_wip/artist/artist.vmdl_c");
+    EXPECT_EQ(archive.Read(archive.Entries().at(1)), model);
+
+    const fs::path repacked = dir.Path() / "repacked_dir.vpk";
+    archive.Write(repacked, {});
+    EXPECT_EQ(LoadU32(ReadBytes(repacked), 4), 2u);
+    const VpkArchive reopened = VpkArchive::Open(repacked);
+    reopened.Validate();
+    ASSERT_EQ(reopened.Entries().size(), 2u);
+}
+
+TEST(Vpk, VersionOneDataOutsideTheFileIsRejected) {
+    TempDir dir;
+    const fs::path path = dir.Path() / "short.vpk";
+    std::vector<uint8_t> bytes;
+    AppendU32(bytes, 0x55AA1234u);
+    AppendU32(bytes, 1u);
+    AppendU32(bytes, 64u);
+    bytes.resize(20, 0);
+    WriteBytes(path, bytes);
+    EXPECT_THROW(VpkArchive::Open(path), InvalidData);
+}
+
 TEST(Vpk, PreloadBytesSurviveRepacking) {
     TempDir dir;
     const fs::path path = dir.Path() / "preload.vpk";

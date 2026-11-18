@@ -53,7 +53,7 @@ private:
     std::unique_ptr<State> state_;
 };
 
-// Source 2 directory VPK. Reads chunked game archives and writes a single embedded mod archive.
+// Source 2 directory VPK. Reads version 1 and 2 archives, including chunked game archives, and writes a single version 2 embedded mod archive.
 class VpkArchive {
 public:
     static constexpr uint16_t EmbeddedArchive = 0x7FFF;
@@ -80,13 +80,14 @@ public:
 
 private:
     VpkArchive(std::filesystem::path directory, std::wstring base_name, std::vector<VpkEntry> entries,
-        uint32_t file_data_size, int32_t tree_size);
+        uint32_t header_size, uint32_t file_data_size, int32_t tree_size);
 
     std::filesystem::path ChunkPath(uint16_t index) const;
     int64_t DataOffset(const VpkEntry& entry) const;
 
     std::filesystem::path directory_;
     std::wstring base_name_;
+    uint32_t header_size_ = 0;
     uint32_t file_data_size_ = 0;
     int32_t tree_size_ = 0;
     std::vector<VpkEntry> entries_;
