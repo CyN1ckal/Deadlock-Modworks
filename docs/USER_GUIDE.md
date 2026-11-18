@@ -251,23 +251,40 @@ Click a mod to see its screenshots, its description and its files, newest first.
 
 ## My mods
 
-**My mods** (**Ctrl+1**) lists every mod in the library with a checkbox. A ticked mod is enabled in the current profile.
+**My mods** (**Ctrl+1**) lists every mod in the library as a card with an on/off switch. A mod that is on is enabled in the current profile. Double-clicking a card flips it too. Under the name, each card says where the mod came from: **GameBanana** and the file name, **Built in Pack builder**, or **Added from a file**.
 
-- **Load order.** The list is the load order. Drag a mod, use the arrows, or right-click it for **Move to top** and **Move to bottom**. The number beside an enabled mod is its position. When two enabled mods contain the same file, the one higher in the list wins. Such mods show **overrides** or **overridden**; hover it to see which mods share files and how many.
-- **Profiles.** **Profile** switches between named sets of enabled mods. **New** starts a profile, optionally with the mods enabled now. **Rename** and **Delete** change the current one. Every profile shares the one load order. The last profile cannot be deleted.
-- **Enable all** and **Disable all** change the current profile. The explorer's right-click menu on a source has **Enable for the game** or **Disable for the game** too.
-- Right-click a mod for **Show skins in library**, **Open GameBanana page** for downloaded mods, and the path items. **Source** says **GameBanana**, **Built pack** or **Local file**.
-- **Add VPKs...** adds mod VPKs you already have, including packs you exported with **Build VPK...** earlier, so you can enable them here. **Build as mod...** in the pack builder adds a pack under a name you choose; see [Build as mod](#build-as-mod).
+Badges on the right of a card:
 
-Nothing reaches the game until **Apply to game**. It needs a connected game and Deadlock closed. It makes `game\citadel\addons` hold exactly the enabled mods, as `pak01_dir.vpk`, `pak02_dir.vpk` and so on in load order: mods already in place stay, moved ones are renamed, new ones are copied, and Modworks files that are no longer enabled are removed. The page then says **Up to date. The game has the mods you turned on.**, or **You have changes that aren't in the game yet.** when it does not, and **Apply to game** takes the primary colour until they are applied. While Deadlock runs it says **Close Deadlock to apply. Start it again afterwards to load the changes.**
+- **Your pack** for a pack you built with [Build as mod](#build-as-mod).
+- **Wins n files** or **Loses n files** when two mods that are on contain the same file. Hover it to see which mods share files and how many.
+- **Not in game yet** or **Still in game** when the mod's switch differs from what is in `addons`.
 
-Modworks records the files it wrote in `addons\.modworks.json`. **It never writes, renames or deletes any other file in `addons`.** Mods installed by hand or by another mod manager are listed under **Files from other tools**, and their numbers are skipped, so they keep loading where they are. A Modworks file that was changed by hand is treated the same way from then on. Deadlock loads at most `pak01` to `pak99`.
+The toolbar has **Profile**, **Search my mods**, **Load order** and **Add mods...**.
 
-Deadlock only reads `addons` when `game\citadel\gameinfo.gi` lists `Game citadel/addons` in its search paths. When the line is missing the page says **Deadlock isn't set up to load mods yet. Apply to game will set it up.**, and **Apply to game** then offers **Add the line and apply**, which keeps the original as `gameinfo.gi.modworks.bak`, or **Apply without it**. A game update can replace `gameinfo.gi` again.
+- **Profiles.** The **Profile** menu switches between named sets of enabled mods and shows how many are on in each. **New profile...** starts one, optionally with the mods enabled now. **Rename** and **Delete** change the current one. Every profile shares the one load order. The last profile cannot be deleted.
+- **Load order.** **Load order** shows each mod's position, a drag handle and up/down arrows, with **Which mod wins** beside the list. When two enabled mods contain the same file, the one higher in the list wins. Drag a card or use the arrows to change it. **Move to top** and **Move to bottom** are on the right-click menu in either view.
+- Right-click a card for **Turn on** or **Turn off**, **Turn all on** and **Turn all off**, **Show skins**, **Open GameBanana page** for downloaded mods, **Reveal in Explorer**, and **Copy** with the name, path and content id. Right-click empty space in the list for **Turn all on** and **Turn all off**. The explorer's right-click menu on a source has **Enable for the game** or **Disable for the game** too.
+- **Add mods...** adds mod VPKs you already have, including packs you exported with **Build VPK...** earlier, so you can turn them on here. **Build as mod...** in the pack builder adds a pack under a name you choose; see [Build as mod](#build-as-mod).
+
+Nothing reaches the game until **Apply to game**, in the bar under the list. It needs Deadlock found and closed. It makes `game\citadel\addons` hold exactly the enabled mods, as `pak01_dir.vpk`, `pak02_dir.vpk` and so on in load order: mods already in place stay, moved ones are renamed, new ones are copied, and Modworks files that are no longer enabled are removed.
+
+The bar always says where things stand:
+
+- **Up to date**, with how many mods the game has.
+- **n changes aren't in the game yet**, naming the mods turned on and off and whether the load order changed. **Apply to game** takes the primary colour. **Undo** goes back to the mods that are in the game now, in their order, without moving the mods that are off.
+- **Close Deadlock to apply** while the game runs. Start it again afterwards to load the changes.
+- **Deadlock wasn't found**, with **Locate Deadlock...** in place of **Apply to game**.
+- While applying, a progress bar and **Cancel**.
+
+After applying, a note above the list says how many mods Deadlock will load. Its **(?)** has the copied, moved, removed and unchanged counts. **Copy** and **Dismiss** are beside it.
+
+Modworks records the files it wrote in `addons\.modworks.json`. **It never writes, renames or deletes any other file in `addons`.** Mods installed by hand or by another mod manager are listed under **Other files** in the bar, and their numbers are skipped, so they keep loading where they are. A Modworks file that was changed by hand is treated the same way from then on. Deadlock loads at most `pak01` to `pak99`.
+
+Deadlock only reads `addons` when `game\citadel\gameinfo.gi` lists `Game citadel/addons` in its search paths. When the line is missing a note above the list says **Deadlock isn't set up to load mods yet. Apply to game will add one line to gameinfo.gi.**, and **Apply to game** then offers **Add the line and apply**, which keeps the original as `gameinfo.gi.modworks.bak`, or **Apply without it**. A game update can replace `gameinfo.gi` again.
 
 Enabled mods, the load order, profiles and download sources are saved in `<data-root>\mods.json`. A damaged `mods.json` is left as it is and the page says so; changes made in that session are not saved over it. **Export library to share...** does not include it.
 
-The pack builder works as before. **Apply to game** does not install a file written by **Build VPK...**; use **Build as mod...** instead, or add that file with **Add VPKs...** and enable it.
+The pack builder works as before. **Apply to game** does not install a file written by **Build VPK...**; use **Build as mod...** instead, or add that file with **Add mods...** and turn it on.
 
 These pages were exercised with a disposable data root and a stand-in game folder: browsing, a pasted link, and **Download & enable** followed by **Apply to game** with the mod `haze black recolor`, next to a foreign `pak03_dir.vpk` that stayed untouched. They were not run against a real Deadlock install, so loading in game was not observed.
 

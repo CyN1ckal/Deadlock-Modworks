@@ -50,7 +50,7 @@ To get a mod from GameBanana, open **Discover** (**Ctrl+2**), paste the mod's li
 
 To add VPKs you already have, use any of these:
 
-- **Add VPKs...** on **My mods**, or **Add mods...** on an empty **Skins** page
+- **Add mods...** on **My mods** or on an empty **Skins** page
 - **File > Add mods...** (**Ctrl+O**)
 - **Add** in the explorer
 
@@ -60,7 +60,7 @@ The file dialog title is **Add reference mods (Ctrl / Shift to select multiple)*
 
 **File > Add folder...** (**Ctrl+Shift+O**), or **Folder** in the explorer, adds every mod VPK directly in a folder, such as Deadlock's `addons` folder. Chunk files and the game archive are skipped. If the folder has no mod VPKs, the status line says `No mod VPKs found in <folder>.`
 
-With an empty library, **My mods** says **No mods yet** and **Find mods on GameBanana, or add VPK files you already have. Then turn them on here and choose Apply to game.** The buttons are **Discover mods** and **Add VPKs...**.
+With an empty library, **My mods** says **No mods yet** and **Find mods on GameBanana, or add VPK files you already have. Then turn them on here and choose Apply to game.** The buttons are **Discover mods** and **Add mods...**.
 
 **Skins** says **No skins yet** and **Skins show up here once you add mods. Find mods on Discover (Ctrl+2), or add VPK files you already have.** The buttons are **Add mods...**, **Locate Deadlock** while the game is not found, and **Quick start**. The tooltip on **Locate Deadlock** lists what needs the game. Both pages say **You can also drop mod VPKs on the window.**
 

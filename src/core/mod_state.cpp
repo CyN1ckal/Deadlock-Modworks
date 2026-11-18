@@ -160,6 +160,24 @@ void ModState::Step(const std::string& id, bool up, const std::vector<std::strin
     }
 }
 
+void ModState::Restore(const std::vector<std::string>& deployed, const std::vector<std::string>& present) {
+    const std::set<std::string> here(present.begin(), present.end());
+    std::vector<std::string> wanted;
+    for (const auto& id : deployed) if (here.contains(id) && !Contains(wanted, id)) wanted.push_back(id);
+    for (const auto& id : present) SetEnabled(id, Contains(wanted, id));
+    // Write the wanted order into the slots those mods already hold.
+    size_t next = 0;
+    for (auto& id : order_) if (Contains(wanted, id)) id = wanted[next++];
+}
+
+ModChanges DiffDeployed(const std::vector<std::string>& deployed, const std::vector<std::string>& enabled) {
+    ModChanges changes;
+    for (const auto& id : enabled) if (!Contains(deployed, id)) changes.TurnedOn.push_back(id);
+    for (const auto& id : deployed) if (!Contains(enabled, id)) changes.TurnedOff.push_back(id);
+    if (changes.TurnedOn.empty() && changes.TurnedOff.empty()) changes.Reordered = deployed != enabled;
+    return changes;
+}
+
 void ModState::Forget(const std::string& id) {
     Erase(order_, id);
     for (auto& profile : profiles_) Erase(profile.Enabled, id);

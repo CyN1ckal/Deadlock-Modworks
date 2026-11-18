@@ -1089,7 +1089,7 @@ void Workspace::DrawWorkspace() {
                 builder_.SetSourceFilter(source);
                 ShowPage(Page::Gallery);
             },
-            [&] { ShowPage(Page::Browse); }, [&] { AddMods(); });
+            [&] { ShowPage(Page::Browse); }, [&] { AddMods(); }, [&] { if (!FilesBusy()) ChooseGame(); });
         break;
     case Page::Browse: {
         const auto entries = ModEntries();

@@ -50,7 +50,7 @@ public:
     // `files_busy` is set while other work may replace stored mods, which also blocks Apply.
     void Draw(const std::vector<ModEntry>& entries, const std::filesystem::path& game, bool files_busy,
         const std::function<void(const std::filesystem::path&)>& show_in_library, const std::function<void()>& get_mods,
-        const std::function<void()>& add_files);
+        const std::function<void()>& add_files, const std::function<void()>& locate_game);
 
     // True when the enabled mods differ from what Modworks last placed in the addons folder.
     bool HasPendingChanges(const std::vector<ModEntry>& entries) const;
@@ -69,11 +69,17 @@ private:
     void Refresh(const std::filesystem::path& game, bool force);
     void SetStatus(std::string text, bool error);
     void UpdateConflicts(const std::vector<ModEntry>& entries);
-    void DrawToolbar(const std::vector<ModEntry>& entries, const std::filesystem::path& game, bool files_busy,
-        const std::function<void()>& add_files);
-    void DrawGameState(const std::vector<ModEntry>& entries);
+    // The mods Modworks placed in the addons folder, highest priority first.
+    std::vector<std::string> Deployed() const;
+    void DrawToolbar(const std::vector<ModEntry>& entries, bool files_busy, const std::function<void()>& add_files);
+    void DrawProfileMenu();
+    void DrawNotices();
     void DrawList(const std::vector<ModEntry>& entries, const std::function<void(const std::filesystem::path&)>& show_in_library,
         const std::function<void()>& get_mods, const std::function<void()>& add_files, bool files_busy);
+    void DrawConflicts(const std::vector<ModEntry>& entries);
+    // The bar under the list: whether the game has the mods that are on, and Apply to game.
+    void DrawApplyBar(const std::vector<ModEntry>& entries, const std::filesystem::path& game, bool files_busy,
+        const std::function<void()>& locate_game);
     void DrawProfilePopups();
 
     std::filesystem::path file_;
@@ -81,6 +87,11 @@ private:
     bool writable_ = true;
     std::string status_;
     bool status_error_ = false;
+    // Counts behind the last apply, for a tooltip on the status.
+    std::string status_detail_;
+    // The load order view: positions, drag handles, arrows and the conflict list.
+    bool load_order_ = false;
+    bool open_other_files_ = false;
     std::optional<std::string> new_error_;
     char filter_[128] = {};
 
