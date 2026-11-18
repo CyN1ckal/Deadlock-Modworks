@@ -1,55 +1,60 @@
 # Deadlock Modworks
 
-Deadlock Modworks 0.2.0 is a Windows app for a local collection of Deadlock mods. It browses skins, inspects and compares models, repairs supported skeleton changes and pre-October 2026 camera attachments, keeps a version history, shares that library, and assembles selected models into one VPK. Assembly does not install the pack, and it does not cover every kind of mod.
+A Windows mod manager for Deadlock. Find mods on GameBanana, turn them on with a switch, and put them in the game with one button. When Deadlock updates and breaks a skin, Modworks can often fix it.
 
-It also downloads Deadlock mods from GameBanana (**Discover**, **Ctrl+2**) and turns library mods on or off in the game (**My mods**, **Ctrl+1**), the page it opens on: you tick mods, set their load order and profiles, and **Apply to game** places them in `game\citadel\addons`. Modworks only changes the files it placed there. See [My mods](docs/USER_GUIDE.md#my-mods) and [Discover](docs/USER_GUIDE.md#discover).
+**[Download the latest release](https://github.com/CyN1ckal/Deadlock-Modworks/releases/latest)** · version 0.2.0 · `DeadlockModworks-0.2.0-win-x64.zip`
 
-The program is `DeadlockModworks.exe`. The release artifact is `DeadlockModworks-0.2.0-win-x64.zip`. Download it from [Releases](https://github.com/CyN1ckal/Deadlock-Modworks/releases), or build it yourself with the steps in [Releasing](docs/RELEASING.md).
+![My mods: five mods as cards with on/off switches, a "Not in game yet" badge on the one just turned on, and the Apply to game bar saying one change isn't in the game yet](docs/screenshots/my-mods.png)
 
-![Deadlock Modworks 0.2.0 with an empty library. The page shows Connect game, Add mods, and Open quick start](docs/screenshots/startup-empty-library.png)
+## What it does
 
-That picture is `docs/screenshots/startup-empty-library.png`, a capture of the real window. The library is empty and shows **Connect game**, **Add mods**, and **Open quick start**. The capture includes desktop around the window. It predates the current page names and empty-library wording described below. A side-by-side comparison of two models was not captured. The **Quick start** popup was not opened for this picture.
+- **My mods.** Every mod you have is a card with an on/off switch. Badges show where two mods change the same file and which one wins. **Load order** decides that, and **profiles** keep separate sets, for example one for ranked.
+- **Apply to game.** The bar under the list says what isn't in the game yet. Close Deadlock, choose **Apply to game**, and start it again. Turn a mod off and apply again to take it out. Modworks only touches the files it placed in `game\citadel\addons`.
+- **Discover.** Browse, search and sort Deadlock mods on GameBanana, or paste a mod link, then **Download & enable**.
+- **After a game update.** Modworks notices when Deadlock has updated and offers **Check my mods**, then **Fix n mods** for the skins it can repair. Each fix is saved as a new version, and the original is kept.
+- **Tools for modders.** Under **TOOLS**, the original workspace is still there: a skin browser, a 3D model inspector, side-by-side comparison, skeleton repairs, a version history, and a **Pack builder** that combines skins from several mods into one. **Add to My mods...** installs that pack like any other mod. **Build VPK file...** writes a `.vpk` instead.
+
+## Getting started
+
+1. Download `DeadlockModworks-0.2.0-win-x64.zip` from [Releases](https://github.com/CyN1ckal/Deadlock-Modworks/releases/latest) and extract it anywhere. There is no installer and no administrator prompt.
+2. Run `DeadlockModworks.exe`. It finds a Steam install of Deadlock by itself. If it doesn't, use **File > Locate Deadlock...** and choose `game\citadel`.
+3. A checklist on **My mods** walks you through the rest: get a mod, turn it on, apply to game.
+
+![The first-run checklist: Find Deadlock is ticked, and Get a mod offers Discover mods and Add mods...](docs/screenshots/first-run.png)
+
+To add mods you already have, choose **Add mods...** (**Ctrl+O**) or drop `.vpk` files on the window.
+
+When Deadlock updates, a banner on **My mods** offers to check your mods:
+
+![The banner "Deadlock has updated since your mods were last checked" with Check my mods and Not now](docs/screenshots/game-update.png)
+
+The [quick start](docs/QUICK_START.md) has the same steps, plus what to do when one fails.
 
 ## What you need
 
 - 64-bit Windows.
-- A graphics driver that supports Vulkan 1.3. `vulkan-1.dll` comes from that driver and is delay-loaded. It is not in the zip. A missing loader is supposed to show a message instead of failing in the static imports. That dialog was not observed.
-- No Visual Studio, Vulkan SDK, installer, or administrator account for normal use. The executable is linked with the static MSVC runtime, so the zip does not include `VCRUNTIME` or `MSVCP` DLLs.
+- A graphics driver with Vulkan 1.3. Any recent NVIDIA, AMD or Intel driver has it.
+- An internet connection for **Discover**. No GameBanana account is needed.
 
-You can browse the library and add mods without a connected game. Textures stored in the game, comparison, repair, and skin packs that use base-game files need the game archive. A pack made only of other files is copied as stored and does not need the game.
+You don't need Deadlock connected to browse or add mods. Textures stored in the game, comparisons, repairs and skin packs that use base-game files do need it.
 
-There is no installer, automatic update, code signing, or GameBanana account sign-in. Downloading from GameBanana needs an internet connection. A clean-machine launch and code signing were not run.
+The executable isn't code-signed, so Windows SmartScreen may warn the first time you run it. There is no auto-update yet; new versions are posted on [Releases](https://github.com/CyN1ckal/Deadlock-Modworks/releases).
 
-## First run
+## Where your data lives
 
-1. Extract `DeadlockModworks-0.2.0-win-x64.zip`. No installer or administrator prompt is required.
-2. Double-click `DeadlockModworks.exe`. A normal start does not need a terminal or a build tool.
-3. The window opens on **My mods**. Until your first mod is in the game, a checklist above the list walks through **Find Deadlock**, **Get a mod**, **Turn it on** and **Apply to game**. The **Skins** page (**Ctrl+3**) says **No skins yet** and offers **Add mods...**, **Locate Deadlock** while the game is not found, and **Quick start**. **Help > Quick start** opens a modal titled **Quick start**. That popup was not clicked. Its eight steps are in the [quick start](docs/QUICK_START.md).
-4. Steam fills the game archive when none is saved. The status bar says **Deadlock found** when that succeeds. You can still use **File > Locate Deadlock...** (**Ctrl+G**), or type `game\citadel` or `pak01_dir.vpk` under **Deadlock** on **Settings** (**Ctrl+,**) and choose **Use this path**.
-5. Get a mod. Open **Discover** (**Ctrl+2**), paste a GameBanana link or search, and choose **Download & enable**. Or choose **Add mods...** (**Ctrl+O**) and select mod `.vpk` files you already have. You can also drop mod VPKs on the window. A drop was not performed.
-6. On **My mods** (**Ctrl+1**), turn the mods you want on with their switches. When two change the same file, **Load order** sets which one wins.
-7. Close Deadlock and choose **Apply to game** in the bar under the list. Start Deadlock. To take a mod out, turn it off and apply again. Modworks only changes the files it placed in `addons`.
-8. After Deadlock updates, **My mods** offers **Check my mods**, and then **Fix n mods** for the ones Repairs can fix.
-
-To combine skins from several mods into one, tick them on **Skins** (or press **Space**), open **Pack builder** and choose **Add to My mods...**. Give it a name and it appears on **My mods** like any other mod; building again under that name replaces it. **Build VPK file...** (**Ctrl+B**), on the arrow beside it, writes a `.vpk` instead. A modal titled **Pack assembled** then shows the summary and says assembly writes a VPK, does not install the pack, and does not guarantee compatibility. Close Deadlock and copy that file into `game\citadel\addons` yourself, without replacing `pak01_dir.vpk` or the game's chunk files. No pack was built for this update, so that modal was not shown.
-
-The same steps, with the failure cases, are in the [quick start](docs/QUICK_START.md). The zip from `Publish.ps1` contains this README, not the `docs` folder. The longer guides are in the source repository.
-
-The collection is stored in `%LOCALAPPDATA%\DeadlockModManager`. `--data-root <directory>` overrides that, and otherwise the environment variable `DEADLOCK_MODWORKS_DATA_ROOT` does. The flag wins when both are set.
-
-Errors are appended to `<data-root>\logs\modworks.log`. With the default root that file is `%LOCALAPPDATA%\DeadlockModManager\logs\modworks.log`. A start with no error does not create it. **Help > Open logs** selects that file in Explorer when it exists. If it does not, the status line says `No log file yet. Errors are written to <path>.` **Help > Copy diagnostic details** copies the product title, the build commit, the data root, and the waiting error, or **No error is waiting.** Those two menu items were not clicked.
-
-Saved preferences are `<data-root>\store\settings.json`. A corrupt `settings.json` is left as it is, the catalog is left in place, and an error is shown. A read-only `store\catalog.sqlite` is not replaced.
+- Your library is stored in `%LOCALAPPDATA%\DeadlockModManager`. To use another folder, pass `--data-root <folder>` or set `DEADLOCK_MODWORKS_DATA_ROOT`. The flag wins when both are set.
+- Enabled mods, load order and profiles are in `mods.json` there. Preferences are in `store\settings.json`.
+- Errors go to `logs\modworks.log` in the same folder. **Help > Open logs** shows the file, and **Help > Copy diagnostic details** copies the version, build and data folder for a bug report.
 
 ## Guides
 
-- [Quick start](docs/QUICK_START.md) — extract, launch, connect, import, inspect, select, build, then install or remove.
-- [User guide](docs/USER_GUIDE.md) — the workspace, shortcuts, comparison, repairs, history, sharing, and backups.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — graphics, missing game files, bad mods, export conflicts, and storage.
-- [Building](docs/BUILDING.md) — compile from source.
-- [Releasing](docs/RELEASING.md) — how a maintainer builds the zip. The tag workflow has not been run.
+- [Quick start](docs/QUICK_START.md): from extracting the zip to a mod in the game.
+- [User guide](docs/USER_GUIDE.md): every page, shortcuts, repairs, history, sharing and backups.
+- [Troubleshooting](docs/TROUBLESHOOTING.md): graphics, missing game files, bad mods and build conflicts.
+- [Building](docs/BUILDING.md): compile from source.
+- [Releasing](docs/RELEASING.md): how a maintainer packages and publishes the zip.
 - [Changelog](CHANGELOG.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
-- [License](LICENSE) — MIT, `Copyright (c) 2026 CyN1ckal`.
+- [License](LICENSE): MIT, `Copyright (c) 2026 CyN1ckal`.
 
-**Help > About** shows the product title and the build commit. `DeadlockModworks.exe --version` prints the same identity. **Help > Keyboard shortcuts** (**F1**) lists the shortcuts. **Help** also has **Quick start**, **Open logs**, and **Copy diagnostic details**.
+**Help > About** and `DeadlockModworks.exe --version` show the version and build commit. **F1** lists the keyboard shortcuts.

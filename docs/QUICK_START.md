@@ -4,7 +4,9 @@
 
 The zip is `DeadlockModworks-0.2.0-win-x64.zip`. Download it from [Releases](https://github.com/CyN1ckal/Deadlock-Modworks/releases), or use one a maintainer produced with [RELEASING.md](RELEASING.md). `LICENSE` is MIT, `Copyright (c) 2026 CyN1ckal`.
 
-`docs/screenshots/startup-empty-library.png` is a capture of the real window with an empty library. It shows the earlier empty library with **Connect game**, **Add mods**, and **Open quick start**, from before the pages were renamed and reordered. It does not show the **Quick start** popup. Two-model comparison was not captured. Other startup captures are `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png`.
+![The first-run checklist on My mods: Find Deadlock is ticked, and Get a mod offers Discover mods and Add mods...](screenshots/first-run.png)
+
+That is **My mods** the first time it opens, with Deadlock found. Older 0.1 startup captures are `startup-corrupt-settings.png`, `startup-readonly-data-root.png`, and `startup-missing-data-root.png`.
 
 ## Extract
 
