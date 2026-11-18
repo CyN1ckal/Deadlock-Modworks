@@ -43,320 +43,320 @@
 <text x="34" y="1998.0" fill="#6b7685" font-size="14" font-weight="650">L12</text>
 <text x="34" y="216.0" fill="#8792a0" font-size="10.5">most</text><text x="34" y="229.0" fill="#8792a0" font-size="10.5">stable</text>
 <text x="34" y="2016.0" fill="#8792a0" font-size="10.5">most</text><text x="34" y="2029.0" fill="#8792a0" font-size="10.5">volatile</text>
-<path d="M2576.8,1970 C2576.8,1887.5 2588.9,1362.5 2588.9,1280" class="u" marker-end="url(#use)"><title>app/main uses main_window</title></path>
-<path d="M2541.6,1970 C2541.6,1887.5 2590.9,462.5 2590.9,380" class="u" marker-end="url(#use)"><title>app/main uses model_tools</title></path>
-<path d="M2612.0,1970 C2612.0,1887.5 2804.9,1362.5 2804.9,1280" class="u" marker-end="url(#use)"><title>app/main uses command_line</title></path>
-<path d="M2565.4,1220 C2565.4,1137.5 2165.5,762.5 2165.5,680" class="u" marker-end="url(#use)"><title>main_window uses game_folder</title></path>
-<path d="M2612.3,1220 C2612.3,1175.0 2901.2,1175.0 2901.2,1130" class="u" marker-end="url(#use)"><title>main_window uses updater</title></path>
-<path d="M1225.8,770 C1225.8,687.5 1255.7,312.5 1255.7,230" class="u" marker-end="url(#use)"><title>addons_deployer uses nlohmann::json</title></path>
-<path d="M1272.8,770 C1272.8,725.0 1667.8,725.0 1667.8,680" class="u" marker-end="url(#use)"><title>addons_deployer uses vpk</title></path>
-<path d="M2790.0,920 C2790.0,875.0 2790.0,875.0 2790.0,830" class="u" marker-end="url(#use)"><title>animation uses migration</title></path>
-<path d="M2825.2,920 C2825.2,837.5 3023.6,762.5 3023.6,680" class="u" marker-end="url(#use)"><title>animation uses resource</title></path>
-<path d="M2754.8,920 C2754.8,837.5 2588.1,762.5 2588.1,680" class="u" marker-end="url(#use)"><title>animation uses skeleton</title></path>
-<path d="M1926.0,920 C1926.0,875.0 2118.5,875.0 2118.5,830" class="u" marker-end="url(#use)"><title>animation_clip uses bone_transform</title></path>
-<path d="M1465.3,770 C1465.3,725.0 1695.9,725.0 1695.9,680" class="u" marker-end="url(#use)"><title>archive_cache uses vpk</title></path>
-<path d="M1517.5,620 C1517.5,575.0 1908.5,575.0 1908.5,530" class="u" marker-end="url(#use)"><title>archive_extract uses strings</title></path>
-<path d="M1470.5,620 C1470.5,575.0 1687.8,575.0 1687.8,530" class="u" marker-end="url(#use)"><title>archive_extract uses cancellation</title></path>
-<path d="M2358.0,770 C2358.0,725.0 1724.1,725.0 1724.1,680" class="u" marker-end="url(#use)"><title>archive_transaction uses vpk</title></path>
-<path d="M2142.0,770 C2142.0,725.0 2559.9,725.0 2559.9,680" class="u" marker-end="url(#use)"><title>bone_transform uses skeleton</title></path>
-<path d="M3006.0,770 C3006.0,725.0 3041.2,725.0 3041.2,680" class="u" marker-end="url(#use)"><title>camera_attachment uses resource</title></path>
-<path d="M1697.9,470 C1697.9,425.0 2297.5,425.0 2297.5,380" class="u" marker-end="url(#use)"><title>cancellation uses error</title></path>
-<path d="M1085.5,620 C1085.5,575.0 1886.8,575.0 1886.8,530" class="u" marker-end="url(#use)"><title>character_view uses strings</title></path>
-<path d="M1038.5,620 C1038.5,537.5 1440.5,462.5 1440.5,380" class="u" marker-end="url(#use)"><title>character_view uses library_types</title></path>
-<path d="M2215.6,1070 C2215.6,1025.0 1949.5,1025.0 1949.5,980" class="u" marker-end="url(#use)"><title>clip_decoder uses animation_clip</title></path>
-<path d="M2262.6,1070 C2262.6,987.5 2970.8,762.5 2970.8,680" class="u" marker-end="url(#use)"><title>clip_decoder uses resource</title></path>
-<path d="M2828.3,1220 C2828.3,1175.0 2929.3,1175.0 2929.3,1130" class="u" marker-end="url(#use)"><title>command_line uses updater</title></path>
-<path d="M2781.4,1220 C2781.4,1137.5 2609.2,1062.5 2609.2,980" class="u" marker-end="url(#use)"><title>command_line uses content_store</title></path>
-<path d="M2598.1,470 C2598.1,387.5 2392.4,312.5 2392.4,230" class="u" marker-end="url(#use)"><title>content_hash uses Win32</title></path>
-<path d="M2551.2,470 C2551.2,425.0 2381.9,425.0 2381.9,380" class="u" marker-end="url(#use)"><title>content_hash uses error</title></path>
-<path d="M2574.0,920 C2574.0,837.5 2766.5,762.5 2766.5,680" fill="none" stroke="#2c6b4a" stroke-width="1.6" stroke-dasharray="6 3" marker-end="url(#real)"/>
-<path d="M2609.2,920 C2609.2,837.5 2998.2,312.5 2998.2,230" class="u" marker-end="url(#use)"><title>content_store uses SQLite</title></path>
-<path d="M2556.4,920 C2556.4,837.5 2551.2,612.5 2551.2,530" class="u" marker-end="url(#use)"><title>content_store uses content_hash</title></path>
-<path d="M2521.2,920 C2521.2,837.5 1308.5,312.5 1308.5,230" class="u" marker-end="url(#use)"><title>content_store uses nlohmann::json</title></path>
-<path d="M2626.8,920 C2626.8,837.5 2988.4,762.5 2988.4,680" class="u" marker-end="url(#use)"><title>content_store uses resource</title></path>
-<path d="M2591.6,920 C2591.6,837.5 2814.1,612.5 2814.1,530" fill="none" stroke="#2c6b4a" stroke-width="1.6" stroke-dasharray="6 3" marker-end="url(#real)"/>
-<path d="M2538.8,920 C2538.8,875.0 2358.0,875.0 2358.0,830" class="u" marker-end="url(#use)"><title>content_store uses archive_transaction</title></path>
-<path d="M2142.0,620 C2142.0,575.0 1940.9,575.0 1940.9,530" class="u" marker-end="url(#use)"><title>game_folder uses strings</title></path>
-<path d="M1056.8,770 C1056.8,725.0 1278.0,725.0 1278.0,680" class="u" marker-end="url(#use)"><title>gamebanana uses http_client</title></path>
-<path d="M1009.8,770 C1009.8,687.5 1238.1,312.5 1238.1,230" class="u" marker-end="url(#use)"><title>gamebanana uses nlohmann::json</title></path>
-<path d="M1716.5,770 C1716.5,687.5 2729.5,462.5 2729.5,380" class="u" marker-end="url(#use)"><title>history_compare uses content_types</title></path>
-<path d="M1646.1,770 C1646.1,725.0 665.2,725.0 665.2,680" class="u" marker-end="url(#use)"><title>history_compare uses startup</title></path>
-<path d="M1681.3,770 C1681.3,725.0 1902.5,725.0 1902.5,680" class="u" marker-end="url(#use)"><title>history_compare uses report</title></path>
-<path d="M1301.5,620 C1301.5,575.0 1897.6,575.0 1897.6,530" class="u" marker-end="url(#use)"><title>http_client uses strings</title></path>
-<path d="M1254.5,620 C1254.5,575.0 1667.7,575.0 1667.7,530" class="u" marker-end="url(#use)"><title>http_client uses cancellation</title></path>
-<path d="M2358.7,470 C2358.7,387.5 2566.2,312.5 2566.2,230" class="u" marker-end="url(#use)"><title>kv3 uses LZ4</title></path>
-<path d="M2393.9,470 C2393.9,387.5 2782.2,312.5 2782.2,230" class="u" marker-end="url(#use)"><title>kv3 uses Zstandard</title></path>
-<path d="M2323.5,470 C2323.5,425.0 2353.8,425.0 2353.8,380" class="u" marker-end="url(#use)"><title>kv3 uses error</title></path>
-<path d="M198.0,620 C198.0,575.0 1647.6,575.0 1647.6,530" class="u" marker-end="url(#use)"><title>latest_task uses cancellation</title></path>
-<path d="M2334.5,620 C2334.5,575.0 1962.6,575.0 1962.6,530" class="u" marker-end="url(#use)"><title>library_model uses strings</title></path>
-<path d="M2381.5,620 C2381.5,537.5 2757.6,462.5 2757.6,380" class="u" marker-end="url(#use)"><title>library_model uses content_types</title></path>
-<path d="M1299.3,1220 C1299.3,1137.5 1056.8,912.5 1056.8,830" class="u" marker-end="url(#use)"><title>library_session uses gamebanana</title></path>
-<path d="M1355.6,1220 C1355.6,1175.0 1830.6,1175.0 1830.6,1130" class="u" marker-end="url(#use)"><title>library_session uses mod_store</title></path>
-<path d="M1327.5,1220 C1327.5,1137.5 1494.0,762.5 1494.0,680" class="u" marker-end="url(#use)"><title>library_session uses archive_extract</title></path>
-<path d="M1271.2,1220 C1271.2,1137.5 437.5,762.5 437.5,680" class="u" marker-end="url(#use)"><title>library_session uses mod_state</title></path>
-<path d="M2790.0,770 C2790.0,725.0 1949.5,725.0 1949.5,680" class="u" marker-end="url(#use)"><title>migration uses report</title></path>
-<path d="M437.5,620 C437.5,575.0 1854.3,575.0 1854.3,530" class="u" marker-end="url(#use)"><title>mod_state uses strings</title></path>
-<path d="M390.5,620 C390.5,537.5 1202.9,312.5 1202.9,230" class="u" marker-end="url(#use)"><title>mod_state uses nlohmann::json</title></path>
-<path d="M1830.6,1070 C1830.6,1025.0 2538.8,1025.0 2538.8,980" class="u" marker-end="url(#use)"><title>mod_store uses content_store</title></path>
-<path d="M1783.6,1070 C1783.6,1025.0 1710.0,1025.0 1710.0,980" class="u" marker-end="url(#use)"><title>mod_store uses model_library</title></path>
-<path d="M3006.0,920 C3006.0,875.0 2825.2,875.0 2825.2,830" class="u" marker-end="url(#use)"><title>model uses migration</title></path>
-<path d="M3041.2,920 C3041.2,837.5 3058.8,762.5 3058.8,680" class="u" marker-end="url(#use)"><title>model uses resource</title></path>
-<path d="M2970.8,920 C2970.8,837.5 2616.2,762.5 2616.2,680" class="u" marker-end="url(#use)"><title>model uses skeleton</title></path>
-<path d="M1926.0,770 C1926.0,687.5 2335.2,612.5 2335.2,530" class="u" marker-end="url(#use)"><title>model_geometry uses kv3</title></path>
-<path d="M1890.8,770 C1890.8,687.5 1918.2,312.5 1918.2,230" class="u" marker-end="url(#use)"><title>model_geometry uses meshoptimizer</title></path>
-<path d="M1961.2,770 C1961.2,725.0 2531.8,725.0 2531.8,680" class="u" marker-end="url(#use)"><title>model_geometry uses skeleton</title></path>
-<path d="M1695.9,920 C1695.9,837.5 1510.9,462.5 1510.9,380" class="u" marker-end="url(#use)"><title>model_library uses library_types</title></path>
-<path d="M1667.8,920 C1667.8,837.5 1273.3,312.5 1273.3,230" class="u" marker-end="url(#use)"><title>model_library uses nlohmann::json</title></path>
-<path d="M1752.2,920 C1752.2,837.5 2953.2,762.5 2953.2,680" class="u" marker-end="url(#use)"><title>model_library uses resource</title></path>
-<path d="M1724.1,920 C1724.1,875.0 2322.8,875.0 2322.8,830" class="u" marker-end="url(#use)"><title>model_library uses archive_transaction</title></path>
-<path d="M2393.2,920 C2393.2,875.0 2754.8,875.0 2754.8,830" class="u" marker-end="url(#use)"><title>model_versions uses migration</title></path>
-<path d="M2358.0,920 C2358.0,875.0 1961.2,875.0 1961.2,830" class="u" marker-end="url(#use)"><title>model_versions uses model_geometry</title></path>
-<path d="M2322.8,920 C2322.8,837.5 1752.2,762.5 1752.2,680" class="u" marker-end="url(#use)"><title>model_versions uses vpk</title></path>
-<path d="M2813.5,620 C2813.5,537.5 2785.8,462.5 2785.8,380" class="u" marker-end="url(#use)"><title>repair_journal uses content_types</title></path>
-<path d="M2766.5,620 C2766.5,575.0 1748.2,575.0 1748.2,530" class="u" marker-end="url(#use)"><title>repair_journal uses cancellation</title></path>
-<path d="M1949.5,620 C1949.5,575.0 1930.1,575.0 1930.1,530" class="u" marker-end="url(#use)"><title>report uses strings</title></path>
-<path d="M1902.5,620 C1902.5,537.5 1290.9,312.5 1290.9,230" class="u" marker-end="url(#use)"><title>report uses nlohmann::json</title></path>
-<path d="M3006.0,620 C3006.0,575.0 2382.1,575.0 2382.1,530" class="u" marker-end="url(#use)"><title>resource uses kv3</title></path>
-<path d="M2574.0,620 C2574.0,575.0 1973.4,575.0 1973.4,530" class="u" marker-end="url(#use)"><title>skeleton uses strings</title></path>
-<path d="M2790.7,470 C2790.7,425.0 2813.9,425.0 2813.9,380" class="u" marker-end="url(#use)"><title>snapshot_reader uses content_types</title></path>
-<path d="M653.5,620 C653.5,575.0 1865.1,575.0 1865.1,530" class="u" marker-end="url(#use)"><title>startup uses strings</title></path>
-<path d="M606.5,620 C606.5,537.5 1220.5,312.5 1220.5,230" class="u" marker-end="url(#use)"><title>startup uses nlohmann::json</title></path>
-<path d="M2396.3,1220 C2396.3,1175.0 2873.0,1175.0 2873.0,1130" class="u" marker-end="url(#use)"><title>store_jobs uses updater</title></path>
-<path d="M2349.4,1220 C2349.4,1137.5 2574.0,1062.5 2574.0,980" class="u" marker-end="url(#use)"><title>store_jobs uses content_store</title></path>
-<path d="M2490.3,1070 C2490.3,987.5 2767.2,612.5 2767.2,530" class="u" marker-end="url(#use)"><title>store_reader uses snapshot_reader</title></path>
-<path d="M2419.9,1070 C2419.9,987.5 2158.9,462.5 2158.9,380" class="u" marker-end="url(#use)"><title>store_reader uses resource_reader</title></path>
-<path d="M2455.1,1070 C2455.1,1025.0 2372.1,1025.0 2372.1,980" class="u" marker-end="url(#use)"><title>store_reader uses model_versions</title></path>
-<path d="M1937.3,470 C1937.3,387.5 2336.1,312.5 2336.1,230" class="u" marker-end="url(#use)"><title>strings uses Win32</title></path>
-<path d="M1890.4,470 C1890.4,425.0 2325.6,425.0 2325.6,380" class="u" marker-end="url(#use)"><title>strings uses error</title></path>
-<path d="M2597.5,770 C2597.5,725.0 3006.0,725.0 3006.0,680" class="u" marker-end="url(#use)"><title>texture uses resource</title></path>
-<path d="M2550.5,770 C2550.5,687.5 2364.2,312.5 2364.2,230" class="u" marker-end="url(#use)"><title>texture uses Win32</title></path>
-<path d="M2856.9,1070 C2856.9,987.5 2598.1,612.5 2598.1,530" class="u" marker-end="url(#use)"><title>updater uses content_hash</title></path>
-<path d="M2877.0,1070 C2877.0,1025.0 2813.5,1025.0 2813.5,980" class="u" marker-end="url(#use)"><title>updater uses animation</title></path>
-<path d="M2917.3,1070 C2917.3,1025.0 3029.5,1025.0 3029.5,980" class="u" marker-end="url(#use)"><title>updater uses model</title></path>
-<path d="M2937.4,1070 C2937.4,987.5 3006.0,912.5 3006.0,830" class="u" marker-end="url(#use)"><title>updater uses camera_attachment</title></path>
-<path d="M2897.1,1070 C2897.1,987.5 2813.5,762.5 2813.5,680" class="u" marker-end="url(#use)"><title>updater uses repair_journal</title></path>
-<path d="M2836.8,1070 C2836.8,987.5 2393.2,912.5 2393.2,830" class="u" marker-end="url(#use)"><title>updater uses archive_transaction</title></path>
-<path d="M2635.9,1070 C2635.9,1025.0 2400.2,1025.0 2400.2,980" class="u" marker-end="url(#use)"><title>version_builder uses model_versions</title></path>
-<path d="M2706.3,1070 C2706.3,1025.0 2982.5,1025.0 2982.5,980" class="u" marker-end="url(#use)"><title>version_builder uses model</title></path>
-<path d="M2671.1,1070 C2671.1,1025.0 2766.5,1025.0 2766.5,980" class="u" marker-end="url(#use)"><title>version_builder uses animation</title></path>
-<path d="M1733.5,620 C1733.5,575.0 1919.3,575.0 1919.3,530" class="u" marker-end="url(#use)"><title>vpk uses strings</title></path>
-<path d="M1686.5,620 C1686.5,575.0 1728.0,575.0 1728.0,530" class="u" marker-end="url(#use)"><title>vpk uses cancellation</title></path>
-<path d="M1521.1,1220 C1521.1,1137.5 240.2,762.5 240.2,680" class="u" marker-end="url(#use)"><title>animation_player uses latest_task</title></path>
-<path d="M1605.5,1220 C1605.5,1175.0 2239.1,1175.0 2239.1,1130" class="u" marker-end="url(#use)"><title>animation_player uses clip_decoder</title></path>
-<path d="M1577.4,1220 C1577.4,1137.5 2088.5,462.5 2088.5,380" class="u" marker-end="url(#use)"><title>animation_player uses resource_reader</title></path>
-<path d="M1549.2,1220 C1549.2,1137.5 1259.7,462.5 1259.7,380" class="u" marker-end="url(#use)"><title>animation_player uses theme</title></path>
-<path d="M1916.8,1520 C1916.8,1437.5 2343.9,1062.5 2343.9,980" class="u" marker-end="url(#use)"><title>comparison_view uses model_versions</title></path>
-<path d="M1822.9,1520 C1822.9,1437.5 900.8,762.5 900.8,680" class="u" marker-end="url(#use)"><title>comparison_view uses ui</title></path>
-<path d="M1893.3,1520 C1893.3,1475.0 1673.3,1475.0 1673.3,1430" class="u" marker-end="url(#use)"><title>comparison_view uses model_viewport</title></path>
-<path d="M1846.4,1520 C1846.4,1437.5 1598.5,1362.5 1598.5,1280" class="u" marker-end="url(#use)"><title>comparison_view uses animation_player</title></path>
-<path d="M1869.9,1520 C1869.9,1437.5 1591.1,1212.5 1591.1,1130" class="u" marker-end="url(#use)"><title>comparison_view uses model_comparison</title></path>
-<path d="M935.1,1520 C935.1,1437.5 183.9,762.5 183.9,680" class="u" marker-end="url(#use)"><title>gamebanana_panel uses latest_task</title></path>
-<path d="M991.5,1520 C991.5,1437.5 1009.8,912.5 1009.8,830" class="u" marker-end="url(#use)"><title>gamebanana_panel uses gamebanana</title></path>
-<path d="M963.3,1520 C963.3,1437.5 822.5,762.5 822.5,680" class="u" marker-end="url(#use)"><title>gamebanana_panel uses ui</title></path>
-<path d="M1019.6,1520 C1019.6,1475.0 1391.6,1475.0 1391.6,1430" class="u" marker-end="url(#use)"><title>gamebanana_panel uses thumbnail_cache</title></path>
-<path d="M2083.2,1670 C2083.2,1587.5 2358.0,762.5 2358.0,680" class="u" marker-end="url(#use)"><title>history_panel uses library_model</title></path>
-<path d="M2043.0,1670 C2043.0,1587.5 1681.3,912.5 1681.3,830" class="u" marker-end="url(#use)"><title>history_panel uses history_compare</title></path>
-<path d="M2123.5,1670 C2123.5,1587.5 2455.1,1212.5 2455.1,1130" class="u" marker-end="url(#use)"><title>history_panel uses store_reader</title></path>
-<path d="M2063.1,1670 C2063.1,1625.0 1893.3,1625.0 1893.3,1580" class="u" marker-end="url(#use)"><title>history_panel uses comparison_view</title></path>
-<path d="M2103.3,1670 C2103.3,1587.5 2372.9,1362.5 2372.9,1280" class="u" marker-end="url(#use)"><title>history_panel uses store_jobs</title></path>
-<path d="M2022.9,1670 C2022.9,1625.0 1653.9,1625.0 1653.9,1580" class="u" marker-end="url(#use)"><title>history_panel uses preview_panel</title></path>
-<path d="M1138.6,1520 C1138.6,1437.5 212.1,762.5 212.1,680" class="u" marker-end="url(#use)"><title>library_panel uses latest_task</title></path>
-<path d="M1169.9,1520 C1169.9,1437.5 838.2,762.5 838.2,680" class="u" marker-end="url(#use)"><title>library_panel uses ui</title></path>
-<path d="M1248.1,1520 C1248.1,1437.5 1783.6,1212.5 1783.6,1130" class="u" marker-end="url(#use)"><title>library_panel uses mod_store</title></path>
-<path d="M1154.3,1520 C1154.3,1437.5 630.0,762.5 630.0,680" class="u" marker-end="url(#use)"><title>library_panel uses startup</title></path>
-<path d="M1232.5,1520 C1232.5,1475.0 1588.8,1475.0 1588.8,1430" class="u" marker-end="url(#use)"><title>library_panel uses model_viewport</title></path>
-<path d="M1201.2,1520 C1201.2,1475.0 1438.5,1475.0 1438.5,1430" class="u" marker-end="url(#use)"><title>library_panel uses thumbnail_cache</title></path>
-<path d="M1216.9,1520 C1216.9,1437.5 1430.1,912.5 1430.1,830" class="u" marker-end="url(#use)"><title>library_panel uses archive_cache</title></path>
-<path d="M1185.6,1520 C1185.6,1437.5 1038.5,762.5 1038.5,680" class="u" marker-end="url(#use)"><title>library_panel uses character_view</title></path>
-<path d="M1990.2,1970 C1990.2,1925.0 1534.2,1925.0 1534.2,1880" class="u" marker-end="url(#use)"><title>preview/main uses workspace</title></path>
-<path d="M2025.4,1970 C2025.4,1887.5 1847.0,1512.5 1847.0,1430" class="u" marker-end="url(#use)"><title>preview/main uses vulkan_window</title></path>
-<path d="M2060.6,1970 C2060.6,1887.5 2520.5,462.5 2520.5,380" fill="none" stroke="#2c6b4a" stroke-width="1.6" stroke-dasharray="6 3" marker-end="url(#real)"/>
-<path d="M1892.4,1670 C1892.4,1587.5 2671.1,1212.5 2671.1,1130" class="u" marker-end="url(#use)"><title>model_inspection uses version_builder</title></path>
-<path d="M1857.2,1670 C1857.2,1625.0 1846.4,1625.0 1846.4,1580" class="u" marker-end="url(#use)"><title>model_inspection uses comparison_view</title></path>
-<path d="M1822.0,1670 C1822.0,1587.5 1500.5,912.5 1500.5,830" class="u" marker-end="url(#use)"><title>model_inspection uses archive_cache</title></path>
-<path d="M1654.5,1370 C1654.5,1287.5 1902.5,1062.5 1902.5,980" class="u" marker-end="url(#use)"><title>model_viewport uses animation_clip</title></path>
-<path d="M1584.1,1370 C1584.1,1287.5 1294.9,462.5 1294.9,380" class="u" marker-end="url(#use)"><title>model_viewport uses theme</title></path>
-<path d="M1607.6,1370 C1607.6,1287.5 1656.5,462.5 1656.5,380" class="u" marker-end="url(#use)"><title>model_viewport uses profile</title></path>
-<path d="M1678.0,1370 C1678.0,1325.0 1995.3,1325.0 1995.3,1280" class="u" marker-end="url(#use)"><title>model_viewport uses model_renderer</title></path>
-<path d="M1631.0,1370 C1631.0,1287.5 1707.9,612.5 1707.9,530" class="u" marker-end="url(#use)"><title>model_viewport uses cancellation</title></path>
-<path d="M844.6,920 C844.6,837.5 155.8,762.5 155.8,680" class="u" marker-end="url(#use)"><title>mods_panel uses latest_task</title></path>
-<path d="M900.9,920 C900.9,837.5 806.9,762.5 806.9,680" class="u" marker-end="url(#use)"><title>mods_panel uses ui</title></path>
-<path d="M929.0,920 C929.0,875.0 1249.3,875.0 1249.3,830" class="u" marker-end="url(#use)"><title>mods_panel uses addons_deployer</title></path>
-<path d="M872.7,920 C872.7,837.5 390.5,762.5 390.5,680" class="u" marker-end="url(#use)"><title>mods_panel uses mod_state</title></path>
-<path d="M1488.1,1520 C1488.1,1437.5 2315.8,1062.5 2315.8,980" class="u" marker-end="url(#use)"><title>multi_view uses model_versions</title></path>
-<path d="M1387.6,1520 C1387.6,1437.5 853.8,762.5 853.8,680" class="u" marker-end="url(#use)"><title>multi_view uses ui</title></path>
-<path d="M1468.0,1520 C1468.0,1475.0 1616.9,1475.0 1616.9,1430" class="u" marker-end="url(#use)"><title>multi_view uses model_viewport</title></path>
-<path d="M1447.9,1520 C1447.9,1437.5 1528.1,1362.5 1528.1,1280" class="u" marker-end="url(#use)"><title>multi_view uses animation_player</title></path>
-<path d="M1427.8,1520 C1427.8,1437.5 1465.3,912.5 1465.3,830" class="u" marker-end="url(#use)"><title>multi_view uses archive_cache</title></path>
-<path d="M1407.7,1520 C1407.7,1437.5 1085.5,762.5 1085.5,680" class="u" marker-end="url(#use)"><title>multi_view uses character_view</title></path>
-<path d="M1618.7,1520 C1618.7,1437.5 869.5,762.5 869.5,680" class="u" marker-end="url(#use)"><title>preview_panel uses ui</title></path>
-<path d="M1689.1,1520 C1689.1,1475.0 1645.1,1475.0 1645.1,1430" class="u" marker-end="url(#use)"><title>preview_panel uses model_viewport</title></path>
-<path d="M1653.9,1520 C1653.9,1437.5 1563.3,1362.5 1563.3,1280" class="u" marker-end="url(#use)"><title>preview_panel uses animation_player</title></path>
-<path d="M1691.7,320 C1691.7,275.0 1702.2,275.0 1702.2,230" class="u" marker-end="url(#use)"><title>profile uses Tracy</title></path>
-<path d="M1744.1,1220 C1744.1,1137.5 885.1,762.5 885.1,680" class="u" marker-end="url(#use)"><title>repair_panel uses ui</title></path>
-<path d="M1814.5,1220 C1814.5,1175.0 2844.8,1175.0 2844.8,1130" class="u" marker-end="url(#use)"><title>repair_panel uses updater</title></path>
-<path d="M1779.3,1220 C1779.3,1137.5 1691.7,462.5 1691.7,380" class="u" marker-end="url(#use)"><title>repair_panel uses profile</title></path>
-<path d="M840.8,770 C840.8,725.0 791.2,725.0 791.2,680" class="u" marker-end="url(#use)"><title>shell_layout uses ui</title></path>
-<path d="M793.8,770 C793.8,725.0 594.8,725.0 594.8,680" class="u" marker-end="url(#use)"><title>shell_layout uses startup</title></path>
-<path d="M1884.2,320 C1884.2,275.0 1528.4,275.0 1528.4,230" class="u" marker-end="url(#use)"><title>shell_window uses Dear ImGui</title></path>
-<path d="M1931.2,320 C1931.2,275.0 2307.9,275.0 2307.9,230" class="u" marker-end="url(#use)"><title>shell_window uses Win32</title></path>
-<path d="M2237.9,1970 C2237.9,1887.5 1951.8,612.5 1951.8,530" class="u" marker-end="url(#use)"><title>standalone uses strings</title></path>
-<path d="M2284.8,1970 C2284.8,1887.5 2555.7,462.5 2555.7,380" class="u" marker-end="url(#use)"><title>standalone uses model_tools</title></path>
-<path d="M1259.7,320 C1259.7,275.0 1443.9,275.0 1443.9,230" class="u" marker-end="url(#use)"><title>theme uses Dear ImGui</title></path>
-<path d="M1415.0,1370 C1415.0,1287.5 1472.1,312.5 1472.1,230" class="u" marker-end="url(#use)"><title>thumbnail_cache uses Dear ImGui</title></path>
-<path d="M1379.8,1370 C1379.8,1287.5 1475.7,462.5 1475.7,380" class="u" marker-end="url(#use)"><title>thumbnail_cache uses library_types</title></path>
-<path d="M1450.2,1370 C1450.2,1325.0 1960.1,1325.0 1960.1,1280" class="u" marker-end="url(#use)"><title>thumbnail_cache uses model_renderer</title></path>
-<path d="M869.5,620 C869.5,575.0 1876.0,575.0 1876.0,530" class="u" marker-end="url(#use)"><title>ui uses strings</title></path>
-<path d="M822.5,620 C822.5,537.5 1224.5,462.5 1224.5,380" class="u" marker-end="url(#use)"><title>ui uses theme</title></path>
-<path d="M1847.0,1370 C1847.0,1287.5 1726.9,462.5 1726.9,380" class="u" marker-end="url(#use)"><title>vulkan_window uses profile</title></path>
-<path d="M1811.8,1370 C1811.8,1287.5 1500.2,312.5 1500.2,230" class="u" marker-end="url(#use)"><title>vulkan_window uses Dear ImGui</title></path>
-<path d="M1882.2,1370 C1882.2,1325.0 2030.5,1325.0 2030.5,1280" class="u" marker-end="url(#use)"><title>vulkan_window uses model_renderer</title></path>
-<path d="M1499.0,1820 C1499.0,1737.5 977.4,1662.5 977.4,1580" class="u" marker-end="url(#use)"><title>workspace uses gamebanana_panel</title></path>
-<path d="M1546.0,1820 C1546.0,1737.5 1779.3,1362.5 1779.3,1280" class="u" marker-end="url(#use)"><title>workspace uses repair_panel</title></path>
-<path d="M1534.2,1820 C1534.2,1737.5 1437.9,1662.5 1437.9,1580" class="u" marker-end="url(#use)"><title>workspace uses multi_view</title></path>
-<path d="M1592.9,1820 C1592.9,1737.5 2118.5,762.5 2118.5,680" class="u" marker-end="url(#use)"><title>workspace uses game_folder</title></path>
-<path d="M1487.3,1820 C1487.3,1737.5 886.8,1062.5 886.8,980" class="u" marker-end="url(#use)"><title>workspace uses mods_panel</title></path>
-<path d="M1510.8,1820 C1510.8,1737.5 1193.4,1662.5 1193.4,1580" class="u" marker-end="url(#use)"><title>workspace uses library_panel</title></path>
-<path d="M1522.5,1820 C1522.5,1737.5 1313.4,1362.5 1313.4,1280" class="u" marker-end="url(#use)"><title>workspace uses library_session</title></path>
-<path d="M1557.7,1820 C1557.7,1775.0 1857.2,1775.0 1857.2,1730" class="u" marker-end="url(#use)"><title>workspace uses model_inspection</title></path>
-<path d="M1569.4,1820 C1569.4,1737.5 1907.7,462.5 1907.7,380" class="u" marker-end="url(#use)"><title>workspace uses shell_window</title></path>
-<path d="M1581.2,1820 C1581.2,1775.0 2073.2,1775.0 2073.2,1730" class="u" marker-end="url(#use)"><title>workspace uses history_panel</title></path>
-<path d="M1475.6,1820 C1475.6,1737.5 817.3,912.5 817.3,830" class="u" marker-end="url(#use)"><title>workspace uses shell_layout</title></path>
-<path d="M1591.1,1070 C1591.1,1025.0 1470.5,1025.0 1470.5,980" class="u" marker-end="url(#use)"><title>model_comparison uses preview_scene</title></path>
-<path d="M1960.1,1220 C1960.1,1175.0 2023.1,1175.0 2023.1,1130" class="u" marker-end="url(#use)"><title>model_renderer uses preview_materials</title></path>
-<path d="M2030.5,1220 C2030.5,1137.5 2142.0,1062.5 2142.0,980" class="u" marker-end="url(#use)"><title>model_renderer uses skeleton_pose</title></path>
-<path d="M1995.3,1220 C1995.3,1137.5 2134.2,312.5 2134.2,230" class="u" marker-end="url(#use)"><title>model_renderer uses Vulkan</title></path>
-<path d="M2058.3,1070 C2058.3,987.5 2574.0,912.5 2574.0,830" class="u" marker-end="url(#use)"><title>preview_materials uses texture</title></path>
-<path d="M1987.9,1070 C1987.9,1025.0 1517.5,1025.0 1517.5,980" class="u" marker-end="url(#use)"><title>preview_materials uses preview_scene</title></path>
-<path d="M2023.1,1070 C2023.1,987.5 2123.7,462.5 2123.7,380" class="u" marker-end="url(#use)"><title>preview_materials uses resource_reader</title></path>
-<path d="M1494.0,920 C1494.0,875.0 1890.8,875.0 1890.8,830" class="u" marker-end="url(#use)"><title>preview_scene uses model_geometry</title></path>
-<path d="M2118.5,920 C2118.5,875.0 1926.0,875.0 1926.0,830" class="u" marker-end="url(#use)"><title>skeleton_pose uses model_geometry</title></path>
-<path d="M2165.5,920 C2165.5,875.0 2165.5,875.0 2165.5,830" class="u" marker-end="url(#use)"><title>skeleton_pose uses bone_transform</title></path>
-<g><title>app/main</title><rect x="2488.8" y="1970" width="176" height="60" rx="3" fill="#e7f3ec" stroke="#2c6b4a" stroke-width="1.3"/>
-<text x="2576.8" y="1985" fill="#2c6b4a" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2576.8" y="2002" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">app/main</text>
-<line x1="2488.8" y1="2009" x2="2664.8" y2="2009" stroke="#2c6b4a" stroke-width=".8" opacity=".45"/>
-<text x="2576.8" y="2023" fill="#526272" font-size="11" text-anchor="middle">I 1.00 · Ca 0 · Ce 5 · 3 commits</text>
+<path d="M2618.0,1970 C2618.0,1887.5 2785.2,462.5 2785.2,380" class="u" marker-end="url(#use)"><title>app/main uses model_tools</title></path>
+<path d="M2653.2,1970 C2653.2,1887.5 2787.2,1362.5 2787.2,1280" class="u" marker-end="url(#use)"><title>app/main uses command_line</title></path>
+<path d="M2582.8,1970 C2582.8,1887.5 1923.2,1362.5 1923.2,1280" class="u" marker-end="url(#use)"><title>app/main uses main_window</title></path>
+<path d="M1946.7,1220 C1946.7,1175.0 2032.7,1175.0 2032.7,1130" class="u" marker-end="url(#use)"><title>main_window uses updater</title></path>
+<path d="M1899.8,1220 C1899.8,1137.5 1085.5,762.5 1085.5,680" class="u" marker-end="url(#use)"><title>main_window uses game_folder</title></path>
+<path d="M2813.5,770 C2813.5,725.0 2804.1,725.0 2804.1,680" class="u" marker-end="url(#use)"><title>addons_deployer uses vpk</title></path>
+<path d="M2766.5,770 C2766.5,687.5 2827.9,312.5 2827.9,230" class="u" marker-end="url(#use)"><title>addons_deployer uses nlohmann::json</title></path>
+<path d="M1024.9,920 C1024.9,837.5 162.2,762.5 162.2,680" class="u" marker-end="url(#use)"><title>animation uses skeleton</title></path>
+<path d="M1095.3,920 C1095.3,875.0 1890.8,875.0 1890.8,830" class="u" marker-end="url(#use)"><title>animation uses migration</title></path>
+<path d="M1060.1,920 C1060.1,837.5 361.2,762.5 361.2,680" class="u" marker-end="url(#use)"><title>animation uses resource</title></path>
+<path d="M1492.1,920 C1492.1,875.0 822.5,875.0 822.5,830" class="u" marker-end="url(#use)"><title>animation_clip uses bone_transform</title></path>
+<path d="M2358.0,770 C2358.0,725.0 2775.9,725.0 2775.9,680" class="u" marker-end="url(#use)"><title>archive_cache uses vpk</title></path>
+<path d="M1686.5,620 C1686.5,575.0 1728.9,575.0 1728.9,530" class="u" marker-end="url(#use)"><title>archive_extract uses strings</title></path>
+<path d="M1733.5,620 C1733.5,575.0 1940.3,575.0 1940.3,530" class="u" marker-end="url(#use)"><title>archive_extract uses cancellation</title></path>
+<path d="M3006.0,770 C3006.0,725.0 2832.2,725.0 2832.2,680" class="u" marker-end="url(#use)"><title>archive_transaction uses vpk</title></path>
+<path d="M846.0,770 C846.0,725.0 134.0,725.0 134.0,680" class="u" marker-end="url(#use)"><title>bone_transform uses skeleton</title></path>
+<path d="M1062.0,770 C1062.0,725.0 378.8,725.0 378.8,680" class="u" marker-end="url(#use)"><title>camera_attachment uses resource</title></path>
+<path d="M1950.3,470 C1950.3,425.0 1684.1,425.0 1684.1,380" class="u" marker-end="url(#use)"><title>cancellation uses error</title></path>
+<path d="M1470.5,620 C1470.5,575.0 1718.1,575.0 1718.1,530" class="u" marker-end="url(#use)"><title>character_view uses strings</title></path>
+<path d="M1517.5,620 C1517.5,537.5 2282.8,462.5 2282.8,380" class="u" marker-end="url(#use)"><title>character_view uses library_types</title></path>
+<path d="M1247.1,1070 C1247.1,1025.0 1468.7,1025.0 1468.7,980" class="u" marker-end="url(#use)"><title>clip_decoder uses animation_clip</title></path>
+<path d="M1200.2,1070 C1200.2,987.5 396.4,762.5 396.4,680" class="u" marker-end="url(#use)"><title>clip_decoder uses resource</title></path>
+<path d="M2763.8,1220 C2763.8,1175.0 2089.1,1175.0 2089.1,1130" class="u" marker-end="url(#use)"><title>command_line uses updater</title></path>
+<path d="M2810.7,1220 C2810.7,1137.5 2823.3,1062.5 2823.3,980" class="u" marker-end="url(#use)"><title>command_line uses content_store</title></path>
+<path d="M2144.3,470 C2144.3,425.0 1712.2,425.0 1712.2,380" class="u" marker-end="url(#use)"><title>content_hash uses error</title></path>
+<path d="M2191.2,470 C2191.2,387.5 2141.1,312.5 2141.1,230" class="u" marker-end="url(#use)"><title>content_hash uses Win32</title></path>
+<path d="M2823.3,920 C2823.3,837.5 3029.5,762.5 3029.5,680" fill="none" stroke="#2c6b4a" stroke-width="1.6" stroke-dasharray="6 3" marker-end="url(#real)"/>
+<path d="M2770.5,920 C2770.5,837.5 2592.4,612.5 2592.4,530" fill="none" stroke="#2c6b4a" stroke-width="1.6" stroke-dasharray="6 3" marker-end="url(#real)"/>
+<path d="M2788.1,920 C2788.1,837.5 2810.3,312.5 2810.3,230" class="u" marker-end="url(#use)"><title>content_store uses nlohmann::json</title></path>
+<path d="M2752.9,920 C2752.9,837.5 2191.2,612.5 2191.2,530" class="u" marker-end="url(#use)"><title>content_store uses content_hash</title></path>
+<path d="M2735.3,920 C2735.3,837.5 466.8,762.5 466.8,680" class="u" marker-end="url(#use)"><title>content_store uses resource</title></path>
+<path d="M2805.7,920 C2805.7,837.5 2991.1,312.5 2991.1,230" class="u" marker-end="url(#use)"><title>content_store uses SQLite</title></path>
+<path d="M2840.9,920 C2840.9,875.0 3041.2,875.0 3041.2,830" class="u" marker-end="url(#use)"><title>content_store uses archive_transaction</title></path>
+<path d="M1062.0,620 C1062.0,575.0 1696.4,575.0 1696.4,530" class="u" marker-end="url(#use)"><title>game_folder uses strings</title></path>
+<path d="M2118.5,770 C2118.5,725.0 1278.0,725.0 1278.0,680" class="u" marker-end="url(#use)"><title>gamebanana uses http_client</title></path>
+<path d="M2165.5,770 C2165.5,687.5 2739.9,312.5 2739.9,230" class="u" marker-end="url(#use)"><title>gamebanana uses nlohmann::json</title></path>
+<path d="M2538.8,770 C2538.8,725.0 1961.2,725.0 1961.2,680" class="u" marker-end="url(#use)"><title>history_compare uses startup</title></path>
+<path d="M2609.2,770 C2609.2,687.5 2951.9,462.5 2951.9,380" class="u" marker-end="url(#use)"><title>history_compare uses content_types</title></path>
+<path d="M2574.0,770 C2574.0,725.0 2381.5,725.0 2381.5,680" class="u" marker-end="url(#use)"><title>history_compare uses report</title></path>
+<path d="M1301.5,620 C1301.5,575.0 1920.2,575.0 1920.2,530" class="u" marker-end="url(#use)"><title>http_client uses cancellation</title></path>
+<path d="M1254.5,620 C1254.5,575.0 1707.2,575.0 1707.2,530" class="u" marker-end="url(#use)"><title>http_client uses strings</title></path>
+<path d="M1383.2,470 C1383.2,387.5 1263.1,312.5 1263.1,230" class="u" marker-end="url(#use)"><title>kv3 uses LZ4</title></path>
+<path d="M1453.6,470 C1453.6,425.0 1627.7,425.0 1627.7,380" class="u" marker-end="url(#use)"><title>kv3 uses error</title></path>
+<path d="M1418.4,470 C1418.4,387.5 1479.1,312.5 1479.1,230" class="u" marker-end="url(#use)"><title>kv3 uses Zstandard</title></path>
+<path d="M846.0,620 C846.0,575.0 1900.0,575.0 1900.0,530" class="u" marker-end="url(#use)"><title>latest_task uses cancellation</title></path>
+<path d="M2550.5,620 C2550.5,575.0 1783.1,575.0 1783.1,530" class="u" marker-end="url(#use)"><title>library_model uses strings</title></path>
+<path d="M2597.5,620 C2597.5,537.5 2980.1,462.5 2980.1,380" class="u" marker-end="url(#use)"><title>library_model uses content_types</title></path>
+<path d="M2341.2,1220 C2341.2,1137.5 2165.5,762.5 2165.5,680" class="u" marker-end="url(#use)"><title>library_session uses mod_state</title></path>
+<path d="M2369.3,1220 C2369.3,1137.5 2165.5,912.5 2165.5,830" class="u" marker-end="url(#use)"><title>library_session uses gamebanana</title></path>
+<path d="M2313.0,1220 C2313.0,1137.5 1710.0,762.5 1710.0,680" class="u" marker-end="url(#use)"><title>library_session uses archive_extract</title></path>
+<path d="M2397.5,1220 C2397.5,1175.0 2718.3,1175.0 2718.3,1130" class="u" marker-end="url(#use)"><title>library_session uses mod_store</title></path>
+<path d="M1926.0,770 C1926.0,725.0 2334.5,725.0 2334.5,680" class="u" marker-end="url(#use)"><title>migration uses report</title></path>
+<path d="M2165.5,620 C2165.5,537.5 2757.5,312.5 2757.5,230" class="u" marker-end="url(#use)"><title>mod_state uses nlohmann::json</title></path>
+<path d="M2118.5,620 C2118.5,575.0 1750.6,575.0 1750.6,530" class="u" marker-end="url(#use)"><title>mod_state uses strings</title></path>
+<path d="M2671.3,1070 C2671.3,1025.0 2572.1,1025.0 2572.1,980" class="u" marker-end="url(#use)"><title>mod_store uses model_library</title></path>
+<path d="M2718.3,1070 C2718.3,1025.0 2788.1,1025.0 2788.1,980" class="u" marker-end="url(#use)"><title>mod_store uses content_store</title></path>
+<path d="M1240.9,920 C1240.9,837.5 190.3,762.5 190.3,680" class="u" marker-end="url(#use)"><title>model uses skeleton</title></path>
+<path d="M1311.3,920 C1311.3,875.0 1926.0,875.0 1926.0,830" class="u" marker-end="url(#use)"><title>model uses migration</title></path>
+<path d="M1276.1,920 C1276.1,837.5 414.0,762.5 414.0,680" class="u" marker-end="url(#use)"><title>model uses resource</title></path>
+<path d="M1710.0,770 C1710.0,687.5 1441.9,612.5 1441.9,530" class="u" marker-end="url(#use)"><title>model_geometry uses kv3</title></path>
+<path d="M1674.8,770 C1674.8,725.0 218.5,725.0 218.5,680" class="u" marker-end="url(#use)"><title>model_geometry uses skeleton</title></path>
+<path d="M1745.2,770 C1745.2,687.5 1695.1,312.5 1695.1,230" class="u" marker-end="url(#use)"><title>model_geometry uses meshoptimizer</title></path>
+<path d="M2586.2,920 C2586.2,837.5 2792.7,312.5 2792.7,230" class="u" marker-end="url(#use)"><title>model_library uses nlohmann::json</title></path>
+<path d="M2529.9,920 C2529.9,837.5 449.2,762.5 449.2,680" class="u" marker-end="url(#use)"><title>model_library uses resource</title></path>
+<path d="M2558.0,920 C2558.0,837.5 2353.2,462.5 2353.2,380" class="u" marker-end="url(#use)"><title>model_library uses library_types</title></path>
+<path d="M2614.4,920 C2614.4,875.0 3006.0,875.0 3006.0,830" class="u" marker-end="url(#use)"><title>model_library uses archive_transaction</title></path>
+<path d="M2391.3,920 C2391.3,837.5 2747.8,762.5 2747.8,680" class="u" marker-end="url(#use)"><title>model_versions uses vpk</title></path>
+<path d="M2356.1,920 C2356.1,875.0 1961.2,875.0 1961.2,830" class="u" marker-end="url(#use)"><title>model_versions uses migration</title></path>
+<path d="M2320.9,920 C2320.9,875.0 1745.2,875.0 1745.2,830" class="u" marker-end="url(#use)"><title>model_versions uses model_geometry</title></path>
+<path d="M2982.5,620 C2982.5,575.0 2000.6,575.0 2000.6,530" class="u" marker-end="url(#use)"><title>repair_journal uses cancellation</title></path>
+<path d="M3029.5,620 C3029.5,537.5 3008.2,462.5 3008.2,380" class="u" marker-end="url(#use)"><title>repair_journal uses content_types</title></path>
+<path d="M2381.5,620 C2381.5,537.5 2775.1,312.5 2775.1,230" class="u" marker-end="url(#use)"><title>report uses nlohmann::json</title></path>
+<path d="M2334.5,620 C2334.5,575.0 1772.2,575.0 1772.2,530" class="u" marker-end="url(#use)"><title>report uses strings</title></path>
+<path d="M414.0,620 C414.0,575.0 1394.9,575.0 1394.9,530" class="u" marker-end="url(#use)"><title>resource uses kv3</title></path>
+<path d="M176.3,620 C176.3,575.0 1674.8,575.0 1674.8,530" class="u" marker-end="url(#use)"><title>skeleton uses strings</title></path>
+<path d="M2568.9,470 C2568.9,425.0 2923.7,425.0 2923.7,380" class="u" marker-end="url(#use)"><title>snapshot_reader uses content_types</title></path>
+<path d="M1902.5,620 C1902.5,575.0 1739.7,575.0 1739.7,530" class="u" marker-end="url(#use)"><title>startup uses strings</title></path>
+<path d="M1949.5,620 C1949.5,537.5 2722.3,312.5 2722.3,230" class="u" marker-end="url(#use)"><title>startup uses nlohmann::json</title></path>
+<path d="M2547.8,1220 C2547.8,1175.0 2060.9,1175.0 2060.9,1130" class="u" marker-end="url(#use)"><title>store_jobs uses updater</title></path>
+<path d="M2594.7,1220 C2594.7,1137.5 2752.9,1062.5 2752.9,980" class="u" marker-end="url(#use)"><title>store_jobs uses content_store</title></path>
+<path d="M2478.8,1070 C2478.8,1025.0 2398.4,1025.0 2398.4,980" class="u" marker-end="url(#use)"><title>store_reader uses model_versions</title></path>
+<path d="M2514.0,1070 C2514.0,987.5 2545.5,612.5 2545.5,530" class="u" marker-end="url(#use)"><title>store_reader uses snapshot_reader</title></path>
+<path d="M2443.6,1070 C2443.6,987.5 2137.2,462.5 2137.2,380" class="u" marker-end="url(#use)"><title>store_reader uses resource_reader</title></path>
+<path d="M1710.9,470 C1710.9,425.0 1655.9,425.0 1655.9,380" class="u" marker-end="url(#use)"><title>strings uses error</title></path>
+<path d="M1757.8,470 C1757.8,387.5 2113.0,312.5 2113.0,230" class="u" marker-end="url(#use)"><title>strings uses Win32</title></path>
+<path d="M1301.5,770 C1301.5,687.5 2084.8,312.5 2084.8,230" class="u" marker-end="url(#use)"><title>texture uses Win32</title></path>
+<path d="M1254.5,770 C1254.5,725.0 431.6,725.0 431.6,680" class="u" marker-end="url(#use)"><title>texture uses resource</title></path>
+<path d="M2077.0,1070 C2077.0,987.5 2982.5,762.5 2982.5,680" class="u" marker-end="url(#use)"><title>updater uses repair_journal</title></path>
+<path d="M2016.6,1070 C2016.6,987.5 1062.0,912.5 1062.0,830" class="u" marker-end="url(#use)"><title>updater uses camera_attachment</title></path>
+<path d="M2056.9,1070 C2056.9,987.5 2144.3,612.5 2144.3,530" class="u" marker-end="url(#use)"><title>updater uses content_hash</title></path>
+<path d="M2097.1,1070 C2097.1,987.5 2970.8,912.5 2970.8,830" class="u" marker-end="url(#use)"><title>updater uses archive_transaction</title></path>
+<path d="M1996.5,1070 C1996.5,1025.0 1083.6,1025.0 1083.6,980" class="u" marker-end="url(#use)"><title>updater uses animation</title></path>
+<path d="M2036.8,1070 C2036.8,1025.0 1299.6,1025.0 1299.6,980" class="u" marker-end="url(#use)"><title>updater uses model</title></path>
+<path d="M1642.1,1070 C1642.1,1025.0 2313.9,1025.0 2313.9,980" class="u" marker-end="url(#use)"><title>version_builder uses model_versions</title></path>
+<path d="M1571.7,1070 C1571.7,1025.0 1036.7,1025.0 1036.7,980" class="u" marker-end="url(#use)"><title>version_builder uses animation</title></path>
+<path d="M1606.9,1070 C1606.9,1025.0 1252.7,1025.0 1252.7,980" class="u" marker-end="url(#use)"><title>version_builder uses model</title></path>
+<path d="M2813.5,620 C2813.5,575.0 1980.5,575.0 1980.5,530" class="u" marker-end="url(#use)"><title>vpk uses cancellation</title></path>
+<path d="M2766.5,620 C2766.5,575.0 1793.9,575.0 1793.9,530" class="u" marker-end="url(#use)"><title>vpk uses strings</title></path>
+<path d="M1505.3,1220 C1505.3,1137.5 1439.5,462.5 1439.5,380" class="u" marker-end="url(#use)"><title>animation_player uses theme</title></path>
+<path d="M1533.5,1220 C1533.5,1137.5 2066.8,462.5 2066.8,380" class="u" marker-end="url(#use)"><title>animation_player uses resource_reader</title></path>
+<path d="M1449.0,1220 C1449.0,1137.5 831.9,762.5 831.9,680" class="u" marker-end="url(#use)"><title>animation_player uses latest_task</title></path>
+<path d="M1477.2,1220 C1477.2,1175.0 1223.6,1175.0 1223.6,1130" class="u" marker-end="url(#use)"><title>animation_player uses clip_decoder</title></path>
+<path d="M2267.6,1520 C2267.6,1437.5 2262.8,1212.5 2262.8,1130" class="u" marker-end="url(#use)"><title>comparison_view uses model_comparison</title></path>
+<path d="M2220.6,1520 C2220.6,1437.5 1526.4,1362.5 1526.4,1280" class="u" marker-end="url(#use)"><title>comparison_view uses animation_player</title></path>
+<path d="M2291.0,1520 C2291.0,1437.5 2370.2,1062.5 2370.2,980" class="u" marker-end="url(#use)"><title>comparison_view uses model_versions</title></path>
+<path d="M2244.1,1520 C2244.1,1475.0 1868.7,1475.0 1868.7,1430" class="u" marker-end="url(#use)"><title>comparison_view uses model_viewport</title></path>
+<path d="M2197.2,1520 C2197.2,1437.5 684.8,762.5 684.8,680" class="u" marker-end="url(#use)"><title>comparison_view uses ui</title></path>
+<path d="M1422.3,1520 C1422.3,1437.5 2118.5,912.5 2118.5,830" class="u" marker-end="url(#use)"><title>gamebanana_panel uses gamebanana</title></path>
+<path d="M1394.2,1520 C1394.2,1475.0 2018.9,1475.0 2018.9,1430" class="u" marker-end="url(#use)"><title>gamebanana_panel uses thumbnail_cache</title></path>
+<path d="M1366.0,1520 C1366.0,1437.5 803.8,762.5 803.8,680" class="u" marker-end="url(#use)"><title>gamebanana_panel uses latest_task</title></path>
+<path d="M1337.9,1520 C1337.9,1437.5 575.2,762.5 575.2,680" class="u" marker-end="url(#use)"><title>gamebanana_panel uses ui</title></path>
+<path d="M2281.5,1670 C2281.5,1587.5 2571.2,1362.5 2571.2,1280" class="u" marker-end="url(#use)"><title>history_panel uses store_jobs</title></path>
+<path d="M2221.2,1670 C2221.2,1625.0 1596.1,1625.0 1596.1,1580" class="u" marker-end="url(#use)"><title>history_panel uses preview_panel</title></path>
+<path d="M2241.3,1670 C2241.3,1625.0 2267.6,1625.0 2267.6,1580" class="u" marker-end="url(#use)"><title>history_panel uses comparison_view</title></path>
+<path d="M2261.4,1670 C2261.4,1587.5 2478.8,1212.5 2478.8,1130" class="u" marker-end="url(#use)"><title>history_panel uses store_reader</title></path>
+<path d="M2301.6,1670 C2301.6,1587.5 2574.0,762.5 2574.0,680" class="u" marker-end="url(#use)"><title>history_panel uses library_model</title></path>
+<path d="M2321.7,1670 C2321.7,1587.5 2574.0,912.5 2574.0,830" class="u" marker-end="url(#use)"><title>history_panel uses history_compare</title></path>
+<path d="M2004.6,1520 C2004.6,1437.5 1517.5,762.5 1517.5,680" class="u" marker-end="url(#use)"><title>library_panel uses character_view</title></path>
+<path d="M2067.2,1520 C2067.2,1437.5 2358.0,912.5 2358.0,830" class="u" marker-end="url(#use)"><title>library_panel uses archive_cache</title></path>
+<path d="M2035.9,1520 C2035.9,1437.5 1926.0,762.5 1926.0,680" class="u" marker-end="url(#use)"><title>library_panel uses startup</title></path>
+<path d="M2051.6,1520 C2051.6,1475.0 2065.9,1475.0 2065.9,1430" class="u" marker-end="url(#use)"><title>library_panel uses thumbnail_cache</title></path>
+<path d="M1989.0,1520 C1989.0,1437.5 888.2,762.5 888.2,680" class="u" marker-end="url(#use)"><title>library_panel uses latest_task</title></path>
+<path d="M2082.9,1520 C2082.9,1437.5 2671.3,1212.5 2671.3,1130" class="u" marker-end="url(#use)"><title>library_panel uses mod_store</title></path>
+<path d="M2020.3,1520 C2020.3,1475.0 1840.5,1475.0 1840.5,1430" class="u" marker-end="url(#use)"><title>library_panel uses model_viewport</title></path>
+<path d="M1973.3,1520 C1973.3,1437.5 669.1,762.5 669.1,680" class="u" marker-end="url(#use)"><title>library_panel uses ui</title></path>
+<path d="M2437.2,1970 C2437.2,1887.5 2750.0,462.5 2750.0,380" fill="none" stroke="#2c6b4a" stroke-width="1.6" stroke-dasharray="6 3" marker-end="url(#real)"/>
+<path d="M2402.0,1970 C2402.0,1887.5 2258.4,1512.5 2258.4,1430" class="u" marker-end="url(#use)"><title>preview/main uses vulkan_window</title></path>
+<path d="M2366.8,1970 C2366.8,1925.0 1917.5,1925.0 1917.5,1880" class="u" marker-end="url(#use)"><title>preview/main uses workspace</title></path>
+<path d="M2074.8,1670 C2074.8,1587.5 2393.2,912.5 2393.2,830" class="u" marker-end="url(#use)"><title>model_inspection uses archive_cache</title></path>
+<path d="M2004.4,1670 C2004.4,1587.5 1606.9,1212.5 1606.9,1130" class="u" marker-end="url(#use)"><title>model_inspection uses version_builder</title></path>
+<path d="M2039.6,1670 C2039.6,1625.0 2220.6,1625.0 2220.6,1580" class="u" marker-end="url(#use)"><title>model_inspection uses comparison_view</title></path>
+<path d="M1779.5,1370 C1779.5,1287.5 1474.7,462.5 1474.7,380" class="u" marker-end="url(#use)"><title>model_viewport uses theme</title></path>
+<path d="M1802.9,1370 C1802.9,1287.5 1515.6,1062.5 1515.6,980" class="u" marker-end="url(#use)"><title>model_viewport uses animation_clip</title></path>
+<path d="M1849.9,1370 C1849.9,1287.5 1960.4,612.5 1960.4,530" class="u" marker-end="url(#use)"><title>model_viewport uses cancellation</title></path>
+<path d="M1826.4,1370 C1826.4,1287.5 1886.0,462.5 1886.0,380" class="u" marker-end="url(#use)"><title>model_viewport uses profile</title></path>
+<path d="M1873.3,1370 C1873.3,1325.0 2104.0,1325.0 2104.0,1280" class="u" marker-end="url(#use)"><title>model_viewport uses model_renderer</title></path>
+<path d="M1938.2,920 C1938.2,837.5 2118.5,762.5 2118.5,680" class="u" marker-end="url(#use)"><title>mods_panel uses mod_state</title></path>
+<path d="M1910.0,920 C1910.0,837.5 860.1,762.5 860.1,680" class="u" marker-end="url(#use)"><title>mods_panel uses latest_task</title></path>
+<path d="M1966.4,920 C1966.4,875.0 2790.0,875.0 2790.0,830" class="u" marker-end="url(#use)"><title>mods_panel uses addons_deployer</title></path>
+<path d="M1881.9,920 C1881.9,837.5 653.5,762.5 653.5,680" class="u" marker-end="url(#use)"><title>mods_panel uses ui</title></path>
+<path d="M1802.0,1520 C1802.0,1437.5 1470.5,762.5 1470.5,680" class="u" marker-end="url(#use)"><title>multi_view uses character_view</title></path>
+<path d="M1862.4,1520 C1862.4,1437.5 2322.8,912.5 2322.8,830" class="u" marker-end="url(#use)"><title>multi_view uses archive_cache</title></path>
+<path d="M1781.9,1520 C1781.9,1437.5 1491.2,1362.5 1491.2,1280" class="u" marker-end="url(#use)"><title>multi_view uses animation_player</title></path>
+<path d="M1842.3,1520 C1842.3,1437.5 2342.0,1062.5 2342.0,980" class="u" marker-end="url(#use)"><title>multi_view uses model_versions</title></path>
+<path d="M1822.2,1520 C1822.2,1475.0 1812.3,1475.0 1812.3,1430" class="u" marker-end="url(#use)"><title>multi_view uses model_viewport</title></path>
+<path d="M1761.8,1520 C1761.8,1437.5 637.8,762.5 637.8,680" class="u" marker-end="url(#use)"><title>multi_view uses ui</title></path>
+<path d="M1596.1,1520 C1596.1,1437.5 1456.0,1362.5 1456.0,1280" class="u" marker-end="url(#use)"><title>preview_panel uses animation_player</title></path>
+<path d="M1631.3,1520 C1631.3,1475.0 1784.2,1475.0 1784.2,1430" class="u" marker-end="url(#use)"><title>preview_panel uses model_viewport</title></path>
+<path d="M1560.9,1520 C1560.9,1437.5 606.5,762.5 606.5,680" class="u" marker-end="url(#use)"><title>preview_panel uses ui</title></path>
+<path d="M1886.0,320 C1886.0,275.0 1911.1,275.0 1911.1,230" class="u" marker-end="url(#use)"><title>profile uses Tracy</title></path>
+<path d="M1742.4,1220 C1742.4,1175.0 2004.6,1175.0 2004.6,1130" class="u" marker-end="url(#use)"><title>repair_panel uses updater</title></path>
+<path d="M1707.2,1220 C1707.2,1137.5 1850.8,462.5 1850.8,380" class="u" marker-end="url(#use)"><title>repair_panel uses profile</title></path>
+<path d="M1672.0,1220 C1672.0,1137.5 622.2,762.5 622.2,680" class="u" marker-end="url(#use)"><title>repair_panel uses ui</title></path>
+<path d="M1517.5,770 C1517.5,725.0 1890.8,725.0 1890.8,680" class="u" marker-end="url(#use)"><title>shell_layout uses startup</title></path>
+<path d="M1470.5,770 C1470.5,725.0 590.9,725.0 590.9,680" class="u" marker-end="url(#use)"><title>shell_layout uses ui</title></path>
+<path d="M2510.5,320 C2510.5,275.0 2169.3,275.0 2169.3,230" class="u" marker-end="url(#use)"><title>shell_window uses Win32</title></path>
+<path d="M2557.4,320 C2557.4,275.0 2385.3,275.0 2385.3,230" class="u" marker-end="url(#use)"><title>shell_window uses Dear ImGui</title></path>
+<path d="M2209.5,1970 C2209.5,1887.5 2714.8,462.5 2714.8,380" class="u" marker-end="url(#use)"><title>standalone uses model_tools</title></path>
+<path d="M2162.5,1970 C2162.5,1887.5 1761.4,612.5 1761.4,530" class="u" marker-end="url(#use)"><title>standalone uses strings</title></path>
+<path d="M1439.5,320 C1439.5,275.0 2300.8,275.0 2300.8,230" class="u" marker-end="url(#use)"><title>theme uses Dear ImGui</title></path>
+<path d="M2077.6,1370 C2077.6,1287.5 2329.0,312.5 2329.0,230" class="u" marker-end="url(#use)"><title>thumbnail_cache uses Dear ImGui</title></path>
+<path d="M2042.4,1370 C2042.4,1287.5 2318.0,462.5 2318.0,380" class="u" marker-end="url(#use)"><title>thumbnail_cache uses library_types</title></path>
+<path d="M2007.2,1370 C2007.2,1325.0 2139.2,1325.0 2139.2,1280" class="u" marker-end="url(#use)"><title>thumbnail_cache uses model_renderer</title></path>
+<path d="M653.5,620 C653.5,575.0 1685.6,575.0 1685.6,530" class="u" marker-end="url(#use)"><title>ui uses strings</title></path>
+<path d="M606.5,620 C606.5,537.5 1404.3,462.5 1404.3,380" class="u" marker-end="url(#use)"><title>ui uses theme</title></path>
+<path d="M2223.2,1370 C2223.2,1287.5 1921.2,462.5 1921.2,380" class="u" marker-end="url(#use)"><title>vulkan_window uses profile</title></path>
+<path d="M2293.6,1370 C2293.6,1287.5 2357.1,312.5 2357.1,230" class="u" marker-end="url(#use)"><title>vulkan_window uses Dear ImGui</title></path>
+<path d="M2258.4,1370 C2258.4,1325.0 2174.4,1325.0 2174.4,1280" class="u" marker-end="url(#use)"><title>vulkan_window uses model_renderer</title></path>
+<path d="M1929.2,1820 C1929.2,1737.5 2028.1,1662.5 2028.1,1580" class="u" marker-end="url(#use)"><title>workspace uses library_panel</title></path>
+<path d="M1964.4,1820 C1964.4,1737.5 2355.2,1362.5 2355.2,1280" class="u" marker-end="url(#use)"><title>workspace uses library_session</title></path>
+<path d="M1976.2,1820 C1976.2,1737.5 2534.0,462.5 2534.0,380" class="u" marker-end="url(#use)"><title>workspace uses shell_window</title></path>
+<path d="M1894.0,1820 C1894.0,1737.5 1707.2,1362.5 1707.2,1280" class="u" marker-end="url(#use)"><title>workspace uses repair_panel</title></path>
+<path d="M1882.3,1820 C1882.3,1737.5 1494.0,912.5 1494.0,830" class="u" marker-end="url(#use)"><title>workspace uses shell_layout</title></path>
+<path d="M1941.0,1820 C1941.0,1775.0 2039.6,1775.0 2039.6,1730" class="u" marker-end="url(#use)"><title>workspace uses model_inspection</title></path>
+<path d="M1952.7,1820 C1952.7,1775.0 2271.5,1775.0 2271.5,1730" class="u" marker-end="url(#use)"><title>workspace uses history_panel</title></path>
+<path d="M1858.8,1820 C1858.8,1737.5 1038.5,762.5 1038.5,680" class="u" marker-end="url(#use)"><title>workspace uses game_folder</title></path>
+<path d="M1917.5,1820 C1917.5,1737.5 1924.1,1062.5 1924.1,980" class="u" marker-end="url(#use)"><title>workspace uses mods_panel</title></path>
+<path d="M1905.8,1820 C1905.8,1737.5 1812.1,1662.5 1812.1,1580" class="u" marker-end="url(#use)"><title>workspace uses multi_view</title></path>
+<path d="M1870.6,1820 C1870.6,1737.5 1380.1,1662.5 1380.1,1580" class="u" marker-end="url(#use)"><title>workspace uses gamebanana_panel</title></path>
+<path d="M2262.8,1070 C2262.8,1025.0 2163.6,1025.0 2163.6,980" class="u" marker-end="url(#use)"><title>model_comparison uses preview_scene</title></path>
+<path d="M2104.0,1220 C2104.0,1137.5 1708.1,1062.5 1708.1,980" class="u" marker-end="url(#use)"><title>model_renderer uses skeleton_pose</title></path>
+<path d="M2174.4,1220 C2174.4,1137.5 2559.1,312.5 2559.1,230" class="u" marker-end="url(#use)"><title>model_renderer uses Vulkan</title></path>
+<path d="M2139.2,1220 C2139.2,1175.0 1830.8,1175.0 1830.8,1130" class="u" marker-end="url(#use)"><title>model_renderer uses preview_materials</title></path>
+<path d="M1866.0,1070 C1866.0,1025.0 2116.7,1025.0 2116.7,980" class="u" marker-end="url(#use)"><title>preview_materials uses preview_scene</title></path>
+<path d="M1830.8,1070 C1830.8,987.5 2102.0,462.5 2102.0,380" class="u" marker-end="url(#use)"><title>preview_materials uses resource_reader</title></path>
+<path d="M1795.6,1070 C1795.6,987.5 1278.0,912.5 1278.0,830" class="u" marker-end="url(#use)"><title>preview_materials uses texture</title></path>
+<path d="M2140.1,920 C2140.1,875.0 1710.0,875.0 1710.0,830" class="u" marker-end="url(#use)"><title>preview_scene uses model_geometry</title></path>
+<path d="M1684.7,920 C1684.7,875.0 869.5,875.0 869.5,830" class="u" marker-end="url(#use)"><title>skeleton_pose uses bone_transform</title></path>
+<path d="M1731.6,920 C1731.6,875.0 1674.8,875.0 1674.8,830" class="u" marker-end="url(#use)"><title>skeleton_pose uses model_geometry</title></path>
+<g><title>app/main</title><rect x="2530.0" y="1970" width="176" height="60" rx="3" fill="#e7f3ec" stroke="#2c6b4a" stroke-width="1.3"/>
+<text x="2618.0" y="1985" fill="#2c6b4a" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2618.0" y="2002" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">app/main</text>
+<line x1="2530.0" y1="2009" x2="2706.0" y2="2009" stroke="#2c6b4a" stroke-width=".8" opacity=".45"/>
+<text x="2618.0" y="2023" fill="#526272" font-size="11" text-anchor="middle">I 1.00 · Ca 0 · Ce 5 · 3 commits</text>
 </g>
-<g><title>main_window</title><rect x="2500.9" y="1220" width="176" height="60" rx="3" fill="#e7f3ec" stroke="#2c6b4a" stroke-width="1.3"/>
-<text x="2588.9" y="1235" fill="#2c6b4a" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2588.9" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">main_window</text>
-<line x1="2500.9" y1="1259" x2="2676.9" y2="1259" stroke="#2c6b4a" stroke-width=".8" opacity=".45"/>
-<text x="2588.9" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.86 · Ca 1 · Ce 6 · 2 commits</text>
+<g><title>main_window</title><rect x="1835.2" y="1220" width="176" height="60" rx="3" fill="#e7f3ec" stroke="#2c6b4a" stroke-width="1.3"/>
+<text x="1923.2" y="1235" fill="#2c6b4a" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1923.2" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">main_window</text>
+<line x1="1835.2" y1="1259" x2="2011.2" y2="1259" stroke="#2c6b4a" stroke-width=".8" opacity=".45"/>
+<text x="1923.2" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.86 · Ca 1 · Ce 6 · 2 commits</text>
 </g>
-<g><title>addons_deployer</title><rect x="1161.3" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1249.3" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1249.3" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">addons_deployer</text>
-<line x1="1161.3" y1="809" x2="1337.3" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1249.3" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.80 · Ca 1 · Ce 4 · 3 commits</text>
+<g><title>addons_deployer</title><rect x="2702.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2790.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2790.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">addons_deployer</text>
+<line x1="2702.0" y1="809" x2="2878.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2790.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.80 · Ca 1 · Ce 4 · 3 commits</text>
 </g>
-<g><title>animation</title><rect x="2702.0" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2790.0" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2790.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">animation</text>
-<line x1="2702.0" y1="959" x2="2878.0" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2790.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 2 · Ce 6 · 2 commits</text>
+<g><title>animation</title><rect x="972.1" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1060.1" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1060.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">animation</text>
+<line x1="972.1" y1="959" x2="1148.1" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1060.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 2 · Ce 6 · 2 commits</text>
 </g>
-<g><title>animation_clip</title><rect x="1838.0" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1926.0" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1926.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">animation_clip</text>
-<line x1="1838.0" y1="959" x2="2014.0" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1926.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.40 · Ca 3 · Ce 2 · 3 commits</text>
+<g><title>animation_clip</title><rect x="1404.1" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1492.1" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1492.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">animation_clip</text>
+<line x1="1404.1" y1="959" x2="1580.1" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1492.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.40 · Ca 3 · Ce 2 · 3 commits</text>
 </g>
-<g><title>archive_cache</title><rect x="1377.3" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1465.3" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1465.3" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">archive_cache</text>
-<line x1="1377.3" y1="809" x2="1553.3" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1465.3" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.43 · Ca 4 · Ce 3 · 0 commits</text>
-</g>
-<g><title>archive_extract</title><rect x="1406.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1494.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1494.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">archive_extract</text>
-<line x1="1406.0" y1="659" x2="1582.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1494.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 1 · Ce 3 · 2 commits</text>
-</g>
-<g><title>archive_transaction</title><rect x="2270.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<g><title>archive_cache</title><rect x="2270.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
 <text x="2358.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2358.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">archive_transaction</text>
+<text x="2358.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">archive_cache</text>
 <line x1="2270.0" y1="809" x2="2446.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2358.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 3 · Ce 3 · 1 commit</text>
+<text x="2358.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.43 · Ca 4 · Ce 3 · 1 commit</text>
 </g>
-<g><title>bone_transform</title><rect x="2054.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2142.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2142.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">bone_transform</text>
-<line x1="2054.0" y1="809" x2="2230.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2142.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 2 · Ce 1 · 1 commit</text>
+<g><title>archive_extract</title><rect x="1622.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1710.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1710.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">archive_extract</text>
+<line x1="1622.0" y1="659" x2="1798.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1710.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 1 · Ce 3 · 2 commits</text>
 </g>
-<g><title>camera_attachment</title><rect x="2918.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<g><title>archive_transaction</title><rect x="2918.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
 <text x="3006.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="3006.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">camera_attachment</text>
+<text x="3006.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">archive_transaction</text>
 <line x1="2918.0" y1="809" x2="3094.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="3006.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 1 · Ce 3 · 1 commit</text>
+<text x="3006.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 3 · Ce 3 · 1 commit</text>
 </g>
-<g><title>cancellation</title><rect x="1609.9" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1697.9" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1697.9" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">cancellation</text>
-<line x1="1609.9" y1="509" x2="1785.9" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1697.9" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.06 · Ca 17 · Ce 1 · 2 commits</text>
+<g><title>bone_transform</title><rect x="758.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="846.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="846.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">bone_transform</text>
+<line x1="758.0" y1="809" x2="934.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="846.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 2 · Ce 1 · 1 commit</text>
 </g>
-<g><title>character_view</title><rect x="974.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<g><title>camera_attachment</title><rect x="974.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1062.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1062.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">camera_attachment</text>
+<line x1="974.0" y1="809" x2="1150.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1062.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 1 · Ce 3 · 1 commit</text>
+</g>
+<g><title>cancellation</title><rect x="1862.3" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1950.3" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1950.3" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">cancellation</text>
+<line x1="1862.3" y1="509" x2="2038.3" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1950.3" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.06 · Ca 17 · Ce 1 · 2 commits</text>
+</g>
+<g><title>character_view</title><rect x="1406.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1494.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1494.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">character_view</text>
+<line x1="1406.0" y1="659" x2="1582.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1494.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.40 · Ca 3 · Ce 2 · 4 commits</text>
+</g>
+<g><title>clip_decoder</title><rect x="1135.6" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1223.6" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1223.6" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">clip_decoder</text>
+<line x1="1135.6" y1="1109" x2="1311.6" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1223.6" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.80 · Ca 1 · Ce 4 · 1 commit</text>
+</g>
+<g><title>command_line</title><rect x="2699.2" y="1220" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2787.2" y="1235" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2787.2" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">command_line</text>
+<line x1="2699.2" y1="1259" x2="2875.2" y2="1259" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2787.2" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.86 · Ca 1 · Ce 6 · 5 commits</text>
+</g>
+<g><title>content_hash</title><rect x="2079.8" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2167.8" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2167.8" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">content_hash</text>
+<line x1="2079.8" y1="509" x2="2255.8" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2167.8" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.25 · Ca 3 · Ce 1 · 1 commit</text>
+</g>
+<g><title>content_store</title><rect x="2700.1" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2788.1" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2788.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">content_store</text>
+<line x1="2700.1" y1="959" x2="2876.1" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2788.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.69 · Ca 5 · Ce 11 · 16 commits</text>
+</g>
+<g><title>content_types</title><rect x="2878.0" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2966.0" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2966.0" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">content_types</text>
+<line x1="2878.0" y1="359" x2="3054.0" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2966.0" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 6 · Ce 0 · 1 commit</text>
+</g>
+<g><title>error</title><rect x="1582.0" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1670.0" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1670.0" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">error</text>
+<line x1="1582.0" y1="359" x2="1758.0" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1670.0" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 30 · Ce 0 · 1 commit</text>
+</g>
+<g><title>game_folder</title><rect x="974.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
 <text x="1062.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1062.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">character_view</text>
+<text x="1062.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">game_folder</text>
 <line x1="974.0" y1="659" x2="1150.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1062.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.40 · Ca 3 · Ce 2 · 3 commits</text>
+<text x="1062.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 2 · Ce 1 · 1 commit</text>
 </g>
-<g><title>clip_decoder</title><rect x="2151.1" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2239.1" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2239.1" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">clip_decoder</text>
-<line x1="2151.1" y1="1109" x2="2327.1" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2239.1" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.80 · Ca 1 · Ce 4 · 1 commit</text>
+<g><title>gamebanana</title><rect x="2054.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2142.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2142.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">gamebanana</text>
+<line x1="2054.0" y1="809" x2="2230.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2142.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 2 · Ce 4 · 2 commits</text>
 </g>
-<g><title>command_line</title><rect x="2716.9" y="1220" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2804.9" y="1235" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2804.9" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">command_line</text>
-<line x1="2716.9" y1="1259" x2="2892.9" y2="1259" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2804.9" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.86 · Ca 1 · Ce 6 · 5 commits</text>
-</g>
-<g><title>content_hash</title><rect x="2486.7" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2574.7" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2574.7" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">content_hash</text>
-<line x1="2486.7" y1="509" x2="2662.7" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2574.7" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.25 · Ca 3 · Ce 1 · 1 commit</text>
-</g>
-<g><title>content_store</title><rect x="2486.0" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2574.0" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2574.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">content_store</text>
-<line x1="2486.0" y1="959" x2="2662.0" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2574.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.69 · Ca 5 · Ce 11 · 16 commits</text>
-</g>
-<g><title>content_types</title><rect x="2683.7" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2771.7" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2771.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">content_types</text>
-<line x1="2683.7" y1="359" x2="2859.7" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2771.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 6 · Ce 0 · 1 commit</text>
-</g>
-<g><title>error</title><rect x="2251.7" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2339.7" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2339.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">error</text>
-<line x1="2251.7" y1="359" x2="2427.7" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2339.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 30 · Ce 0 · 1 commit</text>
-</g>
-<g><title>game_folder</title><rect x="2054.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2142.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2142.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">game_folder</text>
-<line x1="2054.0" y1="659" x2="2230.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2142.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 2 · Ce 1 · 1 commit</text>
-</g>
-<g><title>gamebanana</title><rect x="945.3" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1033.3" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1033.3" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">gamebanana</text>
-<line x1="945.3" y1="809" x2="1121.3" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1033.3" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 2 · Ce 4 · 2 commits</text>
-</g>
-<g><title>history_compare</title><rect x="1593.3" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1681.3" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1681.3" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">history_compare</text>
-<line x1="1593.3" y1="809" x2="1769.3" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1681.3" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 3 commits</text>
+<g><title>history_compare</title><rect x="2486.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2574.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2574.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">history_compare</text>
+<line x1="2486.0" y1="809" x2="2662.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2574.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 4 commits</text>
 </g>
 <g><title>http_client</title><rect x="1190.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
 <text x="1278.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
@@ -364,358 +364,358 @@
 <line x1="1190.0" y1="659" x2="1366.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
 <text x="1278.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 1 · Ce 3 · 2 commits</text>
 </g>
-<g><title>kv3</title><rect x="2270.7" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2358.7" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2358.7" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">kv3</text>
-<line x1="2270.7" y1="509" x2="2446.7" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2358.7" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.09 · Ca 10 · Ce 1 · 2 commits</text>
+<g><title>kv3</title><rect x="1330.4" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1418.4" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1418.4" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">kv3</text>
+<line x1="1330.4" y1="509" x2="1506.4" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1418.4" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.09 · Ca 10 · Ce 1 · 2 commits</text>
 </g>
-<g><title>latest_task</title><rect x="110.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="198.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="198.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">latest_task</text>
-<line x1="110.0" y1="659" x2="286.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="198.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.14 · Ca 6 · Ce 1 · 0 commits</text>
+<g><title>latest_task</title><rect x="758.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="846.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="846.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">latest_task</text>
+<line x1="758.0" y1="659" x2="934.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="846.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.14 · Ca 6 · Ce 1 · 1 commit</text>
 </g>
-<g><title>library_model</title><rect x="2270.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2358.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2358.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_model</text>
-<line x1="2270.0" y1="659" x2="2446.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2358.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 2 commits</text>
-</g>
-<g><title>library_session</title><rect x="1225.4" y="1220" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1313.4" y="1235" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1313.4" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_session</text>
-<line x1="1225.4" y1="1259" x2="1401.4" y2="1259" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1313.4" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.89 · Ca 1 · Ce 8 · 0 commits</text>
-</g>
-<g><title>library_types</title><rect x="1387.7" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1475.7" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1475.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_types</text>
-<line x1="1387.7" y1="359" x2="1563.7" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1475.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 3 · Ce 0 · 1 commit</text>
-</g>
-<g><title>migration</title><rect x="2702.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2790.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2790.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">migration</text>
-<line x1="2702.0" y1="809" x2="2878.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2790.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.25 · Ca 3 · Ce 1 · 2 commits</text>
-</g>
-<g><title>mod_state</title><rect x="326.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="414.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="414.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">mod_state</text>
-<line x1="326.0" y1="659" x2="502.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="414.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 2 · Ce 2 · 2 commits</text>
-</g>
-<g><title>mod_store</title><rect x="1719.1" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1807.1" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1807.1" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">mod_store</text>
-<line x1="1719.1" y1="1109" x2="1895.1" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1807.1" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.62 · Ca 3 · Ce 5 · 7 commits</text>
-</g>
-<g><title>model</title><rect x="2918.0" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="3006.0" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="3006.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model</text>
-<line x1="2918.0" y1="959" x2="3094.0" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="3006.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 2 · Ce 6 · 2 commits</text>
-</g>
-<g><title>model_geometry</title><rect x="1838.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1926.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1926.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_geometry</text>
-<line x1="1838.0" y1="809" x2="2014.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1926.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.30 · Ca 7 · Ce 3 · 2 commits</text>
-</g>
-<g><title>model_library</title><rect x="1622.0" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1710.0" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1710.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_library</text>
-<line x1="1622.0" y1="959" x2="1798.0" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1710.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.70 · Ca 3 · Ce 7 · 5 commits</text>
-</g>
-<g><title>model_versions</title><rect x="2270.0" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2358.0" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2358.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_versions</text>
-<line x1="2270.0" y1="959" x2="2446.0" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2358.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 6 · Ce 3 · 2 commits</text>
-</g>
-<g><title>repair_journal</title><rect x="2702.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2790.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«interface»</text>
-<text x="2790.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">repair_journal</text>
-<line x1="2702.0" y1="659" x2="2878.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2790.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 2 · Ce 2 · 1 commit</text>
-</g>
-<g><title>report</title><rect x="1838.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1926.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1926.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">report</text>
-<line x1="1838.0" y1="659" x2="2014.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1926.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.22 · Ca 7 · Ce 2 · 3 commits</text>
-</g>
-<g><title>resource</title><rect x="2918.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="3006.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="3006.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">resource</text>
-<line x1="2918.0" y1="659" x2="3094.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="3006.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.20 · Ca 8 · Ce 2 · 4 commits</text>
-</g>
-<g><title>resource_reader</title><rect x="2035.7" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2123.7" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2123.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">resource_reader</text>
-<line x1="2035.7" y1="359" x2="2211.7" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2123.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 4 · Ce 0 · 1 commit</text>
-</g>
-<g><title>skeleton</title><rect x="2486.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<g><title>library_model</title><rect x="2486.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
 <text x="2574.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2574.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">skeleton</text>
+<text x="2574.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_model</text>
 <line x1="2486.0" y1="659" x2="2662.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2574.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.29 · Ca 5 · Ce 2 · 1 commit</text>
+<text x="2574.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 3 commits</text>
 </g>
-<g><title>snapshot_reader</title><rect x="2702.7" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2790.7" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«interface»</text>
-<text x="2790.7" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">snapshot_reader</text>
-<line x1="2702.7" y1="509" x2="2878.7" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2790.7" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 2 · Ce 1 · 2 commits</text>
+<g><title>library_session</title><rect x="2267.2" y="1220" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2355.2" y="1235" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2355.2" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_session</text>
+<line x1="2267.2" y1="1259" x2="2443.2" y2="1259" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2355.2" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.89 · Ca 1 · Ce 8 · 1 commit</text>
 </g>
-<g><title>startup</title><rect x="542.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="630.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="630.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">startup</text>
-<line x1="542.0" y1="659" x2="718.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="630.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.14 · Ca 6 · Ce 1 · 2 commits</text>
+<g><title>library_types</title><rect x="2230.0" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2318.0" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2318.0" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_types</text>
+<line x1="2230.0" y1="359" x2="2406.0" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2318.0" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 3 · Ce 0 · 1 commit</text>
 </g>
-<g><title>store_jobs</title><rect x="2284.9" y="1220" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2372.9" y="1235" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2372.9" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">store_jobs</text>
-<line x1="2284.9" y1="1259" x2="2460.9" y2="1259" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2372.9" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 1 commit</text>
+<g><title>migration</title><rect x="1838.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1926.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1926.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">migration</text>
+<line x1="1838.0" y1="809" x2="2014.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1926.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.25 · Ca 3 · Ce 1 · 2 commits</text>
 </g>
-<g><title>store_reader</title><rect x="2367.1" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2455.1" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2455.1" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">store_reader</text>
-<line x1="2367.1" y1="1109" x2="2543.1" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2455.1" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.80 · Ca 1 · Ce 4 · 4 commits</text>
+<g><title>mod_state</title><rect x="2054.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2142.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2142.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">mod_state</text>
+<line x1="2054.0" y1="659" x2="2230.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2142.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 2 · Ce 2 · 2 commits</text>
 </g>
-<g><title>strings</title><rect x="1825.9" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1913.9" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1913.9" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">strings</text>
-<line x1="1825.9" y1="509" x2="2001.9" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1913.9" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.03 · Ca 37 · Ce 1 · 2 commits</text>
+<g><title>mod_store</title><rect x="2606.8" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2694.8" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2694.8" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">mod_store</text>
+<line x1="2606.8" y1="1109" x2="2782.8" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2694.8" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.62 · Ca 3 · Ce 5 · 7 commits</text>
 </g>
-<g><title>texture</title><rect x="2486.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2574.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2574.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">texture</text>
-<line x1="2486.0" y1="809" x2="2662.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2574.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 3 · Ce 3 · 2 commits</text>
+<g><title>model</title><rect x="1188.1" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1276.1" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1276.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model</text>
+<line x1="1188.1" y1="959" x2="1364.1" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1276.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 2 · Ce 6 · 2 commits</text>
 </g>
-<g><title>updater</title><rect x="2799.1" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2887.1" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2887.1" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">updater</text>
-<line x1="2799.1" y1="1109" x2="2975.1" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2887.1" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.76 · Ca 4 · Ce 13 · 5 commits</text>
+<g><title>model_geometry</title><rect x="1622.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1710.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1710.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_geometry</text>
+<line x1="1622.0" y1="809" x2="1798.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1710.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.30 · Ca 7 · Ce 3 · 2 commits</text>
 </g>
-<g><title>version_builder</title><rect x="2583.1" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="2671.1" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2671.1" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">version_builder</text>
-<line x1="2583.1" y1="1109" x2="2759.1" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="2671.1" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 1 · Ce 3 · 1 commit</text>
+<g><title>model_library</title><rect x="2484.1" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2572.1" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2572.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_library</text>
+<line x1="2484.1" y1="959" x2="2660.1" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2572.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.70 · Ca 3 · Ce 7 · 5 commits</text>
 </g>
-<g><title>vpk</title><rect x="1622.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
-<text x="1710.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1710.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">vpk</text>
-<line x1="1622.0" y1="659" x2="1798.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
-<text x="1710.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.27 · Ca 8 · Ce 3 · 3 commits</text>
+<g><title>model_versions</title><rect x="2268.1" y="920" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2356.1" y="935" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2356.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_versions</text>
+<line x1="2268.1" y1="959" x2="2444.1" y2="959" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2356.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 6 · Ce 3 · 2 commits</text>
 </g>
-<g><title>animation_player</title><rect x="1475.3" y="1220" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1563.3" y="1235" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1563.3" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">animation_player</text>
-<line x1="1475.3" y1="1259" x2="1651.3" y2="1259" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1563.3" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.62 · Ca 3 · Ce 5 · 2 commits</text>
+<g><title>repair_journal</title><rect x="2918.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="3006.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«interface»</text>
+<text x="3006.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">repair_journal</text>
+<line x1="2918.0" y1="659" x2="3094.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="3006.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 2 · Ce 2 · 1 commit</text>
 </g>
-<g><title>comparison_view</title><rect x="1781.9" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1869.9" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1869.9" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">comparison_view</text>
-<line x1="1781.9" y1="1559" x2="1957.9" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1869.9" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 3 · Ce 6 · 8 commits</text>
+<g><title>report</title><rect x="2270.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2358.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2358.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">report</text>
+<line x1="2270.0" y1="659" x2="2446.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2358.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.22 · Ca 7 · Ce 2 · 3 commits</text>
 </g>
-<g><title>gamebanana_panel</title><rect x="889.4" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="977.4" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="977.4" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">gamebanana_panel</text>
-<line x1="889.4" y1="1559" x2="1065.4" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="977.4" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 1 commit</text>
+<g><title>resource</title><rect x="326.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="414.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="414.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">resource</text>
+<line x1="326.0" y1="659" x2="502.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="414.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.20 · Ca 8 · Ce 2 · 4 commits</text>
 </g>
-<g><title>history_panel</title><rect x="1985.2" y="1670" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="2073.2" y="1685" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2073.2" y="1702" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">history_panel</text>
-<line x1="1985.2" y1="1709" x2="2161.2" y2="1709" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="2073.2" y="1723" fill="#526272" font-size="11" text-anchor="middle">I 0.92 · Ca 1 · Ce 12 · 4 commits</text>
+<g><title>resource_reader</title><rect x="2014.0" y="320" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2102.0" y="335" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2102.0" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">resource_reader</text>
+<line x1="2014.0" y1="359" x2="2190.0" y2="359" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2102.0" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 4 · Ce 0 · 1 commit</text>
 </g>
-<g><title>library_panel</title><rect x="1105.4" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1193.4" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1193.4" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_panel</text>
-<line x1="1105.4" y1="1559" x2="1281.4" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1193.4" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.93 · Ca 1 · Ce 13 · 22 commits</text>
+<g><title>skeleton</title><rect x="88.3" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="176.3" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="176.3" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">skeleton</text>
+<line x1="88.3" y1="659" x2="264.3" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="176.3" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.29 · Ca 5 · Ce 2 · 1 commit</text>
 </g>
-<g><title>preview/main</title><rect x="1937.4" y="1970" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="2025.4" y="1985" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2025.4" y="2002" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview/main</text>
-<line x1="1937.4" y1="2009" x2="2113.4" y2="2009" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="2025.4" y="2023" fill="#526272" font-size="11" text-anchor="middle">I 1.00 · Ca 0 · Ce 10 · 26 commits</text>
+<g><title>snapshot_reader</title><rect x="2480.9" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2568.9" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«interface»</text>
+<text x="2568.9" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">snapshot_reader</text>
+<line x1="2480.9" y1="509" x2="2656.9" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2568.9" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.33 · Ca 2 · Ce 1 · 2 commits</text>
 </g>
-<g><title>model_inspection</title><rect x="1769.2" y="1670" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1857.2" y="1685" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1857.2" y="1702" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_inspection</text>
-<line x1="1769.2" y1="1709" x2="1945.2" y2="1709" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1857.2" y="1723" fill="#526272" font-size="11" text-anchor="middle">I 0.90 · Ca 1 · Ce 9 · 0 commits</text>
+<g><title>startup</title><rect x="1838.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1926.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1926.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">startup</text>
+<line x1="1838.0" y1="659" x2="2014.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1926.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.14 · Ca 6 · Ce 1 · 2 commits</text>
 </g>
-<g><title>model_tools</title><rect x="2467.7" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="2555.7" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«interface»</text>
-<text x="2555.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_tools</text>
-<line x1="2467.7" y1="359" x2="2643.7" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="2555.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 3 · Ce 0 · 1 commit</text>
+<g><title>store_jobs</title><rect x="2483.2" y="1220" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2571.2" y="1235" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2571.2" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">store_jobs</text>
+<line x1="2483.2" y1="1259" x2="2659.2" y2="1259" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2571.2" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 1 commit</text>
 </g>
-<g><title>model_viewport</title><rect x="1543.0" y="1370" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1631.0" y="1385" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1631.0" y="1402" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_viewport</text>
-<line x1="1543.0" y1="1409" x2="1719.0" y2="1409" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1631.0" y="1423" fill="#526272" font-size="11" text-anchor="middle">I 0.62 · Ca 5 · Ce 8 · 9 commits</text>
+<g><title>store_reader</title><rect x="2390.8" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2478.8" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2478.8" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">store_reader</text>
+<line x1="2390.8" y1="1109" x2="2566.8" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2478.8" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.80 · Ca 1 · Ce 4 · 5 commits</text>
 </g>
-<g><title>mods_panel</title><rect x="798.8" y="920" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="886.8" y="935" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="886.8" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">mods_panel</text>
-<line x1="798.8" y1="959" x2="974.8" y2="959" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="886.8" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 4 commits</text>
+<g><title>strings</title><rect x="1646.3" y="470" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1734.3" y="485" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1734.3" y="502" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">strings</text>
+<line x1="1646.3" y1="509" x2="1822.3" y2="509" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1734.3" y="523" fill="#526272" font-size="11" text-anchor="middle">I 0.03 · Ca 37 · Ce 1 · 2 commits</text>
 </g>
-<g><title>multi_view</title><rect x="1349.9" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1437.9" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1437.9" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">multi_view</text>
-<line x1="1349.9" y1="1559" x2="1525.9" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1437.9" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.92 · Ca 1 · Ce 11 · 4 commits</text>
+<g><title>texture</title><rect x="1190.0" y="770" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1278.0" y="785" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1278.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">texture</text>
+<line x1="1190.0" y1="809" x2="1366.0" y2="809" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1278.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 3 · Ce 3 · 2 commits</text>
 </g>
-<g><title>preview_panel</title><rect x="1565.9" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1653.9" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1653.9" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview_panel</text>
-<line x1="1565.9" y1="1559" x2="1741.9" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1653.9" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 2 · Ce 4 · 8 commits</text>
+<g><title>updater</title><rect x="1958.8" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2046.8" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2046.8" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">updater</text>
+<line x1="1958.8" y1="1109" x2="2134.8" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2046.8" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.76 · Ca 4 · Ce 13 · 5 commits</text>
 </g>
-<g><title>profile</title><rect x="1603.7" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1691.7" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1691.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">profile</text>
-<line x1="1603.7" y1="359" x2="1779.7" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1691.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 11 · Ce 0 · 2 commits</text>
+<g><title>version_builder</title><rect x="1518.9" y="1070" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="1606.9" y="1085" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1606.9" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">version_builder</text>
+<line x1="1518.9" y1="1109" x2="1694.9" y2="1109" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="1606.9" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.75 · Ca 1 · Ce 3 · 1 commit</text>
 </g>
-<g><title>repair_panel</title><rect x="1691.3" y="1220" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1779.3" y="1235" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1779.3" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">repair_panel</text>
-<line x1="1691.3" y1="1259" x2="1867.3" y2="1259" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1779.3" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.86 · Ca 1 · Ce 6 · 6 commits</text>
+<g><title>vpk</title><rect x="2702.0" y="620" width="176" height="60" rx="3" fill="#e7eef5" stroke="#3d5a73" stroke-width="1.3"/>
+<text x="2790.0" y="635" fill="#3d5a73" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2790.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">vpk</text>
+<line x1="2702.0" y1="659" x2="2878.0" y2="659" stroke="#3d5a73" stroke-width=".8" opacity=".45"/>
+<text x="2790.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.27 · Ca 8 · Ce 3 · 3 commits</text>
 </g>
-<g><title>shell_layout</title><rect x="729.3" y="770" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="817.3" y="785" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="817.3" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">shell_layout</text>
-<line x1="729.3" y1="809" x2="905.3" y2="809" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="817.3" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 0 commits</text>
+<g><title>animation_player</title><rect x="1403.2" y="1220" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1491.2" y="1235" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1491.2" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">animation_player</text>
+<line x1="1403.2" y1="1259" x2="1579.2" y2="1259" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1491.2" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.62 · Ca 3 · Ce 5 · 3 commits</text>
 </g>
-<g><title>shell_window</title><rect x="1819.7" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1907.7" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1907.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">shell_window</text>
-<line x1="1819.7" y1="359" x2="1995.7" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1907.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 2 · Ce 0 · 0 commits</text>
+<g><title>comparison_view</title><rect x="2156.1" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2244.1" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2244.1" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">comparison_view</text>
+<line x1="2156.1" y1="1559" x2="2332.1" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2244.1" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 3 · Ce 6 · 8 commits</text>
 </g>
-<g><title>standalone</title><rect x="2173.3" y="1970" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="2261.3" y="1985" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2261.3" y="2002" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">standalone</text>
-<line x1="2173.3" y1="2009" x2="2349.3" y2="2009" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="2261.3" y="2023" fill="#526272" font-size="11" text-anchor="middle">I 1.00 · Ca 0 · Ce 2 · 1 commit</text>
+<g><title>gamebanana_panel</title><rect x="1292.1" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1380.1" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1380.1" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">gamebanana_panel</text>
+<line x1="1292.1" y1="1559" x2="1468.1" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1380.1" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 2 commits</text>
 </g>
-<g><title>theme</title><rect x="1171.7" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1259.7" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1259.7" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">theme</text>
-<line x1="1171.7" y1="359" x2="1347.7" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1259.7" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 6 · Ce 0 · 1 commit</text>
+<g><title>history_panel</title><rect x="2183.5" y="1670" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2271.5" y="1685" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2271.5" y="1702" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">history_panel</text>
+<line x1="2183.5" y1="1709" x2="2359.5" y2="1709" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2271.5" y="1723" fill="#526272" font-size="11" text-anchor="middle">I 0.92 · Ca 1 · Ce 12 · 4 commits</text>
 </g>
-<g><title>thumbnail_cache</title><rect x="1327.0" y="1370" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1415.0" y="1385" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1415.0" y="1402" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">thumbnail_cache</text>
-<line x1="1327.0" y1="1409" x2="1503.0" y2="1409" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1415.0" y="1423" fill="#526272" font-size="11" text-anchor="middle">I 0.71 · Ca 2 · Ce 5 · 5 commits</text>
+<g><title>library_panel</title><rect x="1940.1" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2028.1" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2028.1" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">library_panel</text>
+<line x1="1940.1" y1="1559" x2="2116.1" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2028.1" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.93 · Ca 1 · Ce 13 · 23 commits</text>
 </g>
-<g><title>ui</title><rect x="758.0" y="620" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="846.0" y="635" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="846.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">ui</text>
-<line x1="758.0" y1="659" x2="934.0" y2="659" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="846.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.17 · Ca 10 · Ce 2 · 2 commits</text>
+<g><title>preview/main</title><rect x="2314.0" y="1970" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2402.0" y="1985" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2402.0" y="2002" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview/main</text>
+<line x1="2314.0" y1="2009" x2="2490.0" y2="2009" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2402.0" y="2023" fill="#526272" font-size="11" text-anchor="middle">I 1.00 · Ca 0 · Ce 10 · 27 commits</text>
 </g>
-<g><title>vulkan_window</title><rect x="1759.0" y="1370" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1847.0" y="1385" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1847.0" y="1402" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">vulkan_window</text>
-<line x1="1759.0" y1="1409" x2="1935.0" y2="1409" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1847.0" y="1423" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 0 commits</text>
+<g><title>model_inspection</title><rect x="1951.6" y="1670" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2039.6" y="1685" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2039.6" y="1702" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_inspection</text>
+<line x1="1951.6" y1="1709" x2="2127.6" y2="1709" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2039.6" y="1723" fill="#526272" font-size="11" text-anchor="middle">I 0.90 · Ca 1 · Ce 9 · 1 commit</text>
 </g>
-<g><title>workspace</title><rect x="1446.2" y="1820" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
-<text x="1534.2" y="1835" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1534.2" y="1852" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">workspace</text>
-<line x1="1446.2" y1="1859" x2="1622.2" y2="1859" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
-<text x="1534.2" y="1873" fill="#526272" font-size="11" text-anchor="middle">I 0.96 · Ca 1 · Ce 22 · 0 commits</text>
+<g><title>model_tools</title><rect x="2662.0" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2750.0" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«interface»</text>
+<text x="2750.0" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_tools</text>
+<line x1="2662.0" y1="359" x2="2838.0" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2750.0" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 3 · Ce 0 · 1 commit</text>
 </g>
-<g><title>model_comparison</title><rect x="1503.1" y="1070" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
-<text x="1591.1" y="1085" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1591.1" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_comparison</text>
-<line x1="1503.1" y1="1109" x2="1679.1" y2="1109" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
-<text x="1591.1" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 1 commit</text>
+<g><title>model_viewport</title><rect x="1738.4" y="1370" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1826.4" y="1385" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1826.4" y="1402" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_viewport</text>
+<line x1="1738.4" y1="1409" x2="1914.4" y2="1409" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1826.4" y="1423" fill="#526272" font-size="11" text-anchor="middle">I 0.62 · Ca 5 · Ce 8 · 10 commits</text>
 </g>
-<g><title>model_renderer</title><rect x="1907.3" y="1220" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
-<text x="1995.3" y="1235" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1995.3" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_renderer</text>
-<line x1="1907.3" y1="1259" x2="2083.3" y2="1259" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
-<text x="1995.3" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 3 · Ce 3 · 8 commits</text>
+<g><title>mods_panel</title><rect x="1836.1" y="920" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1924.1" y="935" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1924.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">mods_panel</text>
+<line x1="1836.1" y1="959" x2="2012.1" y2="959" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1924.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.83 · Ca 1 · Ce 5 · 5 commits</text>
 </g>
-<g><title>preview_materials</title><rect x="1935.1" y="1070" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
-<text x="2023.1" y="1085" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2023.1" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview_materials</text>
-<line x1="1935.1" y1="1109" x2="2111.1" y2="1109" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
-<text x="2023.1" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.60 · Ca 2 · Ce 3 · 2 commits</text>
+<g><title>multi_view</title><rect x="1724.1" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1812.1" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1812.1" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">multi_view</text>
+<line x1="1724.1" y1="1559" x2="1900.1" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1812.1" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.92 · Ca 1 · Ce 11 · 5 commits</text>
 </g>
-<g><title>preview_scene</title><rect x="1406.0" y="920" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
-<text x="1494.0" y="935" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="1494.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview_scene</text>
-<line x1="1406.0" y1="959" x2="1582.0" y2="959" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
-<text x="1494.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.20 · Ca 4 · Ce 1 · 4 commits</text>
+<g><title>preview_panel</title><rect x="1508.1" y="1520" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1596.1" y="1535" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1596.1" y="1552" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview_panel</text>
+<line x1="1508.1" y1="1559" x2="1684.1" y2="1559" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1596.1" y="1573" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 2 · Ce 4 · 8 commits</text>
 </g>
-<g><title>skeleton_pose</title><rect x="2054.0" y="920" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
-<text x="2142.0" y="935" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
-<text x="2142.0" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">skeleton_pose</text>
-<line x1="2054.0" y1="959" x2="2230.0" y2="959" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
-<text x="2142.0" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 2 · Ce 2 · 2 commits</text>
+<g><title>profile</title><rect x="1798.0" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1886.0" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1886.0" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">profile</text>
+<line x1="1798.0" y1="359" x2="1974.0" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1886.0" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 11 · Ce 0 · 2 commits</text>
 </g>
-<g><title>Tracy</title><rect x="1614.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="1702.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="1702.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Tracy</text>
+<g><title>repair_panel</title><rect x="1619.2" y="1220" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1707.2" y="1235" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1707.2" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">repair_panel</text>
+<line x1="1619.2" y1="1259" x2="1795.2" y2="1259" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1707.2" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.86 · Ca 1 · Ce 6 · 6 commits</text>
 </g>
-<g><title>Dear ImGui</title><rect x="1398.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="1486.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="1486.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Dear ImGui</text>
+<g><title>shell_layout</title><rect x="1406.0" y="770" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1494.0" y="785" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1494.0" y="802" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">shell_layout</text>
+<line x1="1406.0" y1="809" x2="1582.0" y2="809" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1494.0" y="823" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 1 commit</text>
 </g>
-<g><title>SQLite</title><rect x="2910.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="2998.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="2998.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">SQLite</text>
+<g><title>shell_window</title><rect x="2446.0" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2534.0" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2534.0" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">shell_window</text>
+<line x1="2446.0" y1="359" x2="2622.0" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2534.0" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 2 · Ce 0 · 1 commit</text>
 </g>
-<g><title>meshoptimizer</title><rect x="1830.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="1918.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="1918.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">meshoptimizer</text>
+<g><title>standalone</title><rect x="2098.0" y="1970" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2186.0" y="1985" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2186.0" y="2002" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">standalone</text>
+<line x1="2098.0" y1="2009" x2="2274.0" y2="2009" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2186.0" y="2023" fill="#526272" font-size="11" text-anchor="middle">I 1.00 · Ca 0 · Ce 2 · 1 commit</text>
 </g>
-<g><title>Win32</title><rect x="2262.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="2350.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="2350.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Win32</text>
+<g><title>theme</title><rect x="1351.5" y="320" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1439.5" y="335" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1439.5" y="352" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">theme</text>
+<line x1="1351.5" y1="359" x2="1527.5" y2="359" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1439.5" y="373" fill="#526272" font-size="11" text-anchor="middle">I 0.00 · Ca 6 · Ce 0 · 1 commit</text>
 </g>
-<g><title>Vulkan</title><rect x="2046.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="2134.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="2134.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Vulkan</text>
+<g><title>thumbnail_cache</title><rect x="1954.4" y="1370" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2042.4" y="1385" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2042.4" y="1402" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">thumbnail_cache</text>
+<line x1="1954.4" y1="1409" x2="2130.4" y2="1409" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2042.4" y="1423" fill="#526272" font-size="11" text-anchor="middle">I 0.71 · Ca 2 · Ce 5 · 5 commits</text>
 </g>
-<g><title>Zstandard</title><rect x="2694.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="2782.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="2782.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Zstandard</text>
+<g><title>ui</title><rect x="542.0" y="620" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="630.0" y="635" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="630.0" y="652" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">ui</text>
+<line x1="542.0" y1="659" x2="718.0" y2="659" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="630.0" y="673" fill="#526272" font-size="11" text-anchor="middle">I 0.17 · Ca 10 · Ce 2 · 2 commits</text>
 </g>
-<g><title>nlohmann::json</title><rect x="1167.7" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="1255.7" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="1255.7" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">nlohmann::json</text>
+<g><title>vulkan_window</title><rect x="2170.4" y="1370" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="2258.4" y="1385" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2258.4" y="1402" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">vulkan_window</text>
+<line x1="2170.4" y1="1409" x2="2346.4" y2="1409" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="2258.4" y="1423" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 1 commit</text>
 </g>
-<g><title>LZ4</title><rect x="2478.2" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
-<text x="2566.2" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
-<text x="2566.2" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">LZ4</text>
+<g><title>workspace</title><rect x="1829.5" y="1820" width="176" height="60" rx="3" fill="#fff4e0" stroke="#9a6416" stroke-width="1.3"/>
+<text x="1917.5" y="1835" fill="#9a6416" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1917.5" y="1852" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">workspace</text>
+<line x1="1829.5" y1="1859" x2="2005.5" y2="1859" stroke="#9a6416" stroke-width=".8" opacity=".45"/>
+<text x="1917.5" y="1873" fill="#526272" font-size="11" text-anchor="middle">I 0.96 · Ca 1 · Ce 22 · 1 commit</text>
+</g>
+<g><title>model_comparison</title><rect x="2174.8" y="1070" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
+<text x="2262.8" y="1085" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2262.8" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_comparison</text>
+<line x1="2174.8" y1="1109" x2="2350.8" y2="1109" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
+<text x="2262.8" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.67 · Ca 1 · Ce 2 · 1 commit</text>
+</g>
+<g><title>model_renderer</title><rect x="2051.2" y="1220" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
+<text x="2139.2" y="1235" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2139.2" y="1252" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">model_renderer</text>
+<line x1="2051.2" y1="1259" x2="2227.2" y2="1259" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
+<text x="2139.2" y="1273" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 3 · Ce 3 · 8 commits</text>
+</g>
+<g><title>preview_materials</title><rect x="1742.8" y="1070" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
+<text x="1830.8" y="1085" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1830.8" y="1102" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview_materials</text>
+<line x1="1742.8" y1="1109" x2="1918.8" y2="1109" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
+<text x="1830.8" y="1123" fill="#526272" font-size="11" text-anchor="middle">I 0.60 · Ca 2 · Ce 3 · 2 commits</text>
+</g>
+<g><title>preview_scene</title><rect x="2052.1" y="920" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
+<text x="2140.1" y="935" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="2140.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">preview_scene</text>
+<line x1="2052.1" y1="959" x2="2228.1" y2="959" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
+<text x="2140.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.20 · Ca 4 · Ce 1 · 4 commits</text>
+</g>
+<g><title>skeleton_pose</title><rect x="1620.1" y="920" width="176" height="60" rx="3" fill="#f3eef8" stroke="#5b4580" stroke-width="1.3"/>
+<text x="1708.1" y="935" fill="#5b4580" font-size="10.5" text-anchor="middle" font-style="italic">«component»</text>
+<text x="1708.1" y="952" fill="#1c2430" font-size="13.5" font-weight="650" text-anchor="middle">skeleton_pose</text>
+<line x1="1620.1" y1="959" x2="1796.1" y2="959" stroke="#5b4580" stroke-width=".8" opacity=".45"/>
+<text x="1708.1" y="973" fill="#526272" font-size="11" text-anchor="middle">I 0.50 · Ca 2 · Ce 2 · 2 commits</text>
+</g>
+<g><title>LZ4</title><rect x="1175.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="1263.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="1263.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">LZ4</text>
+</g>
+<g><title>Win32</title><rect x="2039.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="2127.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="2127.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Win32</text>
+</g>
+<g><title>Vulkan</title><rect x="2471.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="2559.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="2559.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Vulkan</text>
+</g>
+<g><title>meshoptimizer</title><rect x="1607.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="1695.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="1695.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">meshoptimizer</text>
+</g>
+<g><title>SQLite</title><rect x="2903.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="2991.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="2991.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">SQLite</text>
+</g>
+<g><title>Dear ImGui</title><rect x="2255.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="2343.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="2343.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Dear ImGui</text>
+</g>
+<g><title>Tracy</title><rect x="1823.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="1911.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="1911.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Tracy</text>
+</g>
+<g><title>nlohmann::json</title><rect x="2687.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="2775.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="2775.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">nlohmann::json</text>
+</g>
+<g><title>Zstandard</title><rect x="1391.1" y="170" width="176" height="60" rx="3" fill="#eef0f3" stroke="#59636e" stroke-width="1.3"/>
+<text x="1479.1" y="192" fill="#59636e" font-size="10.5" text-anchor="middle" font-style="italic">«library»</text>
+<text x="1479.1" y="211" fill="#1c2430" font-size="14" font-weight="650" text-anchor="middle">Zstandard</text>
 </g>
 </svg>
