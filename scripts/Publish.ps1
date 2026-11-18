@@ -558,9 +558,19 @@ $partial = Join-Path $OutputDirectory ($ExpectedZip + '.partial')
 Remove-PackageFile $partial
 $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path -LiteralPath $tar)) { throw "tar.exe is required to create the zip ($tar)." }
-& $tar -a -c -f $partial -C $staging .
+# The format is explicit: -a picks it from the extension, and .zip.partial would make a tar archive.
+& $tar --format zip -c -f $partial -C $staging .
 if ($LASTEXITCODE -ne 0) { throw "tar failed to create $partial." }
 if (-not (Test-Path -LiteralPath $partial -PathType Leaf)) { throw "Zip was not written: $partial" }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+try {
+    $check = [IO.Compression.ZipFile]::OpenRead($partial)
+    $names = @($check.Entries | ForEach-Object { $_.FullName })
+    $check.Dispose()
+} catch {
+    throw "The package is not a readable zip: $partial. $($_.Exception.Message)"
+}
+if (-not ($names | Where-Object { $_ -match '(^|/)DeadlockModworks\.exe$' })) { throw "The zip has no DeadlockModworks.exe: $partial" }
 
 $finalZip = Join-Path $OutputDirectory $ExpectedZip
 $finalHash = Join-Path $OutputDirectory ($ExpectedZip + '.sha256')
