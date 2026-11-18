@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -178,4 +179,48 @@ TEST(Kv3, RejectsATruncatedOrForeignSignature) {
     skeleton_repair::KvDocument document;
     document.Version = 3;
     EXPECT_THROW(skeleton_repair::WriteKv3(document), skeleton_repair::InvalidOperation);
+}
+
+// Newer encoders write unsigned 0 and 1 as payload-free node types 26 and 27.
+// Null also has no payload, so swapping two Null type bytes for 26 and 27 keeps every lane valid.
+TEST(Kv3, ReadsPayloadFreeUnsignedZeroAndOne) {
+    using namespace skeleton_repair;
+    KvDocument document;
+    document.Root = KvValue::Object({{"zero", KvValue::Null()}, {"one", KvValue::Null()}});
+    std::vector<uint8_t> bytes = WriteKv3(document);
+
+    const std::vector<uint8_t> types{9, 1, 1, 0x00, 0xDD, 0xEE, 0xFF};
+    const auto found = std::search(bytes.begin(), bytes.end(), types.begin(), types.end());
+    ASSERT_NE(found, bytes.end());
+    found[1] = 26;
+    found[2] = 27;
+
+    const KvDocument read = ReadKv3(bytes);
+    ASSERT_NE(read.Root.Find("zero"), nullptr);
+    EXPECT_EQ(read.Root.Find("zero")->Kind, KvKind::UInt32);
+    EXPECT_EQ(read.Root.Find("zero")->UInt32(), 0u);
+    EXPECT_EQ(read.Root.Find("one")->Kind, KvKind::UInt32);
+    EXPECT_EQ(read.Root.Find("one")->UInt32(), 1u);
+
+    // They are written back as ordinary UInt32 values, which every reader accepts.
+    const KvDocument again = ReadKv3(WriteKv3(read));
+    EXPECT_EQ(again.Root.Find("zero")->UInt32(), 0u);
+    EXPECT_EQ(again.Root.Find("one")->UInt32(), 1u);
+}
+
+TEST(Kv3, UnknownValueTypesNameTheType) {
+    using namespace skeleton_repair;
+    KvDocument document;
+    document.Root = KvValue::Object({{"x", KvValue::Null()}});
+    std::vector<uint8_t> bytes = WriteKv3(document);
+    const std::vector<uint8_t> types{9, 1, 0x00, 0xDD, 0xEE, 0xFF};
+    const auto found = std::search(bytes.begin(), bytes.end(), types.begin(), types.end());
+    ASSERT_NE(found, bytes.end());
+    found[1] = 60;
+    try {
+        ReadKv3(bytes);
+        FAIL() << "Expected InvalidData";
+    } catch (const InvalidData& error) {
+        EXPECT_NE(std::string(error.what()).find("KV3 value type 60 is not supported."), std::string::npos);
+    }
 }
