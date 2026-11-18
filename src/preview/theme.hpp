@@ -2,8 +2,9 @@
 
 // Steel-blue workspace tokens. Values are sRGB. Contrast is WCAG relative luminance.
 // #E6EDF3 on #141B23 is 14.68:1 and on #1D2833 is 12.66:1. #9BAEBE on #1D2833 is 6.55:1.
-// #4682B4 behind #E6EDF3 is 3.48:1, so it is not a button fill. Primary fill #2A5678 is 6.58:1,
-// its hover #346888 is 5.10:1, and its pressed state #1E4460 is 8.67:1.
+// #4682B4 behind #E6EDF3 is 3.48:1, so it is not a button fill. Primary fill #2F6FAE carries white text
+// at 5.25:1, its hover #3577B8 is 4.69:1, and its pressed state #275F96 is 6.60:1. It sits well apart
+// from the plain button fill #2A3948, so the one primary action on a page reads first.
 // Text accent and focus use #659BC3 (5.01:1 on #1D2833). Disabled #8B9DAB is 5.35:1 on #1D2833
 // and darker than #9BAEBE. Success #6BCC85, warning #F2B357, and failure #F56B66 on #1D2833
 // are 7.55:1, 8.09:1, and 5.11:1. The viewport clear matches the workspace so a resize does not
@@ -34,9 +35,10 @@ inline constexpr ImVec4 kSelection = Rgb(0x1E, 0x3C, 0x56);
 inline constexpr ImVec4 kSelectionHover = Rgb(0x2A, 0x4E, 0x70);
 inline constexpr ImVec4 kSelectionActive = Rgb(0x34, 0x5E, 0x86);
 inline constexpr ImVec4 kSelectionBorder = kFocus;
-inline constexpr ImVec4 kPrimary = Rgb(0x2A, 0x56, 0x78);
-inline constexpr ImVec4 kPrimaryHover = Rgb(0x34, 0x68, 0x88);
-inline constexpr ImVec4 kPrimaryActive = Rgb(0x1E, 0x44, 0x60);
+inline constexpr ImVec4 kPrimary = Rgb(0x2F, 0x6F, 0xAE);
+inline constexpr ImVec4 kPrimaryHover = Rgb(0x35, 0x77, 0xB8);
+inline constexpr ImVec4 kPrimaryActive = Rgb(0x27, 0x5F, 0x96);
+inline constexpr ImVec4 kOnPrimary = Rgb(0xFF, 0xFF, 0xFF);
 inline constexpr ImVec4 kSuccess = Rgb(0x6B, 0xCC, 0x85);
 inline constexpr ImVec4 kWarning = Rgb(0xF2, 0xB3, 0x57);
 inline constexpr ImVec4 kError = Rgb(0xF5, 0x6B, 0x66);
@@ -48,5 +50,15 @@ inline constexpr std::array<float, 3> kClearRgb{kWorkspace.x, kWorkspace.y, kWor
 void Apply(float dpi_scale);
 void PushPrimaryButton();
 void PopPrimaryButton();
+
+// A larger bold face for page and empty-state headings. Null until main registers it, and then
+// Heading() falls back to the body font.
+void SetHeadingFont(ImFont* font);
+ImFont* HeadingFont();
+// Whether main merged an icon font into the body font, for the navigation's icons::k* glyphs.
+void SetIconsLoaded(bool loaded);
+bool IconsLoaded();
+// The heading face is this many times the body font size.
+inline constexpr float kHeadingScale = 1.35f;
 
 }  // namespace skeleton_repair::theme

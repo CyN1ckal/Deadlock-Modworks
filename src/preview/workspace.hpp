@@ -1,5 +1,6 @@
 #pragma once
 
+#include "icons.hpp"
 #include "archive_cache.hpp"
 #include "comparison_view.hpp"
 #include "gamebanana_panel.hpp"
@@ -33,7 +34,21 @@ namespace skeleton_repair {
 // applies finished results and draws, all on the UI thread.
 class Workspace {
 public:
-    enum class Page { Gallery, Pack, History, Inspect, Repair, Multi, Mods, Browse };
+    enum class Page { Gallery, Pack, History, Inspect, Repair, Multi, Mods, Browse, Settings };
+    // Pages in navigation order; Ctrl+1 to Ctrl+8 follow it. The first kPlayPages get mods into the game. The rest
+    // are tools for building, checking and comparing models. Settings sits at the foot of the navigation instead.
+    struct PageInfo { Page Value; const char* Name; const char* Icon; const char* Keys; const char* Tooltip; };
+    static constexpr PageInfo kPages[] = {
+        {Page::Mods, "My mods", icons::kHome, "Ctrl+1", "Turn mods on or off, then apply them to the game"},
+        {Page::Browse, "Discover", icons::kGlobe, "Ctrl+2", "Find and download Deadlock mods from GameBanana"},
+        {Page::Gallery, "Skins", icons::kPerson, "Ctrl+3", "Every skin and file in your library"},
+        {Page::Pack, "Pack builder", icons::kPackage, "Ctrl+4", "Combine skins from several mods into one pack"},
+        {Page::Repair, "Repairs", icons::kRepair, "Ctrl+5", "Check and fix mods after a game update"},
+        {Page::Inspect, "Inspector", icons::kZoom, "Ctrl+6", "Textures, animations and skeleton of one model"},
+        {Page::Multi, "Side by side", icons::kTwoPage, "Ctrl+7", "Several models of one hero, with one shared camera"},
+        {Page::History, "History", icons::kHistory, "Ctrl+8", "Every stored copy of each model, and how repairs changed it"},
+    };
+    static constexpr size_t kPlayPages = 3;
 
     // `window` owns the dialogs the menus open. Starts reading the library under `data_root`.
     Workspace(const VulkanDevice& device, const std::filesystem::path& data_root, HWND__* window);
@@ -109,8 +124,17 @@ private:
     std::string* StatusMessage(ImVec4& color);
     void DrawStatusBar();
     void DrawExplorer();
+    // My mods and Discover have their own lists and filters, so the explorer gives its width back to them.
+    bool ExplorerOnPage() const;
     void DrawSourceList();
-    void DrawPageTabs();
+    void DrawNavRail();
+    void DrawGameCard();
+    void DrawSettingsPage();
+    // After Deadlock updates: offers to check the library's mods, then to fix the ones Repairs can fix.
+    void PollGameUpdate();
+    void DrawGameUpdate();
+    // Records the connected game's build as the one the mods were checked against.
+    void AcceptGameBuild();
     void DrawWorkspace();
     void DrawInspectPage();
     void DrawDialogs();
@@ -124,10 +148,15 @@ private:
     std::filesystem::path layout_ini_;
 
     // Pages and shell windows
-    Page page_ = Page::Gallery;
-    Page previous_page_ = Page::Gallery;
+    Page page_ = Page::Mods;
+    // Where the check after a game update stands. Found until the user checks, Checked until they fix or dismiss it.
+    enum class GameUpdate { None, Found, Checking, Checked, Fixing, Fixed };
+    GameUpdate game_update_ = GameUpdate::None;
+    // GameBuildId of the connected game, and how many mods the last check after an update can fix.
+    std::string game_build_;
+    size_t update_fixable_ = 0;
+    Page previous_page_ = Page::Mods;
     // Set while a page shown from code waits for its tab to become selected.
-    bool page_requested_ = true;
     bool show_explorer_ = true;
     bool focus_explorer_ = false;
     bool focus_workspace_ = false;

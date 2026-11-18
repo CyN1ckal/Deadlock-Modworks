@@ -48,6 +48,28 @@ std::vector<std::string> ParseSteamLibraryPaths(std::string_view vdf) {
     return paths;
 }
 
+std::optional<std::string> ParseClientVersion(std::string_view steam_inf) {
+    static const std::regex pattern(R"rx((?:^|\n)\s*ClientVersion\s*=\s*([^\r\n]*?)\s*(?:\r|\n|$))rx");
+    const std::string text(steam_inf);
+    std::smatch match;
+    if (!std::regex_search(text, match, pattern) || match[1].str().empty()) return std::nullopt;
+    return match[1].str();
+}
+
+std::string GameBuildId(const fs::path& citadel) {
+    std::error_code error;
+    if (std::ifstream in(citadel / L"steam.inf", std::ios::binary); in) {
+        const std::string text((std::istreambuf_iterator<char>(in)), {});
+        if (const auto version = ParseClientVersion(text)) return "client " + *version;
+    }
+    const fs::path archive = citadel / L"pak01_dir.vpk";
+    const auto size = fs::file_size(archive, error);
+    if (error) return {};
+    const auto written = fs::last_write_time(archive, error);
+    if (error) return {};
+    return "archive " + std::to_string(size) + " " + std::to_string(written.time_since_epoch().count());
+}
+
 std::optional<std::string> FindGameFolder() {
     std::vector<std::string> libraries;
     if (const auto steam = SteamPath(); steam && !steam->empty()) {

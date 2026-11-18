@@ -6,7 +6,7 @@ title: ""
 
 ## App version
 
-From **Help > About**, or from `DeadlockModworks.exe --version`. Include the **Build** commit, not only `0.1.0`.
+From **Help > About**, or from `DeadlockModworks.exe --version`. Include the **Build** commit, not only `0.2.0`.
 
 ## What you did
 

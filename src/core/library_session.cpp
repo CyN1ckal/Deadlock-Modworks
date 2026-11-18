@@ -197,7 +197,7 @@ LibraryJobResult DownloadMod(const fs::path& root, const GbMod& mod, const GbFil
     result.Origin = ModOrigin{mod.Id, file.Id, file.Name, mod.ProfileUrl, mod.DateModified};
     result.Enable = enable;
     if (!result.AddedIds.empty()) {
-        result.Done = "Downloaded " + mod.Name + (enable ? ". It is enabled; choose Apply to game on the Mods page." : ". Enable it on the Mods page.");
+        result.Done = "Downloaded " + mod.Name + (enable ? ". It is on; choose Apply to game on My mods." : ". Turn it on in My mods.");
     }
     return result;
 }
@@ -222,7 +222,7 @@ LibraryJobResult BuildPackAsMod(const fs::path& root, const std::string& name, b
             if (store.ContentId(source) != id) continue;
             const auto other = store.Name(source).value_or(Narrow(source.stem().wstring()));
             throw InvalidOperation("The pack has exactly the same files as " + other
-                + ", which is already in your library. Enable that mod on the Mods page instead.");
+                + ", which is already in your library. Turn that mod on in My mods instead.");
         }
     }
     store.Rename(cached, name);
@@ -246,7 +246,7 @@ LibraryJobResult BuildPackAsMod(const fs::path& root, const std::string& name, b
     result.Enable = enable;
     if (replacing) result.ReplacedId = *replaced;
     result.Done = "Built " + name + (replacing ? ", replacing the earlier build" : "")
-        + (enable ? ". It is enabled; choose Apply to game on the Mods page." : ". Enable it on the Mods page.");
+        + (enable ? ". It is on; choose Apply to game on My mods." : ". Turn it on in My mods.");
     return result;
 }
 

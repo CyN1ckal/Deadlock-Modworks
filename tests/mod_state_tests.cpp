@@ -128,6 +128,31 @@ TEST(ModState, ReplacingAnUnknownModAddsTheReplacement) {
     EXPECT_EQ(state.Order(), (Ids{"a", "new"}));
 }
 
+TEST(ModState, DiffsTheEnabledModsAgainstTheAddonsFolder) {
+    EXPECT_EQ(DiffDeployed({"a", "b"}, {"a", "b"}).Count(), 0u);
+    const auto changes = DiffDeployed({"a", "b"}, {"c", "a"});
+    EXPECT_EQ(changes.TurnedOn, Ids({"c"}));
+    EXPECT_EQ(changes.TurnedOff, Ids({"b"}));
+    EXPECT_FALSE(changes.Reordered);
+    EXPECT_EQ(changes.Count(), 2u);
+    const auto reordered = DiffDeployed({"a", "b"}, {"b", "a"});
+    EXPECT_TRUE(reordered.Reordered);
+    EXPECT_EQ(reordered.Count(), 1u);
+}
+
+TEST(ModState, RestoresTheDeployedModsWithoutMovingOthers) {
+    ModState state;
+    const Ids present{"a", "b", "c", "d"};
+    state.Sync(present);
+    state.SetEnabled("a", true);
+    state.SetEnabled("c", true);
+    // The addons folder has d before b; a and c were turned on since.
+    state.Restore({"d", "b", "gone"}, present);
+    EXPECT_EQ(state.EnabledInOrder(present), Ids({"d", "b"}));
+    // a and c keep their places; b and d swap into each other's.
+    EXPECT_EQ(state.Ordered(present), Ids({"a", "d", "c", "b"}));
+}
+
 TEST(ModState, SavesAndLoads) {
     TempFolder temp;
     const auto file = temp.Path / "mods.json";
@@ -139,6 +164,8 @@ TEST(ModState, SavesAndLoads) {
     state.SetEnabled("c", true);
     state.SetOrigin("c", {691764, 1746166, "haze.zip", "https://gamebanana.com/mods/691764", 1783303978});
     state.SetOrigin("b", {0, 0, "", "", 0, true});
+    state.SetCheckedGameBuild("client 6011");
+    state.SetGuideDone(true);
     state.Save(file);
     const auto loaded = ModState::Load(file);
     EXPECT_EQ(loaded, state);

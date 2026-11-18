@@ -1,10 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-18
+
+A reworked interface for players who aren't developers: My mods, Discover and GameBanana downloads, Apply to game, a first-run checklist and a check after game updates. The advanced tools are unchanged under **TOOLS**.
+
+### Changed
+
+- Pages are renamed and reordered around getting mods into the game. The window opens on **My mods** (was **Mods**), then **Discover** (was **Get mods**) and **Skins** (was **Mod library**). The tools follow with dimmer labels: **Pack builder** (was **VPK builder**), **Repairs** (was **Skin repairs**), **Inspector** (was **Model inspector**), **Side by side** (was **Multi view**) and **History** (was **Version history**). **Ctrl+1** to **Ctrl+8** follow the new order.
+- The explorer is not drawn on **My mods** and **Discover**. Its source list is now **MOD FILES**.
+- Plainer wording: **File > Locate Deadlock...** (was **Choose game archive...**), **Deadlock found** / **Deadlock not found**, **Import a shared library...** and **Export library to share...**, **Tools > Check mods for problems** and **Fix supported problems**. My mods says **Up to date** or that changes aren't in the game yet, and explains a missing `gameinfo.gi` line in a tooltip. Empty pages lead with a heading and one sentence instead of a paragraph of caveats.
+- Navigation moved from the tab strip to a rail down the left edge, with icons, **PLAY** and **TOOLS** groups, an **Apply** badge on **My mods** while changes wait, and the pack count on **Pack builder**. A card at the bottom says whether Deadlock was found and opens the game menu.
+- A **Settings** page (**Ctrl+,**) holds Deadlock's folder and manual path, the library's location with export and import, and the interface switches. The explorer is now the **mod files panel** and lists only mod files; its **GAME** and **LIBRARY** sections moved to Settings.
+- **My mods** is a list of cards with on/off switches, where each mod came from, and badges for **Your pack**, **Wins** / **Loses n files**, and **Not in game yet** / **Still in game**. Profile actions moved into the **Profile** menu, and **Enable all** / **Disable all** into the right-click menu as **Turn all on** / **Turn all off**. Positions, drag handles, arrows and a **Which mod wins** list are in a separate **Load order** view.
+- A bar under the list replaces the status lines on **My mods**. It names the changes that aren't in the game yet, offers **Undo** and **Apply to game**, reads **Close Deadlock to apply** while the game runs, and offers **Locate Deadlock...** when the game isn't found. Files from other tools are under **Other files** in the bar.
+- **Add to My mods...** (was **Build as mod...**) is the pack builder's main button. **Build VPK file...** moved to the arrow beside it and keeps **Ctrl+B**.
+- More spacing and rounder controls, a bold heading font, and a brighter primary button colour (`#2F6FAE` with white text) so the main action on a page stands out.
 
 ### Added
 
-- **Get mods** (**Ctrl+8**): browse, sort, filter and search Deadlock mods on GameBanana, or open a pasted mod link, then **Download** or **Download & enable** one of its files. Downloads are HTTPS-only from gamebanana.com, checked against GameBanana's MD5, and zip, 7z and rar archives are opened with libarchive. Only the `.vpk` files inside are written, and archive paths cannot leave the temporary folder.
+- A first-run checklist on **My mods**, **Get your first mod into Deadlock**, with **Find Deadlock**, **Get a mod**, **Turn it on** and **Apply to game**. It goes away once every step is done, or with **Hide**.
+- After a game update, **My mods** offers **Check my mods**, which runs **Analyze**, then **Fix n mods** for the mods Repairs can fix. The build the mods were checked against (steam.inf's `ClientVersion`, or the game archive's size and date) is kept in `mods.json`.
+- **Get mods** (**Ctrl+8**, now **Discover**, **Ctrl+2**): browse, sort, filter and search Deadlock mods on GameBanana, or open a pasted mod link, then **Download** or **Download & enable** one of its files. Downloads are HTTPS-only from gamebanana.com, checked against GameBanana's MD5, and zip, 7z and rar archives are opened with libarchive. Only the `.vpk` files inside are written, and archive paths cannot leave the temporary folder.
 - **Mods** (**Ctrl+7**): enable library mods per profile, set the load order by dragging, see which enabled mods override each other's files, and **Apply to game**, which places the enabled mods in `game\citadel\addons` as `pakNN_dir.vpk`. Modworks records its files in `addons\.modworks.json` and never touches other files there. It checks `gameinfo.gi` for the addons search path and, when asked, adds it with a backup.
 - **Build as mod...** in the VPK builder builds the pack into the library as a named mod that the **Mods** page can enable and apply. Building again under the same name replaces it in place, keeping its load-order position and enabled state. A pack identical to a mod already in the library is refused rather than renaming that mod.
 - **Add VPKs...** on the **Mods** page, and **Built pack** as a mod source.
@@ -29,7 +45,7 @@
 - The quick start's Import and Install or remove steps describe **Get mods** and **Apply to game**. Building a pack still does not install it.
 - Repairs wait while mods are applied, because both use the stored mod files.
 
-## 0.1.0 — not tagged, not published
+## 0.1.0 — 2026-10-13
 
 The commits below are `8470d845c656fba0c60bcf02644fbb7537a6070a` through `68b8ebf2362556d66e0019107d66bbba659e0134`, plus the documentation commit that describes the empty-library actions. Nothing in this list has been pushed, and `v0.1.0` has not been tagged. A GitHub release does not exist yet. The draft workflow in `.github/workflows/release.yml` has not been run. `scripts/Publish.ps1` was not run on this documentation commit.
 

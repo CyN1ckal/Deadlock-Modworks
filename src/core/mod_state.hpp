@@ -22,6 +22,19 @@ struct ModOrigin {
     bool operator==(const ModOrigin&) const = default;
 };
 
+// How the enabled mods differ from the ones in the addons folder.
+struct ModChanges {
+    std::vector<std::string> TurnedOn;
+    std::vector<std::string> TurnedOff;
+    // The same mods are on in both, in a different order.
+    bool Reordered = false;
+    // How many changes to report: one per mod turned on or off, or one for a new order.
+    size_t Count() const { return TurnedOn.size() + TurnedOff.size() + (Reordered ? 1 : 0); }
+    bool operator==(const ModChanges&) const = default;
+};
+// `deployed` and `enabled` are both highest priority first.
+ModChanges DiffDeployed(const std::vector<std::string>& deployed, const std::vector<std::string>& enabled);
+
 // A named set of enabled mods. Every profile shares one load order.
 struct ModProfile {
     std::string Name;
@@ -54,6 +67,10 @@ public:
     void MoveBefore(const std::string& id, const std::string& before);
     // Moves `id` one place up (toward higher priority) or down among `present`.
     void Step(const std::string& id, bool up, const std::vector<std::string>& present);
+    // Makes the active profile match `deployed`, the mods in the addons folder highest priority first: among `present`,
+    // exactly those are enabled, and they take the order they have there. They keep the places in the load order they
+    // hold now, so disabled mods do not move.
+    void Restore(const std::vector<std::string>& deployed, const std::vector<std::string>& present);
     // Removes a mod that left the library from the order, every profile and the origins.
     void Forget(const std::string& id);
     // Puts `replacement` where `id` was: its place in the load order and its enabled state in every profile.
@@ -75,6 +92,14 @@ public:
     // The stored mods downloaded from a GameBanana mod.
     std::vector<std::string> FromGameBanana(int64_t mod) const;
 
+    // The game build (GameBuildId) the library's skins were last checked against after an update. Empty until the
+    // first time a game is found.
+    const std::string& CheckedGameBuild() const { return checked_game_build_; }
+    void SetCheckedGameBuild(std::string build) { checked_game_build_ = std::move(build); }
+    // Whether the first-run checklist on My mods was finished or hidden.
+    bool GuideDone() const { return guide_done_; }
+    void SetGuideDone(bool done) { guide_done_ = done; }
+
     bool operator==(const ModState&) const = default;
 
 private:
@@ -84,6 +109,8 @@ private:
     std::vector<ModProfile> profiles_;
     std::string active_;
     std::map<std::string, ModOrigin> origins_;
+    std::string checked_game_build_;
+    bool guide_done_ = false;
 };
 
 }  // namespace skeleton_repair

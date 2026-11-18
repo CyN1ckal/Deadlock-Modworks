@@ -68,6 +68,8 @@ ModState ModState::Load(const fs::path& file) {
         }
         if (state.profiles_.empty()) state.profiles_.push_back({kDefaultProfile, {}});
         state.active_ = parsed.value("active", std::string());
+        state.checked_game_build_ = parsed.value("checked_game_build", std::string());
+        state.guide_done_ = parsed.value("guide_done", false);
         if (std::none_of(state.profiles_.begin(), state.profiles_.end(), [&](const auto& p) { return p.Name == state.active_; }))
             state.active_ = state.profiles_.front().Name;
         const auto origins = parsed.value("origins", json::object());
@@ -95,7 +97,9 @@ void ModState::Save(const fs::path& file) const {
         origins[id] = {{"gamebanana_mod", origin.GameBananaMod}, {"gamebanana_file", origin.GameBananaFile},
             {"file_name", origin.FileName}, {"page_url", origin.PageUrl}, {"date_modified", origin.DateModified}, {"built", origin.Built}};
     }
-    const json document = {{"version", kVersion}, {"order", order_}, {"active", active_}, {"profiles", profiles}, {"origins", origins}};
+    json document = {{"version", kVersion}, {"order", order_}, {"active", active_}, {"profiles", profiles}, {"origins", origins}};
+    if (!checked_game_build_.empty()) document["checked_game_build"] = checked_game_build_;
+    if (guide_done_) document["guide_done"] = true;
     fs::create_directories(file.parent_path());
     auto temp = file;
     temp += L".tmp";
@@ -158,6 +162,24 @@ void ModState::Step(const std::string& id, bool up, const std::vector<std::strin
         // Moving down past the next mod is moving that mod up past this one.
         MoveBefore(*(at + 1), id);
     }
+}
+
+void ModState::Restore(const std::vector<std::string>& deployed, const std::vector<std::string>& present) {
+    const std::set<std::string> here(present.begin(), present.end());
+    std::vector<std::string> wanted;
+    for (const auto& id : deployed) if (here.contains(id) && !Contains(wanted, id)) wanted.push_back(id);
+    for (const auto& id : present) SetEnabled(id, Contains(wanted, id));
+    // Write the wanted order into the slots those mods already hold.
+    size_t next = 0;
+    for (auto& id : order_) if (Contains(wanted, id)) id = wanted[next++];
+}
+
+ModChanges DiffDeployed(const std::vector<std::string>& deployed, const std::vector<std::string>& enabled) {
+    ModChanges changes;
+    for (const auto& id : enabled) if (!Contains(deployed, id)) changes.TurnedOn.push_back(id);
+    for (const auto& id : deployed) if (!Contains(enabled, id)) changes.TurnedOff.push_back(id);
+    if (changes.TurnedOn.empty() && changes.TurnedOff.empty()) changes.Reordered = deployed != enabled;
+    return changes;
 }
 
 void ModState::Forget(const std::string& id) {

@@ -384,7 +384,7 @@ void GameBananaPanel::DrawDetails(bool can_download, const char* busy_reason, co
         if (!file.Description.empty()) ImGui::TextWrapped("%s", file.Description.c_str());
         ImGui::BeginDisabled(!can_download);
         if (ImGui::Button("Download & enable")) download(mod, file, true);
-        ImGui::SetItemTooltip("Adds the mod to your library and enables it in the current profile. Apply it on the Mods page.");
+        ImGui::SetItemTooltip("Adds the mod to your library and enables it in the current profile. Apply it on My mods (Ctrl+1).");
         ImGui::SameLine();
         if (ImGui::Button("Download")) download(mod, file, false);
         ImGui::SetItemTooltip("Adds the mod to your library without enabling it.");

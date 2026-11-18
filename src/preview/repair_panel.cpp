@@ -110,6 +110,7 @@ void RepairPanel::Start(bool repair, std::optional<std::pair<std::string, std::s
     if (worker_.joinable()) worker_.join();
     cancellation_ = CancellationSource{};
     done_ = false;
+    completed_ = false;
     busy_ = true;
     repairing_ = repair;
     export_status_.clear();
@@ -176,6 +177,7 @@ void RepairPanel::Start(bool repair, std::optional<std::pair<std::string, std::s
             else if (one_model && one_repairable) pending_status_ = "Checked " + *jobs.front().Model + ". Use Repair this model to update it.";
             else if (one_model) pending_status_ = "Checked " + *jobs.front().Model + ". Other models in that archive were not checked.";
             else pending_status_ = "Analysis finished. Supported archives can now be repaired.";
+            completed_ = true;
         } catch (const OperationCancelled&) {
             std::lock_guard lock(mutex_);
             pending_status_ = "Cancelled. Completed results are shown below.";
@@ -274,7 +276,7 @@ void RepairPanel::Draw(void* owner, const std::function<void()>& before_repair) 
     }
 
     if (busy_) ImGui::ProgressBar(progress_.Total > 0 ? static_cast<float>(progress_.Completed) / progress_.Total : 0.f, {-1, 3}, "");
-    if (game_.empty()) ImGui::TextColored(ui::kWarning, "Connect Deadlock (File > Choose game archive) to enable analysis.");
+    if (game_.empty()) ImGui::TextColored(ui::kWarning, "Locate Deadlock (Ctrl+G) to check mods for problems.");
     ui::TextEllipsis(status_, 0, nullptr);
     if (!export_status_.empty()) ui::TextEllipsis(export_status_);
     ImGui::SetNextItemWidth(-1);

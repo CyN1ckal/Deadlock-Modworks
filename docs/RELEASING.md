@@ -1,6 +1,6 @@
 # Releasing
 
-This is how a maintainer builds `DeadlockModworks-0.1.0-win-x64.zip` and what the unpublished tag workflow does. `v0.1.0` is not tagged. Nothing has been pushed. Do not tag, push, or run `gh release create` as part of editing these docs.
+This is how a maintainer builds `DeadlockModworks-0.2.0-win-x64.zip` and what the tag workflow does. Pushing a `v*` tag builds the zip and attaches it to a draft GitHub release, which a maintainer then publishes. Do not tag, push, or run `gh release create` as part of editing these docs.
 
 `scripts/Publish.ps1` must not be pointed at an arbitrary directory. It only accepts paths inside this repository, and it stages under `build\package-staging`.
 
@@ -39,19 +39,19 @@ Defaults, all inside the repository:
 | `-Configuration` | `Release` | Any other value is rejected. The build command is always Release. |
 | `-PackagingRoot` | `build\package-staging` | Must stay under `build\`. |
 | `-OutputDirectory` | `dist` | Must already be empty of unrelated files, or not exist yet. |
-| `-OutputZip` | `dist\DeadlockModworks-0.1.0-win-x64.zip` | The file name must be that zip name. |
+| `-OutputZip` | `dist\DeadlockModworks-0.2.0-win-x64.zip` | The file name must be that zip name. |
 
 The script refuses a filesystem root, the repository root, a relative path that resolves outside the repository, a path that overlaps the build tree or the sources, a missing caller directory, and a caller directory that already contains something it did not put there. It does not recursively delete those paths.
 
-What it deletes is limited to the previous `DeadlockModworks-0.1.0-win-x64.zip`, the matching `.sha256` file, a `.partial` zip, and staging directories under `build\package-staging` that it marked with a `.owner` file. It does not delete `build\release`.
+What it deletes is limited to the previous `DeadlockModworks-0.2.0-win-x64.zip`, the matching `.sha256` file, a `.partial` zip, and staging directories under `build\package-staging` that it marked with a `.owner` file. It does not delete `build\release`.
 
-Staging is `build\package-staging\<timestamp>-<pid>`. The script writes the zip only after that stage exists. The checksum file is `dist\DeadlockModworks-0.1.0-win-x64.zip.sha256`.
+Staging is `build\package-staging\<timestamp>-<pid>`. The script writes the zip only after that stage exists. The checksum file is `dist\DeadlockModworks-0.2.0-win-x64.zip.sha256`.
 
 The zip contains `DeadlockModworks.exe`, `README.md`, `THIRD_PARTY_NOTICES.md`, `PACKAGE_MANIFEST.txt`, the third-party files in `licenses\`, and `LICENSE` when the root license file exists. Shaders are embedded. It does not contain `docs\`, tests, PDBs, game assets, or `vulkan-1.dll`. A package built before `LICENSE` was added recorded `ProjectLicense: absent`. A package built after this tree will copy `LICENSE` and record `ProjectLicense: LICENSE`. This documentation change did not run the script, so it did not produce a new zip.
 
 The executable is linked `/MT`. `Publish.ps1` fails if a static build still needs a VC runtime DLL beside the exe, or if some other non-system DLL is missing. `vulkan-1.dll` is recorded as a driver import and is not copied into the zip.
 
-## What the draft workflow does, and that it has not run
+## What the draft workflow does
 
 `.github/workflows/build.yml` runs on push, pull request, and manual dispatch. It configures with Visual Studio 2026 or 2022, builds Release, runs CTest and both test executables, runs `py -3 scripts/architecture_diagram.py --check`, runs `Publish.ps1`, and uploads the zip and the `.sha256` file. Hosted CI does not launch the Vulkan window. `render_tests` may skip when no Vulkan 1.3 device exists. A skip is not a test failure. There is no separate GPU smoke job.
 
@@ -59,9 +59,9 @@ The executable is linked `/MT`. `Publish.ps1` fails if a static build still need
 
 Do not treat a green CI run on an older commit, or a zip SHA recorded in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md), as the artifact for a later commit. Build the commit you intend to ship, and record the new checksum.
 
-## Not done for 0.1
+## Not done
 
 - Clean-machine launch of an extracted zip, on a PC without Visual Studio, the Vulkan SDK, or a development `PATH`, was not run.
 - The executable is not code-signed. There is no certificate step.
 - No installer and no auto-update.
-- Tagging `v0.1.0` and opening the draft are still a separate publication decision. Do them only after the checklist gates that are still **NOT RUN** are either passed or explicitly accepted.
+- Tagging a version and publishing its draft are a separate publication decision. Do them only after the checklist gates that are still **NOT RUN** are either passed or explicitly accepted.

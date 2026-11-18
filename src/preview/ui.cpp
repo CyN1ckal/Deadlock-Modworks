@@ -9,6 +9,9 @@
 
 #include <imgui_internal.h>
 
+#include <cmath>
+#include <vector>
+
 namespace skeleton_repair::ui {
 
 void CopyToClipboard(const std::string& text) {
@@ -66,6 +69,135 @@ void SectionLabel(const char* text) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextUnformatted(text);
     ImGui::PopStyleColor();
+}
+
+void Heading(const char* text) {
+    ImFont* font = theme::HeadingFont();
+    if (font) ImGui::PushFont(font);
+    ImGui::TextUnformatted(text);
+    if (font) ImGui::PopFont();
+    ImGui::Dummy({0, ImGui::GetStyle().ItemSpacing.y * .5f});
+}
+
+bool PrimaryButton(const char* label, const ImVec2& size, bool enabled) {
+    if (enabled) theme::PushPrimaryButton();
+    ImGui::BeginDisabled(!enabled);
+    const bool pressed = ImGui::Button(label, size);
+    ImGui::EndDisabled();
+    if (enabled) theme::PopPrimaryButton();
+    return pressed;
+}
+
+bool Toggle(const char* id, bool* value) {
+    const float frame = ImGui::GetFrameHeight();
+    const float height = std::round(frame * .8f);
+    const float width = std::round(height * 1.8f);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const bool pressed = ImGui::InvisibleButton(id, {width, frame});
+    if (pressed) *value = !*value;
+    const bool hovered = ImGui::IsItemHovered();
+    const ImVec2 min{origin.x, origin.y + (frame - height) * .5f};
+    const ImVec2 max{min.x + width, min.y + height};
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImVec4 fill = *value ? (hovered ? theme::kPrimaryHover : theme::kPrimary) : (hovered ? theme::kRaisedHover : theme::kRaised);
+    draw->AddRectFilled(min, max, ImGui::GetColorU32(fill), height * .5f);
+    if (!*value) draw->AddRect(min, max, ImGui::GetColorU32(theme::kBorder), height * .5f);
+    const float radius = height * .5f - 3.f;
+    const float x = *value ? max.x - height * .5f : min.x + height * .5f;
+    draw->AddCircleFilled({x, min.y + height * .5f}, radius, ImGui::GetColorU32(*value ? theme::kOnPrimary : theme::kSecondary));
+    if (ImGui::IsItemFocused() && ImGui::GetIO().NavVisible)
+        draw->AddRect({min.x - 2, min.y - 2}, {max.x + 2, max.y + 2}, ImGui::GetColorU32(theme::kFocus), height * .5f + 2, 0, 2.f);
+    return pressed;
+}
+
+float BadgeWidth(const char* text) {
+    return ImGui::CalcTextSize(text).x + ImGui::GetFontSize() * .8f;
+}
+
+void Badge(const char* text, const ImVec4& color) {
+    const ImVec2 size{BadgeWidth(text), ImGui::GetTextLineHeight() + 2.f};
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(size);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, {origin.x + size.x, origin.y + size.y}, ImGui::GetColorU32({color.x, color.y, color.z, .16f}), size.y * .5f);
+    draw->AddText({origin.x + ImGui::GetFontSize() * .4f, origin.y + 1.f}, ImGui::GetColorU32(color), text);
+}
+
+namespace {
+struct BannerFrame {
+    ImVec4 Tone;
+    ImVec2 Start;
+    float Right;
+};
+std::vector<BannerFrame> g_banners;
+}  // namespace
+
+void BeginBanner(const ImVec4& tone) {
+    const ImVec2 pad = ImGui::GetStyle().FramePadding;
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float right = start.x + ImGui::GetContentRegionAvail().x - pad.x * 1.5f;
+    g_banners.push_back({tone, start, right});
+    ImGui::GetWindowDrawList()->ChannelsSplit(2);
+    ImGui::GetWindowDrawList()->ChannelsSetCurrent(1);
+    ImGui::SetCursorScreenPos({start.x + pad.x * 2.f, start.y + pad.y * 1.5f});
+    ImGui::BeginGroup();
+    ImGui::PushTextWrapPos(right - ImGui::GetWindowPos().x + ImGui::GetScrollX());
+}
+
+float BannerRight() {
+    return g_banners.empty() ? ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x : g_banners.back().Right;
+}
+
+void EndBanner() {
+    ImGui::PopTextWrapPos();
+    ImGui::EndGroup();
+    const BannerFrame frame = g_banners.back();
+    g_banners.pop_back();
+    const ImVec2 pad = ImGui::GetStyle().FramePadding;
+    const ImVec2 max{frame.Right + pad.x * 1.5f, ImGui::GetItemRectMax().y + pad.y * 1.5f};
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->ChannelsSetCurrent(0);
+    const float rounding = ImGui::GetStyle().FrameRounding;
+    draw->AddRectFilled(frame.Start, max, ImGui::GetColorU32({frame.Tone.x, frame.Tone.y, frame.Tone.z, .12f}), rounding);
+    draw->AddRectFilled(frame.Start, {frame.Start.x + 3.f, max.y}, ImGui::GetColorU32(frame.Tone), rounding, ImDrawFlags_RoundCornersLeft);
+    draw->ChannelsMerge();
+    ImGui::SetCursorScreenPos(frame.Start);
+    ImGui::Dummy({max.x - frame.Start.x, max.y - frame.Start.y});
+}
+
+bool NavItem(const char* icon, const char* label, bool selected, const char* badge, bool dim, const ImVec4* badge_color) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float height = std::round(ImGui::GetFrameHeight() * 1.25f);
+    const float width = ImGui::GetContentRegionAvail().x;
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const ImVec2 max{min.x + width, min.y + height};
+    ImGui::PushID(label);
+    const bool pressed = ImGui::InvisibleButton("##nav", {width, height});
+    ImGui::PopID();
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    if (selected || hovered)
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(selected ? theme::kSelection : theme::kRaised), style.FrameRounding);
+    if (selected) draw->AddRectFilled(min, {min.x + 3.f, max.y}, ImGui::GetColorU32(theme::kFocus), style.FrameRounding, ImDrawFlags_RoundCornersLeft);
+    const float text_y = min.y + (height - ImGui::GetTextLineHeight()) * .5f;
+    float x = min.x + style.FramePadding.x * 1.5f;
+    const ImU32 text = ImGui::GetColorU32(selected ? theme::kText : dim ? theme::kSecondary : theme::kText);
+    if (theme::IconsLoaded() && icon != nullptr) {
+        draw->AddText({x, text_y}, ImGui::GetColorU32(selected ? theme::kFocus : theme::kSecondary), icon);
+        x += ImGui::GetFontSize() * 1.25f + style.ItemSpacing.x;
+    }
+    draw->AddText({x, text_y}, text, label);
+    if (badge != nullptr && badge[0] != '\0') {
+        const ImVec2 size = ImGui::CalcTextSize(badge);
+        const ImVec4 color = badge_color ? *badge_color : theme::kSecondary;
+        const float right = max.x - style.FramePadding.x * 1.5f;
+        const ImVec2 pill_min{right - size.x - ImGui::GetFontSize() * .7f, min.y + (height - size.y - 2.f) * .5f};
+        draw->AddRectFilled(pill_min, {right, pill_min.y + size.y + 2.f}, ImGui::GetColorU32({color.x, color.y, color.z, .16f}), (size.y + 2.f) * .5f);
+        draw->AddText({pill_min.x + ImGui::GetFontSize() * .35f, pill_min.y + 1.f}, ImGui::GetColorU32(color), badge);
+    }
+    if (ImGui::IsItemFocused() && ImGui::GetIO().NavVisible)
+        draw->AddRect(min, max, ImGui::GetColorU32(theme::kFocus), style.FrameRounding, 0, 2.f);
+    return pressed;
 }
 
 void HelpMarker(const char* text) {

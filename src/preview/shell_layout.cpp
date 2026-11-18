@@ -81,9 +81,9 @@ void DrawShortcutsDialog() {
     static const char* const kShortcuts[][2] = {
         {"Ctrl+O", "Add mods"}, {"Ctrl+Shift+O", "Add every mod in a folder"}, {"Ctrl+G", "Choose the game archive"},
         {"Ctrl+B", "Build the pack as a VPK"}, {"Ctrl+F", "Search skins, packages and sources"}, {"F5", "Reopen every source and reload thumbnails"},
-        {"Ctrl+1 ... Ctrl+8", "Library, builder, history, repairs, inspector, multi view, mods, get mods"}, {"Alt+Left", "Back to the previous page"},
-        {"Ctrl+Shift+E", "Show or hide the explorer"}, {"View > Workspace", "Focus the workspace"},
-        {"View > Reset layout", "Restore the explorer and workspace split"},
+        {"Ctrl+1 ... Ctrl+8", "My mods, Discover, Skins, Pack builder, Repairs, Inspector, Side by side, History"}, {"Alt+Left", "Back to the previous page"},
+        {"Ctrl+Shift+E", "Show or hide the mod files panel"}, {"Ctrl+,", "Settings"}, {"View > Workspace", "Focus the workspace"},
+        {"View > Reset layout", "Put the mod files panel back beside the page"},
         {"Double-click", "Inspect a skin, list a package's files, or view a version"},
         {"Enter / Space", "Inspect a skin or list a package's files / include it in the pack"}, {"Ctrl+Wheel", "Thumbnail size in the gallery"},
         {"Drag / right-drag / wheel", "Orbit / pan / zoom a viewport"}, {"F", "Frame the model in the hovered viewport"},

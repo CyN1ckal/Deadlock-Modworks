@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DeadlockModworks VERSION 0.1.0 LANGUAGES C CXX)
+project(DeadlockModworks VERSION 0.2.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Deadlock Modworks builds on Windows x64.")

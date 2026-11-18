@@ -430,7 +430,7 @@ void MultiView::Draw(const std::vector<LibraryModel>& library) {
     ImGui::SetItemTooltip("Orbit, pan and zoom move every viewport together");
 
     if (character_.empty() && std::none_of(slots_.begin(), slots_.end(), [](const Slot& slot) { return slot.Model.has_value(); })) {
-        ImGui::TextDisabled("Right-click a skin in the library and choose Multi view, or pick a character above.");
+        ImGui::TextDisabled("Right-click a skin on the Skins page and choose Side by side, or pick a hero above.");
         return;
     }
 

@@ -1,0 +1,411 @@
+<title>Modworks UX Redesign</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column (~68ch) with wide breakout bands for app mockups. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --fg: #17202a; --muted: #5a6876; --line: #d9e0e7;
+  --accent: #2f6fa8; --accent-soft: #e3eef8; --good: #2e8a4a; --warn: #a86a12; --bad: #b8403b;
+  --display: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, monospace;
+  /* App mockup tokens: the app's real palette from src/preview/theme.hpp, fixed dark in both themes. */
+  --app-ws: #141b23; --app-panel: #1d2833; --app-border: #344657; --app-raised: #2a3948; --app-hover: #3a4c5e;
+  --app-text: #e6edf3; --app-sec: #9baebe; --app-dim: #6f8496; --app-sel: #1e3c56;
+  --app-primary: #3b7dbf; --app-primary-h: #4a8ccc; --app-good: #6bcc85; --app-warn: #f2b357; --app-bad: #f56b66;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f151b; --surface: #17202a; --fg: #e6edf3; --muted: #9baebe; --line: #2a3948;
+  --accent: #7fb3e0; --accent-soft: #1b3248; --good: #6bcc85; --warn: #f2b357; --bad: #f56b66; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f151b; --surface: #17202a; --fg: #e6edf3; --muted: #9baebe; --line: #2a3948;
+  --accent: #7fb3e0; --accent-soft: #1b3248; --good: #6bcc85; --warn: #f2b357; --bad: #f56b66; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 48px 96px }
+.col { max-width: 720px; margin-inline: auto }
+.wide { max-width: 1120px; margin-inline: auto }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.15; margin: 0 }
+h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 800; letter-spacing: -.02em }
+h2 { font-size: 26px; font-weight: 700; margin-top: 64px; margin-bottom: 12px }
+h3 { font-size: 17px; font-weight: 700; margin-top: 28px; margin-bottom: 6px }
+p { margin: 0 0 14px }
+.eyebrow { font: 600 12px/1 var(--body); text-transform: uppercase; letter-spacing: .1em; color: var(--accent); margin-bottom: 14px }
+.lede { font-size: 18px; color: var(--muted); margin-top: 16px }
+code, .mono { font-family: var(--mono); font-size: .86em }
+code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px }
+a { color: var(--accent) }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 20px; color: var(--muted); font-size: 13px }
+
+/* Findings */
+.findings { display: grid; gap: 0; border-top: 1px solid var(--line); margin-top: 16px }
+.finding { display: grid; grid-template-columns: 150px 1fr; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line) }
+.finding > * { min-width: 0 }
+.finding .tag { font: 600 12px/1.4 var(--body); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding-top: 3px }
+.finding p { margin: 0 }
+.finding .ev { font-size: 13px; color: var(--muted); margin-top: 6px }
+@media (max-width: 560px) { .finding { grid-template-columns: 1fr; gap: 4px } }
+
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px }
+.principle { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px }
+.principle b { display: block; font-family: var(--display); font-size: 16px; margin-bottom: 4px }
+.principle span { color: var(--muted); font-size: 14px }
+
+/* IA map */
+.ia { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px }
+.ia > div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0 }
+.ia h4 { margin: 0 0 10px; font: 600 12px/1 var(--body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
+.ia ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px }
+.ia li { display: flex; justify-content: space-between; gap: 8px }
+.ia .from { color: var(--muted); font-size: 12px; text-align: right }
+.ia .grp { font: 600 11px/1 var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-top: 8px }
+@media (max-width: 640px) { .ia { grid-template-columns: 1fr } }
+
+/* Copy table */
+.tbl { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface) }
+table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 560px }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font: 600 12px/1.3 var(--body); text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
+tr:last-child td { border-bottom: 0 }
+td.old { color: var(--muted); font-family: var(--mono); font-size: 12.5px; width: 42% }
+
+/* Mockups */
+.fig { margin-top: 24px }
+.cap { color: var(--muted); font-size: 13px; margin-top: 10px; max-width: 720px }
+.scroll { overflow-x: auto; border-radius: 10px; box-shadow: 0 10px 40px rgba(10,20,30,.25) }
+.app { min-width: 980px; background: var(--app-ws); color: var(--app-text); font: 13px/1.45 var(--body); border: 1px solid var(--app-border); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: 32px 1fr }
+.titlebar { display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--app-panel); border-bottom: 1px solid var(--app-border); color: var(--app-sec); font-size: 12px }
+.titlebar .logo { width: 16px; height: 16px; border: 1.5px solid var(--app-text); border-radius: 3px; display: grid; place-items: center; font: 800 9px var(--display); color: var(--app-text) }
+.titlebar .spacer { flex: 1 }
+.body { display: grid; grid-template-columns: 196px 1fr; min-height: 560px }
+.rail { background: var(--app-panel); border-right: 1px solid var(--app-border); padding: 12px 8px; display: flex; flex-direction: column; gap: 2px }
+.rail .sec { font: 600 10.5px/1 var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--app-dim); padding: 14px 10px 6px }
+.rail .sec:first-child { padding-top: 2px }
+.nav { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; color: var(--app-sec) }
+.nav svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8 }
+.nav.on { background: var(--app-sel); color: var(--app-text); box-shadow: inset 2px 0 0 var(--app-primary) }
+.nav .kbd { margin-left: auto; font: 10.5px var(--mono); color: var(--app-dim) }
+.nav .count { margin-left: auto; font-size: 11px; background: var(--app-raised); border-radius: 9px; padding: 0 7px; color: var(--app-sec) }
+.rail .grow { flex: 1 }
+.gamepill { margin: 8px 2px 0; background: var(--app-ws); border: 1px solid var(--app-border); border-radius: 8px; padding: 10px; display: grid; gap: 2px }
+.gamepill .st { display: flex; align-items: center; gap: 7px; font-weight: 600 }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--app-good); flex: none }
+.dot.warn { background: var(--app-warn) }
+.gamepill small { color: var(--app-dim); font-size: 11.5px }
+.main { display: grid; grid-template-rows: auto auto 1fr auto; min-width: 0 }
+.head { display: flex; align-items: center; gap: 12px; padding: 18px 22px 12px }
+.head h5 { font: 700 20px/1 var(--display); margin: 0; letter-spacing: -.01em }
+.head .grow { flex: 1 }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; background: var(--app-raised); border: 1px solid var(--app-border); color: var(--app-text); font-size: 12.5px; white-space: nowrap }
+.btn.primary { background: var(--app-primary); border-color: var(--app-primary-h); font-weight: 600 }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--app-sec) }
+.btn.lg { padding: 9px 18px; font-size: 13.5px }
+.select { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; background: var(--app-ws); border: 1px solid var(--app-border); font-size: 12.5px }
+.select .lbl { color: var(--app-dim) }
+.search { flex: 1; max-width: 300px; padding: 6px 10px; border-radius: 6px; background: var(--app-ws); border: 1px solid var(--app-border); color: var(--app-dim); font-size: 12.5px }
+.banner { margin: 0 22px 12px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(242,179,87,.1); border: 1px solid rgba(242,179,87,.35) }
+.banner b { color: var(--app-warn) }
+.banner .grow { flex: 1; color: var(--app-sec) }
+.list { padding: 0 22px 16px; display: grid; gap: 8px; align-content: start }
+.mod { display: grid; grid-template-columns: 52px 1fr auto auto; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 8px; background: var(--app-panel); border: 1px solid var(--app-border) }
+.mod.off { opacity: .62 }
+.thumb { width: 52px; height: 52px; border-radius: 6px; background: linear-gradient(135deg, var(--t1), var(--t2)); position: relative; overflow: hidden }
+.thumb::after { content: ""; position: absolute; left: 50%; bottom: -8px; width: 30px; height: 40px; transform: translateX(-50%); border-radius: 15px 15px 4px 4px; background: rgba(0,0,0,.28) }
+.mod .name { font-weight: 600; font-size: 13.5px }
+.mod .sub { color: var(--app-dim); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--app-border); color: var(--app-sec); white-space: nowrap }
+.badge.warn { color: var(--app-warn); border-color: rgba(242,179,87,.4) }
+.badge.info { color: #8ec1ea; border-color: rgba(142,193,234,.35) }
+.toggle { width: 36px; height: 20px; border-radius: 10px; background: var(--app-raised); border: 1px solid var(--app-border); position: relative }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--app-sec) }
+.toggle.on { background: var(--app-primary); border-color: var(--app-primary-h) }
+.toggle.on::after { left: 18px; background: #fff }
+.applybar { display: flex; align-items: center; gap: 14px; padding: 12px 22px; background: var(--app-panel); border-top: 1px solid var(--app-border) }
+.applybar .grow { flex: 1; color: var(--app-sec) }
+.applybar b { color: var(--app-text) }
+.menu { position: absolute; right: 22px; top: 46px; width: 230px; background: var(--app-panel); border: 1px solid var(--app-border); border-radius: 8px; padding: 6px; box-shadow: 0 12px 30px rgba(0,0,0,.45); font-size: 12.5px }
+.menu div { padding: 6px 10px; border-radius: 5px; display: flex; justify-content: space-between; color: var(--app-text) }
+.menu div.h { background: var(--app-sel) }
+.menu hr { border: 0; border-top: 1px solid var(--app-border); margin: 5px 4px }
+.menu .k { color: var(--app-dim); font-family: var(--mono); font-size: 11px }
+.menu .sub2 { color: var(--app-dim) }
+
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px }
+.pair > div { min-width: 0 }
+@media (max-width: 860px) { .pair { grid-template-columns: 1fr } }
+.mini { min-width: 0; background: var(--app-ws); color: var(--app-text); font: 13px/1.5 var(--body); border: 1px solid var(--app-border); border-radius: 10px; padding: 28px; box-shadow: 0 10px 40px rgba(10,20,30,.25) }
+.mini h5 { font: 700 22px/1.15 var(--display); margin: 0 0 6px }
+.mini .s { color: var(--app-sec); margin-bottom: 20px }
+.steps { display: grid; gap: 10px }
+.step { display: grid; grid-template-columns: 28px 1fr auto; gap: 12px; align-items: center; padding: 12px; border-radius: 8px; border: 1px solid var(--app-border); background: var(--app-panel) }
+.step .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; background: var(--app-raised); color: var(--app-sec) }
+.step.done .n { background: rgba(107,204,133,.18); color: var(--app-good) }
+.step.cur { border-color: var(--app-primary) }
+.step.cur .n { background: var(--app-primary); color: #fff }
+.step small { display: block; color: var(--app-dim); font-size: 12px }
+.split { display: inline-flex }
+.split .btn:first-child { border-radius: 6px 0 0 6px }
+.split .btn:last-child { border-radius: 0 6px 6px 0; border-left: 1px solid rgba(255,255,255,.25); padding-inline: 8px }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 12.5px; margin: 16px 0 }
+.kv span:nth-child(odd) { color: var(--app-dim) }
+
+.phase { display: grid; grid-template-columns: 110px 1fr; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line) }
+.phase > * { min-width: 0 }
+.phase .when { font: 700 15px var(--display) }
+.phase .when small { display: block; font: 500 12px var(--body); color: var(--muted); margin-top: 2px }
+.phase ul { margin: 0; padding-left: 18px }
+.phase li { margin-bottom: 4px }
+@media (max-width: 560px) { .phase { grid-template-columns: 1fr; gap: 4px } }
+.q { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 14px 16px; margin-top: 10px }
+.q b { display: block; margin-bottom: 2px }
+.q span { color: var(--muted); font-size: 14px }
+</style>
+
+<header class="col">
+  <div class="eyebrow">Deadlock Modworks · UX proposal</div>
+  <h1>One app, two depths: a mod manager up front, a model workshop one click away</h1>
+  <p class="lede">The features are solid. The layout follows the code's modules, so a player who only wants three skins in their game has to read a lot of it. This proposal reorganizes around what people come to do, keeps every expert tool, and changes very little underneath.</p>
+  <div class="meta"><span>Based on <span class="mono">src/preview/*</span> at <span class="mono">2f6a545</span></span><span>Dear ImGui 1.91.9b (docking)</span><span>18 Nov 2026</span></div>
+</header>
+
+<section class="col">
+  <h2>What I found</h2>
+  <p>I read the page tabs, menus, panels and theme, and looked at the captured screenshots. These are the issues that cost a non-developer the most.</p>
+  <div class="findings">
+    <div class="finding"><div class="tag">Navigation</div><div><p>Eight equal tabs, ordered by when each module was built. The two things most players want, <b>Get mods</b> and <b>Mods → Apply to game</b>, are tabs 7 and 8 on the far right. Model inspector and Multi view get the same weight as the core loop.</p><div class="ev">DrawPageTabs in main.cpp:1846</div></div></div>
+    <div class="finding"><div class="tag">Two install paths</div><div><p>Players can enable a mod and press <b>Apply to game</b>, or build a VPK and copy it into <code>addons</code> by hand. The README's first-run steps teach the manual path first, so new users meet the harder route before the easy one.</p><div class="ev">README "First run" steps 6–8 vs. mods_panel.cpp Apply</div></div></div>
+    <div class="finding"><div class="tag">Always-on sidebar</div><div><p>The Sources panel shows on every page, including Get mods and Mods where it has no job. It carries the library path, the game archive path, Share and Add shared. That is setup detail sitting in prime space.</p><div class="ev">DrawExplorer, main.cpp:1663</div></div></div>
+    <div class="finding"><div class="tag">Vocabulary</div><div><p>A user meets mod, source, package, archive, VPK, pack, skin, model, library, game archive, addons and citadel. Several mean nearly the same thing to a player.</p></div></div>
+    <div class="finding"><div class="tag">Copy</div><div><p>Messages are precise and honest, written as disclaimers. The empty library leads with a paragraph about textures stored in the game archive before the user has done anything.</p></div></div>
+    <div class="finding"><div class="tag">Hierarchy</div><div><p>Primary buttons (<span class="mono">#2A5678</span>) are barely distinct from normal ones (<span class="mono">#2A3948</span>). 6 px padding, one font size, no page headings. Every control looks equally important, so nothing reads as the next step.</p><div class="ev">theme.cpp, theme.hpp</div></div></div>
+    <div class="finding"><div class="tag">State as sentences</div><div><p>Whether changes are applied, whether Deadlock is running, and whether <code>gameinfo.gi</code> loads addons are lines of coloured text. Game connection is a dot and a "..." button.</p><div class="ev">ModsPanel::DrawGameState</div></div></div>
+    <div class="finding"><div class="tag">Repairs are hidden</div><div><p>After a game update, users must already know that skins can break and that a Skin repairs tab exists. The app knows the game changed but doesn't say so.</p></div></div>
+  </div>
+</section>
+
+<section class="col">
+  <h2>Principles</h2>
+  <div class="principles">
+    <div class="principle"><b>Goals before modules</b><span>Navigation names what a player wants to do, in the order they do it.</span></div>
+    <div class="principle"><b>One happy path</b><span>Discover → turn on → Apply → play. Everything else branches from it.</span></div>
+    <div class="principle"><b>Group, don't hide</b><span>Expert tools stay one click away in a labelled Tools section. Shortcuts and right-click menus keep working.</span></div>
+    <div class="principle"><b>State is a component</b><span>Game status, pending changes and broken mods get persistent UI, not a sentence that scrolls away.</span></div>
+    <div class="principle"><b>Say it, then explain</b><span>Lead with the action in plain words. Caveats move to tooltips and a "Learn more" link.</span></div>
+  </div>
+</section>
+
+<section class="col">
+  <h2>New structure</h2>
+  <p>The top tab bar becomes a left navigation rail with two groups. The rail replaces the Sources sidebar, whose contents move to where they are used: the source list becomes a filter on <b>Skins</b> and <b>Pack builder</b>, and game and library settings move to <b>Settings</b>.</p>
+  <div class="ia">
+    <div>
+      <h4>Today</h4>
+      <ul>
+        <li>Mod library <span class="from">Ctrl+1</span></li>
+        <li>VPK builder (n) <span class="from">Ctrl+2</span></li>
+        <li>Version history <span class="from">Ctrl+3</span></li>
+        <li>Skin repairs <span class="from">Ctrl+4</span></li>
+        <li>Model inspector <span class="from">Ctrl+5</span></li>
+        <li>Multi view <span class="from">Ctrl+6</span></li>
+        <li>Mods <span class="from">Ctrl+7</span></li>
+        <li>Get mods <span class="from">Ctrl+8</span></li>
+        <li style="color:var(--muted)">+ Sources sidebar on every page</li>
+      </ul>
+    </div>
+    <div>
+      <h4>Proposed</h4>
+      <ul>
+        <li class="grp">Play</li>
+        <li>My mods <span class="from">was Mods</span></li>
+        <li>Discover <span class="from">was Get mods</span></li>
+        <li>Skins <span class="from">was Mod library, grouped by hero</span></li>
+        <li class="grp">Tools</li>
+        <li>Pack builder <span class="from">was VPK builder</span></li>
+        <li>Repairs <span class="from">was Skin repairs</span></li>
+        <li>Inspector <span class="from">was Model inspector</span></li>
+        <li>Side by side <span class="from">was Multi view</span></li>
+        <li>History <span class="from">was Version history</span></li>
+        <li class="grp">Footer</li>
+        <li>Game status card · Settings</li>
+      </ul>
+    </div>
+  </div>
+  <p style="margin-top:16px">Shortcuts follow the new order (Ctrl+1 = My mods). If muscle memory matters to current users, keep the old numbers for one release and show both in the rail tooltips.</p>
+</section>
+
+<section class="wide">
+  <div class="col"><h2>My mods, the new home screen</h2>
+  <p>This merges the job of the Mods tab with the parts of the library a player cares about. Every row is a mod file with a picture, a switch and plain-language badges. Load order and profiles stay, but they stop crowding the toolbar.</p></div>
+  <div class="fig">
+    <div class="scroll"><div class="app" aria-label="Mockup of the proposed My mods screen">
+      <div class="titlebar"><div class="logo">M</div>Deadlock Modworks<div class="spacer"></div>—&nbsp;&nbsp;☐&nbsp;&nbsp;✕</div>
+      <div class="body">
+        <nav class="rail">
+          <div class="sec">Play</div>
+          <div class="nav on"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/></svg>My mods<span class="count">12</span></div>
+          <div class="nav"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Discover</div>
+          <div class="nav"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Skins</div>
+          <div class="sec">Tools</div>
+          <div class="nav"><svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/></svg>Pack builder<span class="kbd">Ctrl+4</span></div>
+          <div class="nav"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4Z"/></svg>Repairs<span class="count" style="color:var(--app-warn)">3</span></div>
+          <div class="nav"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>Inspector<span class="kbd">Ctrl+6</span></div>
+          <div class="nav"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="8" height="14" rx="1"/><rect x="13" y="5" width="8" height="14" rx="1"/></svg>Side by side<span class="kbd">Ctrl+7</span></div>
+          <div class="nav"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History<span class="kbd">Ctrl+8</span></div>
+          <div class="grow"></div>
+          <div class="gamepill"><div class="st"><span class="dot"></span>Deadlock ready</div><small>Steam · addons loaded</small></div>
+          <div class="nav"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.07-.4.1-.8.1-1.2Z"/></svg>Settings</div>
+        </nav>
+        <div class="main" style="position:relative">
+          <div class="head">
+            <h5>My mods</h5>
+            <div class="select"><span class="lbl">Profile</span>Ranked ▾</div>
+            <div class="grow"></div>
+            <div class="search">Search my mods</div>
+            <div class="btn">Load order</div>
+            <div class="btn primary">+ Add mods</div>
+          </div>
+          <div class="banner"><b>Deadlock updated 12 Nov.</b><span class="grow">3 skins use the old skeleton and may look broken in game.</span><span class="btn">Details</span><span class="btn primary">Fix 3 skins</span></div>
+          <div class="list">
+            <div class="mod"><div class="thumb" style="--t1:#6a3d8f;--t2:#c27a3a"></div><div><div class="name">Lady Geist — Crimson Opera</div><div class="sub"><span>GameBanana · Velvet</span><span>3 skins</span></div></div><div class="badges"><span class="badge warn">Needs repair</span></div><div class="toggle on"></div></div>
+            <div class="mod"><div class="thumb" style="--t1:#2f5f7a;--t2:#86b8a4"></div><div><div class="name">Haze — Arctic Ops</div><div class="sub"><span>GameBanana · frostbyte</span><span>1 skin</span></div></div><div class="badges"><span class="badge info">Wins 2 files over Haze Classic</span></div><div class="toggle on"></div></div>
+            <div class="mod"><div class="thumb" style="--t1:#7a5b2f;--t2:#d8b46a"></div><div><div class="name">Abrams Brass Knuckle</div><div class="sub"><span>Built in Pack builder</span><span>2 skins · 14 files</span></div></div><div class="badges"><span class="badge">Your pack</span></div><div class="toggle on"></div></div>
+            <div class="mod off"><div class="thumb" style="--t1:#3a4c5e;--t2:#68798a"></div><div><div class="name">Haze Classic</div><div class="sub"><span>Added from file</span><span>1 skin</span></div></div><div class="badges"></div><div class="toggle"></div></div>
+            <div class="mod off"><div class="thumb" style="--t1:#3d6b47;--t2:#a3c47b"></div><div><div class="name">Cleaner HUD</div><div class="sub"><span>GameBanana · uiwork</span><span>No skins · 31 files</span></div></div><div class="badges"></div><div class="toggle"></div></div>
+          </div>
+          <div class="applybar"><span class="dot warn"></span><span class="grow"><b>2 changes</b> aren't in the game yet. Turned on Abrams Brass Knuckle, turned off Cleaner HUD.</span><span class="btn ghost">Undo</span><span class="btn primary lg">Apply to game</span></div>
+          <div class="menu" aria-hidden="true">
+            <div class="h">Ranked <span class="k">7 on</span></div>
+            <div>Default <span class="k">12 on</span></div>
+            <div>Screenshots <span class="k">4 on</span></div>
+            <hr><div>New profile…</div><div>Rename “Ranked”…</div><div class="sub2">Delete “Ranked”…</div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <p class="cap">Mockup in the app's own palette, profile menu shown open. Mod names and authors are examples. The sticky Apply bar appears only when the enabled set differs from <code>addons</code>, and it changes to "Close Deadlock to apply" while the game runs. Conflict badges reuse the existing <code>conflicts_</code> data in ModsPanel.</p>
+  </div>
+</section>
+
+<section class="col">
+  <h3>What changes on this screen</h3>
+  <ul>
+    <li><b>Switches, not checkboxes.</b> A row reads as on or off at a glance. Disabled rows dim.</li>
+    <li><b>Profile actions live in the profile menu.</b> New, Rename and Delete leave the toolbar. Enable all and Disable all move to the row's right-click menu and a multi-select bar.</li>
+    <li><b>Load order is a mode.</b> The up/down arrows on every row become a "Load order" view with drag handles and the conflict list beside it. Most users never open it; the conflict badge tells them when it matters.</li>
+    <li><b>The Apply bar is the one primary action.</b> It counts changes, names them, offers Undo, and explains why it's disabled.</li>
+    <li><b>gameinfo.gi</b> stops being a warning line. If addons aren't loaded, Apply handles it with a one-time confirm: "Deadlock isn't set up to load mods yet. Modworks will add one line to gameinfo.gi."</li>
+  </ul>
+</section>
+
+<section class="wide">
+  <div class="col"><h2>First run and the pack builder</h2></div>
+  <div class="pair">
+    <div>
+      <div class="mini">
+        <h5>Let's get your first mod in game</h5>
+        <div class="s">Three steps. You can skip any of them and come back later.</div>
+        <div class="steps">
+          <div class="step done"><div class="n">✓</div><div>Found Deadlock<small>Steam · C:\Program Files (x86)\Steam\…\Deadlock</small></div><span class="btn ghost">Change</span></div>
+          <div class="step cur"><div class="n">2</div><div>Get a mod<small>Browse GameBanana, or add VPK files you already have</small></div><span class="btn primary">Discover</span></div>
+          <div class="step"><div class="n">3</div><div>Apply to game<small>Close Deadlock first. Modworks only touches files it placed.</small></div><span></span></div>
+        </div>
+      </div>
+      <p class="cap">Replaces the three-paragraph empty state. Steam detection already runs on start, so step 1 is usually done before the user sees it. The game-archive caveats move to the Skins page, where they apply.</p>
+    </div>
+    <div>
+      <div class="mini">
+        <h5>Pack builder</h5>
+        <div class="s">Combine skins from several mods into one pack.</div>
+        <div class="kv"><span>Selected</span><span>6 skins from 3 mods</span><span>Name</span><span>Abrams Brass Knuckle</span><span>Uses game files</span><span>Yes · Deadlock connected</span></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <div class="split"><span class="btn primary lg">Add to My mods</span><span class="btn primary lg">▾</span></div>
+          <span class="btn ghost">Clear selection</span>
+        </div>
+        <div style="margin-top:10px;color:var(--app-dim);font-size:12px">▾ Export VPK file…  ·  Ctrl+B</div>
+      </div>
+      <p class="cap">"Build as mod" becomes the default, labelled by its result. "Build VPK…" moves into the split button for people who share packs or install by hand.</p>
+    </div>
+  </div>
+</section>
+
+<section class="col">
+  <h2>Words</h2>
+  <p>One noun per idea. A <b>mod</b> is a file you added. A <b>skin</b> is one model inside it. A <b>pack</b> is something you built. "Source", "package" and "archive" leave the main UI and stay in Tools and tooltips.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Today</th><th>Proposed</th></tr></thead>
+    <tbody>
+      <tr><td class="old">Choose game archive... (Ctrl+G)</td><td>Locate Deadlock…</td></tr>
+      <tr><td class="old">Deadlock connected  [...]</td><td>Game card: "Deadlock ready" with Change and Reconnect in its menu</td></tr>
+      <tr><td class="old">Changes not applied yet. Choose Apply to game.</td><td>Apply bar: "2 changes aren't in the game yet."</td></tr>
+      <tr><td class="old">Deadlock is running. Close it before applying, and restart it to load changes.</td><td>Apply button reads "Close Deadlock to apply", tooltip says to restart afterwards</td></tr>
+      <tr><td class="old">The addons folder matches the enabled mods.</td><td>"Up to date" in the Apply bar's resting state</td></tr>
+      <tr><td class="old">gameinfo.gi does not load the addons folder, so Deadlock would ignore every mod. Apply offers to fix it.</td><td>Handled inside Apply. Shown once: "Deadlock isn't set up to load mods yet. Modworks will add one line to gameinfo.gi."</td></tr>
+      <tr><td class="old">Your library has no mods yet. You can browse the library and add mods without a connected game. Textures stored in the game, …</td><td>First-run checklist (above)</td></tr>
+      <tr><td class="old">Add shared library... / Share library...</td><td>Settings › Library › Import from a friend / Export my library</td></tr>
+      <tr><td class="old">Analyze mods / Repair supported mods</td><td>Check for problems / Fix problems</td></tr>
+      <tr><td class="old">Other files in addons (n)</td><td>"n files from other tools", with "Modworks won't touch these"</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="col">
+  <h2>Visual system</h2>
+  <p>Keep the palette; it already suits the game. Fix hierarchy with spacing, type size and a primary colour that stands out.</p>
+  <ul>
+    <li><b>Primary</b> goes from <span class="mono">#2A5678</span> to <span class="mono">#3B7DBF</span> with white text. Use it once per screen.</li>
+    <li><b>Spacing</b>: FramePadding 6×3 → 10×6, ItemSpacing 6×4 → 8×8, WindowPadding 6 → 16 on pages. Rounding 2 → 6 on cards and buttons.</li>
+    <li><b>Type</b>: load a second atlas entry at 1.4× for page titles, and a bold weight. ImGui 1.91.9 has no per-call font sizes, so these are extra <code>AddFontFromFileTTF</code> calls next to the body font.</li>
+    <li><b>Icons</b>: merge an icon font (Lucide or Material Symbols, both permissively licensed) into the body font with <code>MergeMode</code>. The rail, Apply bar and badges use them; menus mostly don't need them.</li>
+    <li><b>New widgets in ui.cpp</b>: <code>Toggle</code>, <code>Badge</code>, <code>NavItem</code>, <code>Banner</code>, <code>SplitButton</code>. Each is a small custom draw with <code>ImDrawList</code>.</li>
+  </ul>
+</section>
+
+<section class="col">
+  <h2>Keeping it powerful</h2>
+  <p>Nothing is removed. The Tools group is visible by default, under a quieter label. A <b>Settings › Interface › Show tools</b> switch can collapse it for people who only play; I'd leave it on for existing installs and off for fresh ones only if you're comfortable with that split.</p>
+  <ul>
+    <li>Every right-click menu stays, including copy hash, copy path and reveal in Explorer. Developer-only items (copy hash, snapshot id) move under a "Copy ▸" submenu so they don't lead.</li>
+    <li>Every shortcut stays. F1 still lists them.</li>
+    <li>Skins and Pack builder keep the dense grid/list switch and thumbnail size control; Tools pages keep their tables.</li>
+    <li>Status messages stay copyable. They move into a toast stack in the bottom right with "Copy" and "Dismiss".</li>
+  </ul>
+</section>
+
+<section class="col">
+  <h2>Rollout</h2>
+  <p>Ordered so each step ships on its own and the riskiest structural change comes after the cheap wins.</p>
+  <div style="border-top:1px solid var(--line)">
+    <div class="phase"><div class="when">Phase 1<small>copy and theme</small></div><ul>
+      <li>New spacing, primary colour and title font in <code>theme.cpp</code>.</li>
+      <li>Reorder and rename tabs in <code>DrawPageTabs</code>; My mods and Discover first.</li>
+      <li>Rewrite empty states and status lines per the Words table.</li>
+      <li>Hide the Sources sidebar on My mods and Discover.</li>
+    </ul></div>
+    <div class="phase"><div class="when">Phase 2<small>My mods</small></div><ul>
+      <li>Toggle, Badge and Banner widgets in <code>ui.cpp</code>.</li>
+      <li>Rebuild <code>ModsPanel::DrawList</code> as cards; move profile actions into the combo; Load order view.</li>
+      <li>Sticky Apply bar replacing <code>DrawGameState</code>'s text lines.</li>
+    </ul></div>
+    <div class="phase"><div class="when">Phase 3<small>navigation</small></div><ul>
+      <li>Left nav rail with icon font, replacing the tab bar and the Sources sidebar.</li>
+      <li>Game status card; game and library settings move to a Settings page.</li>
+      <li>Source filter moves into Skins and Pack builder.</li>
+    </ul></div>
+    <div class="phase"><div class="when">Phase 4<small>guided flows</small></div><ul>
+      <li>First-run checklist.</li>
+      <li>Game-update banner that runs Analyze and offers "Fix n skins".</li>
+      <li>"Add to My mods" as the Pack builder's default action.</li>
+      <li>Refresh the screenshots and the README first-run steps to lead with Apply to game.</li>
+    </ul></div>
+  </div>
+</section>
+
+<section class="col">
+  <h2>Decisions for you</h2>
+  <div class="q"><b>Should Tools be collapsible for players?</b><span>Grouped and always visible is safer for support and docs. A "Show tools" switch is cleaner for players who never touch them.</span></div>
+  <div class="q"><b>Renumber shortcuts now, or keep Ctrl+1–8 for one release?</b><span>Renumbering matches the new order; keeping them avoids surprising current users.</span></div>
+  <div class="q"><b>Where to start?</b><span>Phase 1 is a few hours and touches only theme, labels and copy. Phase 2 is where players feel the difference.</span></div>
+</section>
