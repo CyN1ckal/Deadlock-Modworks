@@ -6,7 +6,8 @@ layout(push_constant) uniform Push {
     vec4 color;
     // 0: push.color, 1: the vertex's dominant-bone color, 2: the color map.
     uint mode;
-    // Bit 0: discard texels with alpha below one half.
+    // Bit 0: discard texels with alpha below one half. Bit 1: skinned (vertex stage).
+    // Bit 2: multiply the color map by the mesh vertex color.
     uint flags;
 } push;
 
@@ -16,11 +17,16 @@ layout(location = 0) in vec3 in_normal;
 layout(location = 1) in vec3 in_world;
 layout(location = 2) in vec3 in_bone_color;
 layout(location = 3) in vec2 in_texcoord;
+layout(location = 4) in vec4 in_vertex_color;
 
 layout(location = 0) out vec4 out_color;
 
 void main() {
     vec4 texel = push.mode == 2u ? texture(color_map, in_texcoord) : vec4(1.0);
+    if ((push.flags & 4u) != 0u) {
+        // Vertex colors are display-encoded like bone colors; texels are already linear.
+        texel.rgb *= pow(in_vertex_color.rgb, vec3(2.2));
+    }
     if ((push.flags & 1u) != 0u && texel.a < 0.5) {
         discard;
     }

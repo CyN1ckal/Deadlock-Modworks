@@ -6,6 +6,7 @@ layout(location = 2) in vec4 in_bone_color;
 layout(location = 3) in vec2 in_texcoord;
 layout(location = 4) in uvec4 in_bones;
 layout(location = 5) in vec4 in_weights;
+layout(location = 6) in vec4 in_vertex_color;
 
 layout(push_constant) uniform Push {
     mat4 view_projection;
@@ -24,6 +25,7 @@ layout(location = 0) out vec3 out_normal;
 layout(location = 1) out vec3 out_world;
 layout(location = 2) out vec3 out_bone_color;
 layout(location = 3) out vec2 out_texcoord;
+layout(location = 4) out vec4 out_vertex_color;
 
 void main() {
     vec3 position = in_position;
@@ -51,5 +53,6 @@ void main() {
     out_world = position;
     out_bone_color = in_bone_color.rgb;
     out_texcoord = in_texcoord;
+    out_vertex_color = in_vertex_color;
     gl_Position = push.view_projection * vec4(position, 1.0);
 }

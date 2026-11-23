@@ -41,6 +41,7 @@ struct MeshPush {
 };
 
 constexpr uint32_t kSkinnedFlag = 2;
+constexpr uint32_t kVertexColorFlag = 4;
 
 std::optional<VkFormat> VulkanFormat(TextureFormat format) {
     switch (format) {
@@ -337,7 +338,7 @@ void ModelRenderer::CreatePipelines() {
 
         const VkVertexInputBindingDescription binding{0, lines ? static_cast<uint32_t>(sizeof(LineVertex)) : static_cast<uint32_t>(sizeof(PreviewVertex)),
             VK_VERTEX_INPUT_RATE_VERTEX};
-        const VkVertexInputAttributeDescription attributes[6] = {
+        const VkVertexInputAttributeDescription attributes[7] = {
             {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},
             lines ? VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(LineVertex, Color)}
                   : VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(PreviewVertex, Normal)},
@@ -345,11 +346,12 @@ void ModelRenderer::CreatePipelines() {
             {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(PreviewVertex, TexCoord)},
             {4, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(PreviewVertex, BoneIndices)},
             {5, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(PreviewVertex, BoneWeights)},
+            {6, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(PreviewVertex, VertexColor)},
         };
         VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         input.vertexBindingDescriptionCount = 1;
         input.pVertexBindingDescriptions = &binding;
-        input.vertexAttributeDescriptionCount = lines ? 2 : 6;
+        input.vertexAttributeDescriptionCount = lines ? 2 : 7;
         input.pVertexAttributeDescriptions = attributes;
 
         VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -739,7 +741,7 @@ std::vector<std::string> ModelRenderer::SetMaterials(std::span<const PreviewMate
     for (size_t d = 0; d < draws_.size(); ++d) {
         for (size_t m = 0; m < materials.size(); ++m) {
             if (materials[m].Name == draws_[d].Material) {
-                draw_materials_[d] = {texture_of_material[m], materials[m].AlphaTest, materials[m].Translucent};
+                draw_materials_[d] = {texture_of_material[m], materials[m].AlphaTest, materials[m].Translucent, materials[m].VertexColor};
                 break;
             }
         }
@@ -877,6 +879,7 @@ void ModelRenderer::Record(VkCommandBuffer command_buffer, const OrbitCamera& ca
                 } else if (textured && material.Texture >= 0) {
                     push.Mode = 2;
                     push.Flags |= material.AlphaTest ? 1u : 0u;
+                    push.Flags |= material.VertexColor ? kVertexColorFlag : 0u;
                     set = textures_[static_cast<size_t>(material.Texture)].Set;
                 }
                 if (set != bound) {

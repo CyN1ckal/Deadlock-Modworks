@@ -141,6 +141,11 @@ PreviewScene BuildPreviewScene(const ModelGeometry& geometry) {
                 vertex.Position = v < buffer.Positions.size() ? buffer.Positions[v] : Vec3{};
                 vertex.Normal = v < buffer.Normals.size() ? buffer.Normals[v] : Vec3{0, 0, 1};
                 vertex.TexCoord = v < buffer.TexCoords.size() ? buffer.TexCoords[v] : Vec2{};
+                if (v < buffer.Colors.size()) {
+                    const auto& color = buffer.Colors[v];
+                    auto channel = [&](size_t c) { return static_cast<uint8_t>(std::lround(std::clamp(color[c], 0.0f, 1.0f) * 255.0f)); };
+                    vertex.VertexColor = PackRgba(channel(0), channel(1), channel(2), channel(3));
+                }
                 if (v < buffer.BoneIndices.size()) {
                     const auto& weights = buffer.BoneWeights[v];
                     for (size_t slot = 0; slot < 4; ++slot) {

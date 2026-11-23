@@ -181,6 +181,7 @@ private:
         int Texture = -1;
         bool AlphaTest = false;
         bool Translucent = false;
+        bool VertexColor = false;
     };
     // One per draw, filled by SetMaterials.
     std::vector<DrawMaterial> draw_materials_;

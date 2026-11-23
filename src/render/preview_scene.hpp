@@ -38,8 +38,10 @@ struct PreviewVertex {
     // Model skeleton bones and weights (out of 255). All-zero weights mean the vertex is not skinned.
     std::array<uint16_t, 4> BoneIndices{};
     std::array<uint8_t, 4> BoneWeights{};
+    // Mesh COLOR attribute as RGBA8 (red in the low byte, display-encoded), white when the mesh has none.
+    uint32_t VertexColor = 0xffffffffu;
 };
-static_assert(sizeof(PreviewVertex) == 48);
+static_assert(sizeof(PreviewVertex) == 52);
 
 struct LineVertex {
     Vec3 Position;

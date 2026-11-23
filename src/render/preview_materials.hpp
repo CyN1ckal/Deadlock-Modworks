@@ -19,6 +19,8 @@ struct PreviewMaterial {
     std::optional<TextureImage> Color;
     bool AlphaTest = false;
     bool Translucent = false;
+    // F_VERTEX_COLOR: the mesh COLOR attribute multiplies the color map (hair is often a white map tinted this way).
+    bool VertexColor = false;
     // Why there is no color map, when there is none.
     std::string Problem;
 };

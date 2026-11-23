@@ -22,6 +22,8 @@ struct GeometryVertexBuffer {
     std::vector<Vec3> Positions;
     std::vector<Vec3> Normals;
     std::vector<Vec2> TexCoords;
+    // COLOR as stored (display-encoded RGBA, 0..1).
+    std::vector<std::array<float, 4>> Colors;
     std::vector<std::array<uint16_t, 4>> BoneIndices;
     // Set whenever BoneIndices is. Buffers without blend weights get {1, 0, 0, 0}.
     std::vector<std::array<float, 4>> BoneWeights;

@@ -332,6 +332,27 @@ TEST_F(RendererTest, DrawsWithoutAColorMapStayClay) {
     EXPECT_EQ(clay.B, textured.B);
 }
 
+TEST_F(RendererTest, VertexColorMaterialsTintTheColorMap) {
+    for (skeleton_repair::PreviewVertex& vertex : scene_.Vertices) {
+        vertex.VertexColor = skeleton_repair::PackRgba(0, 255, 0);
+    }
+    renderer_->SetScene(scene_);
+    skeleton_repair::PreviewMaterial material = SolidMaterial("models/test/body.vmat", 255, 255, 255, 255);
+    options_.Coloring = skeleton_repair::ColorMode::Textured;
+
+    renderer_->SetMaterials(std::span(&material, 1));
+    const Pixel plain = At(Render(), kWidth / 2, kHeight / 2);
+    EXPECT_GT(plain.R, 150);
+    EXPECT_GT(plain.B, 150);
+
+    material.VertexColor = true;
+    renderer_->SetMaterials(std::span(&material, 1));
+    const Pixel tinted = At(Render(), kWidth / 2, kHeight / 2);
+    EXPECT_GT(tinted.G, 150);
+    EXPECT_LT(tinted.R, 60);
+    EXPECT_LT(tinted.B, 60);
+}
+
 TEST_F(RendererTest, AlphaTestDiscardsTransparentTexels) {
     renderer_->SetScene(scene_);
     skeleton_repair::PreviewMaterial material = SolidMaterial("models/test/body.vmat", 255, 0, 0, 0);

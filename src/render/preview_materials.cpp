@@ -22,6 +22,7 @@ std::vector<PreviewMaterial> LoadPreviewMaterials(const PreviewScene& scene, con
                 const MaterialInfo info = DecodeMaterial(*material_bytes);
                 material.AlphaTest = info.IntParam("F_ALPHA_TEST") != 0;
                 material.Translucent = info.IntParam("F_TRANSLUCENT") != 0;
+                material.VertexColor = info.IntParam("F_VERTEX_COLOR") != 0;
                 const std::optional<std::string> color = info.ColorTexture();
                 if (!color) {
                     material.Problem = "Material has no color texture.";

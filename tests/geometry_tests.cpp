@@ -323,6 +323,63 @@ TEST(ModelGeometry, DecodesUncompressedRigidMesh) {
     EXPECT_EQ(geometry.Meshes[0].IndexBuffers[0], (std::vector<uint32_t>{2, 1, 0}));
 }
 
+TEST(ModelGeometry, DecodesVertexColors) {
+    // Hair-style buffer: float position, then an RGBA8 COLOR the material multiplies into its color map.
+    constexpr int stride = 16;
+    std::vector<uint8_t> vertices(3 * stride);
+    for (int v = 0; v < 3; ++v) {
+        const float position[3] = {static_cast<float>(v), 0, 0};
+        const uint8_t color[4] = {static_cast<uint8_t>(v * 100), 51, 255, 128};
+        std::memcpy(vertices.data() + v * stride, position, 12);
+        std::memcpy(vertices.data() + v * stride + 12, color, 4);
+    }
+    std::vector<uint8_t> indices(12);
+    const uint32_t triangle[3] = {0, 1, 2};
+    std::memcpy(indices.data(), triangle, 12);
+    KvValue index = KvValue::Object(Fields{
+        {"m_nElementCount", KvValue::Int32(3)},
+        {"m_nElementSizeInBytes", KvValue::Int32(4)},
+        {"m_pData", KvValue::Blob(indices)},
+    });
+    const auto file = Resource({
+        {"MVTX", vertices},
+        {"DATA", Kv(ModelData(Ints({1, 2})))},
+        {"MDAT", Kv(MeshData(0, 3, 0))},
+        {"CTRL", Kv(Control(BufferDescription(0, 3, stride, false, false, {Field("POSITION", 6, 0), Field("COLOR", 28, 12)}), std::move(index)))},
+    });
+    const ModelGeometry geometry = DecodeModelGeometry(file);
+    ASSERT_EQ(geometry.Meshes.size(), 1u);
+    const auto& vb = geometry.Meshes[0].VertexBuffers[0];
+    ASSERT_EQ(vb.Colors.size(), 3u);
+    EXPECT_FLOAT_EQ(vb.Colors[0][0], 0.0f);
+    EXPECT_FLOAT_EQ(vb.Colors[2][0], 200.0f / 255.0f);
+    EXPECT_FLOAT_EQ(vb.Colors[1][1], 0.2f);
+    EXPECT_FLOAT_EQ(vb.Colors[1][2], 1.0f);
+    EXPECT_FLOAT_EQ(vb.Colors[1][3], 128.0f / 255.0f);
+}
+
+TEST(ModelGeometry, SkipsVertexColorsInAnUnknownFormat) {
+    constexpr int stride = 16;
+    std::vector<uint8_t> vertices(3 * stride);
+    std::vector<uint8_t> indices(12);
+    const uint32_t triangle[3] = {0, 1, 2};
+    std::memcpy(indices.data(), triangle, 12);
+    KvValue index = KvValue::Object(Fields{
+        {"m_nElementCount", KvValue::Int32(3)},
+        {"m_nElementSizeInBytes", KvValue::Int32(4)},
+        {"m_pData", KvValue::Blob(indices)},
+    });
+    const auto file = Resource({
+        {"MVTX", vertices},
+        {"DATA", Kv(ModelData(Ints({1, 2})))},
+        {"MDAT", Kv(MeshData(0, 3, 0))},
+        {"CTRL", Kv(Control(BufferDescription(0, 3, stride, false, false, {Field("POSITION", 6, 0), Field("COLOR", 99, 12)}), std::move(index)))},
+    });
+    const ModelGeometry geometry = DecodeModelGeometry(file);
+    ASSERT_EQ(geometry.Meshes.size(), 1u);
+    EXPECT_TRUE(geometry.Meshes[0].VertexBuffers[0].Colors.empty());
+}
+
 TEST(ModelGeometry, RejectsDrawCallOutsideIndexBuffer) {
     EXPECT_THROW(DecodeModelGeometry(HeroModel(false, 3, 6)), InvalidData);
 }

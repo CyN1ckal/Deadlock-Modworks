@@ -20,8 +20,10 @@ namespace {
 
 // DXGI_FORMAT values used by Source 2 input layouts.
 enum DxgiFormat : uint32_t {
+    R32G32B32A32_FLOAT = 2,
     R32G32B32A32_SINT = 4,
     R32G32B32_FLOAT = 6,
+    R16G16B16A16_FLOAT = 10,
     R16G16B16A16_UNORM = 11,
     R16G16B16A16_UINT = 12,
     R16G16B16A16_SINT = 14,
@@ -530,6 +532,53 @@ GeometryVertexBuffer DecodeVertices(const RawBuffer& buffer, std::span<const int
                 }
                 default:
                     throw InvalidData("Unsupported TEXCOORD format " + std::to_string(field.Format) + ".");
+                }
+            }
+        } else if (field.Semantic == "COLOR") {
+            // A color the preview cannot read only loses its tint, so the buffer stays drawable.
+            if (field.Format != R8G8B8A8_UNORM && field.Format != R16G16B16A16_UNORM && field.Format != R16G16B16A16_FLOAT
+                && field.Format != R32G32B32A32_FLOAT && field.Format != R32G32B32_FLOAT) {
+                continue;
+            }
+            out.Colors.resize(buffer.Count);
+            for (size_t v = 0; v < buffer.Count; ++v) {
+                const uint8_t* at = buffer.Data.data() + v * buffer.Stride + field.Offset;
+                std::array<float, 4>& color = out.Colors[v];
+                switch (field.Format) {
+                case R8G8B8A8_UNORM:
+                    CheckField(buffer, field, 4);
+                    for (size_t c = 0; c < 4; ++c) {
+                        color[c] = at[c] / 255.0f;
+                    }
+                    break;
+                case R16G16B16A16_UNORM: {
+                    CheckField(buffer, field, 8);
+                    uint16_t value[4];
+                    std::memcpy(value, at, 8);
+                    for (size_t c = 0; c < 4; ++c) {
+                        color[c] = value[c] / 65535.0f;
+                    }
+                    break;
+                }
+                case R16G16B16A16_FLOAT: {
+                    CheckField(buffer, field, 8);
+                    uint16_t half[4];
+                    std::memcpy(half, at, 8);
+                    for (size_t c = 0; c < 4; ++c) {
+                        color[c] = HalfToFloat(half[c]);
+                    }
+                    break;
+                }
+                case R32G32B32A32_FLOAT:
+                    CheckField(buffer, field, 16);
+                    std::memcpy(color.data(), at, 16);
+                    break;
+                case R32G32B32_FLOAT:
+                    CheckField(buffer, field, 12);
+                    std::memcpy(color.data(), at, 12);
+                    color[3] = 1;
+                    break;
+                default: break;
                 }
             }
         } else if (field.Semantic == "BLENDINDICES") {
