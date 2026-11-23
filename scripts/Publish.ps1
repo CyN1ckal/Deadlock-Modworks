@@ -559,7 +559,11 @@ Remove-PackageFile $partial
 $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path -LiteralPath $tar)) { throw "tar.exe is required to create the zip ($tar)." }
 # The format is explicit: -a picks it from the extension, and .zip.partial would make a tar archive.
-& $tar --format zip -c -f $partial -C $staging .
+# Name the top-level entries instead of '.', which would store every path as './name'.
+# Windows Explorer shows such a zip as empty.
+$topLevel = @(Get-ChildItem -LiteralPath $staging -Force | ForEach-Object { $_.Name } | Sort-Object)
+if ($topLevel.Count -eq 0) { throw "Staging is empty: $staging" }
+& $tar --format zip -c -f $partial -C $staging @topLevel
 if ($LASTEXITCODE -ne 0) { throw "tar failed to create $partial." }
 if (-not (Test-Path -LiteralPath $partial -PathType Leaf)) { throw "Zip was not written: $partial" }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -570,7 +574,9 @@ try {
 } catch {
     throw "The package is not a readable zip: $partial. $($_.Exception.Message)"
 }
-if (-not ($names | Where-Object { $_ -match '(^|/)DeadlockModworks\.exe$' })) { throw "The zip has no DeadlockModworks.exe: $partial" }
+$badNames = @($names | Where-Object { $_ -match '^(\./|/|\\)' -or $_ -match '(^|/)\.\.?(/|$)' -or $_ -match '\\' })
+if ($badNames.Count -gt 0) { throw "The zip has entries Windows cannot extract cleanly: $($badNames -join ', ')" }
+if ($names -notcontains $ExpectedExe) { throw "The zip has no $ExpectedExe at its root: $partial" }
 
 $finalZip = Join-Path $OutputDirectory $ExpectedZip
 $finalHash = Join-Path $OutputDirectory ($ExpectedZip + '.sha256')
